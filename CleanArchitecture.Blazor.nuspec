@@ -35,7 +35,7 @@
         <file src=".template.config\icon.png"/>
         <file src="README.md"/>
         <file src=".\**" target="content"
-              exclude=".template.config\**;*.exe\;*\bin\**;**\obj\**;**\.vs\**;**\.vscode\**;**\wwwroot\dist\**;content\Directory.Build.*;**\.git\**;**\.github\**;**\CODE_OF_CONDUCT.md;**\LICENSE;**\README.md;"/>
+              exclude=".template.config\**;*.exe\;*\bin\**;**\obj\**;**\.vs\**;**\.vscode\**;**\wwwroot\dist\**;content\Directory.Build.*;**\.git\**;**\.github\**;**\CODE_OF_CONDUCT.md;**\LICENSE;**\README.md;graphify-out\**;docs\**;.codex\**;.agents\**;"/>
     </files>
 
 </package>

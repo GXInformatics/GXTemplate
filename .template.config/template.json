@@ -1,12 +1,12 @@
 {
     "$schema": "http://json.schemastore.org/template",
-    "author": "hl.z",
+    "author": "GX Informatics Limited",
     "classifications": ["Web","Blazor","Clean Architecture"],
-    "name": "Clean Architecture for Blazor Server Solution",
+    "name": "GX Blazor Server Solution (Clean Architecture)",
     "defaultName": "CleanArchitecture.Blazor",
-    "identity": "CleanArchitecture.Blazor.Solution.CSharp",
-    "groupIdentity": "CleanArchitecture.Blazor.Solution",
-    "shortName": "ca-blazorserver-sln",
+    "identity": "GX.Blazor.Template.CSharp",
+    "groupIdentity": "GX.Blazor.Template",
+    "shortName": "gxblazor",
     "tags": {
       "language": "C#",
       "type": "project"
@@ -36,7 +36,11 @@
         "*.nupkg",
         "launchSettings.json",
         "*.exe",
-        "src/Server.UI/Files/**"
+        "src/Server.UI/Files/**",
+        "graphify-out/**",
+        "docs/**/*",
+        ".codex/**/*",
+        ".agents/**/*"
       ]
     }
   ]

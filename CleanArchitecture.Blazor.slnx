@@ -3,9 +3,7 @@
     <File Path=".dockerignore" />
     <File Path=".editorconfig" />
     <File Path=".gitignore" />
-    <File Path="CleanArchitecture.Blazor.nuspec" />
     <File Path="Dockerfile" />
-    <File Path="README.md" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Application/Application.csproj" />
