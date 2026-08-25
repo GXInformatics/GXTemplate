@@ -8,6 +8,7 @@ using CleanArchitecture.Blazor.Application.Features.SystemLogs.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.SystemLogs.Queries.PaginationQuery;
 
+[RequestAuthorize(Policy = Permissions.Logs.View)]
 public class SystemLogsWithPaginationQuery : SystemLogAdvancedFilter, ICacheableRequest<PaginatedData<SystemLogDto>>
 {
     public SystemLogAdvancedSpecification Specification => new(this);

@@ -16,6 +16,7 @@ using CleanArchitecture.Blazor.Application.Features.Contacts.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Contacts.Commands.Update;
 
+[RequestAuthorize(Policy = Permissions.Contacts.Edit)]
 public class UpdateContactCommand: ICacheInvalidatorRequest<Result<int>>
 {
       [Display(Name ="Id")]

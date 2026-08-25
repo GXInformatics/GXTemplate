@@ -8,6 +8,7 @@ using CleanArchitecture.Blazor.Application.Features.PicklistSets.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.PicklistSets.Queries.PaginationQuery;
 
+[RequestAuthorize(Policy = Permissions.PicklistSets.View)]
 public class PicklistSetsWithPaginationQuery : PicklistSetAdvancedFilter, ICacheableRequest<PaginatedData<PicklistSetDto>>
 {
     public PicklistSetAdvancedSpecification Specification => new(this);

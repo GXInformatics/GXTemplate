@@ -6,6 +6,7 @@ using CleanArchitecture.Blazor.Application.Features.PicklistSets.DTOs;
 
 namespace CleanArchitecture.Blazor.Application.Features.PicklistSets.Queries.Export;
 
+[RequestAuthorize(Policy = Permissions.PicklistSets.Export)]
 public class ExportPicklistSetsQuery : IRequest<byte[]>
 {
     public string? Keyword { get; set; }

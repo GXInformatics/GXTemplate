@@ -6,6 +6,7 @@ using CleanArchitecture.Blazor.Application.Features.SystemLogs.DTOs;
 
 namespace CleanArchitecture.Blazor.Application.Features.Loggers.Queries.Export;
 
+[RequestAuthorize(Policy = Permissions.Logs.Export)]
 public class ExportSystemLogsQuery : IRequest<byte[]>
 {
     public string Keyword { get; set; } = string.Empty;

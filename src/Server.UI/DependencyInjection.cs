@@ -12,8 +12,10 @@ using CleanArchitecture.Blazor.Server.UI.Services.Navigation;
 using CleanArchitecture.Blazor.Server.UI.Services.Notifications;
 using CleanArchitecture.Blazor.Server.UI.Services.UserPreferences;
 using Hangfire;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Localization;
+using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.FileProviders;
 using MudBlazor.Services;
@@ -29,6 +31,12 @@ namespace CleanArchitecture.Blazor.Server.UI;
 /// </summary>
 public static class DependencyInjection
 {
+    /// <summary>
+    /// Route prefix of the Blazor circuit endpoints (negotiate, the hub itself, disconnect,
+    /// initializers) that AddInteractiveServerRenderMode maps alongside the page endpoints.
+    /// </summary>
+    private const string BlazorCircuitPathPrefix = "/_blazor";
+
     /// <summary>
     /// Adds server UI services to the service collection.
     /// </summary>
@@ -137,13 +145,16 @@ public static class DependencyInjection
         app.UseExceptionHandler();
         app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
         app.UseForwardedHeaders();
-        app.MapHealthChecks("/health");
+        // Liveness must answer before a user has authenticated, so it opts out of the fallback policy.
+        app.MapHealthChecks("/health").AllowAnonymous();
         //app.UseDataProtectionKeyCheck();
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseAntiforgery();
         app.UseHttpsRedirection();
-        app.MapStaticAssets();
+        // Framework and static assets must load for the anonymous login page - without this the
+        // fallback policy would block blazor.web.js and no circuit could ever start.
+        app.MapStaticAssets().AllowAnonymous();
         
 
         if (!Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), @"Files")))
@@ -177,7 +188,23 @@ public static class DependencyInjection
             Authorization = new[] { new HangfireDashboardAuthorizationFilter() },
             AsyncAuthorization = new[] { new HangfireDashboardAsyncAuthorizationFilter() }
         });
-        app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+        app.MapRazorComponents<App>()
+            .AddInteractiveServerRenderMode()
+            // MapRazorComponents maps two different kinds of endpoint: one per routable page, and
+            // the Blazor circuit endpoints under /_blazor that AddInteractiveServerRenderMode adds.
+            // The login page is interactive, so an anonymous visitor has to be able to negotiate a
+            // circuit - but exempting the whole builder would also exempt every page and silently
+            // undo both the fallback policy and the [Authorize] attributes on the protected pages.
+            // This convention inspects each endpoint's route pattern and exempts only the framework
+            // circuit endpoints, leaving page endpoints under the policy.
+            .Add(builder =>
+            {
+                if (builder is RouteEndpointBuilder route &&
+                    route.RoutePattern.RawText?.StartsWith(BlazorCircuitPathPrefix, StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    builder.Metadata.Add(new AllowAnonymousAttribute());
+                }
+            });
         app.MapHub<ServerHub>(ISignalRHub.Url);
 
         //QuestPDF License configuration

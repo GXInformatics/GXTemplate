@@ -6,6 +6,7 @@ using CleanArchitecture.Blazor.Application.Features.PicklistSets.Commands.AddEdi
 
 namespace CleanArchitecture.Blazor.Application.Features.PicklistSets.Commands.Import;
 
+[RequestAuthorize(Policy = Permissions.PicklistSets.Import)]
 public class ImportPicklistSetsCommand : ICacheInvalidatorRequest<Result>
 {
     public ImportPicklistSetsCommand(string fileName, byte[] data)

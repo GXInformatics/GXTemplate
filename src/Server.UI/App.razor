@@ -99,6 +99,10 @@
 </html>
 
 @code {
+   // prerender: false is load-bearing for authorization. AuthorizationBehaviour denies any request
+   // dispatched with no ambient IUserContextAccessor context, and that context is only populated for
+   // circuit invocations - enabling prerendering would run every page's first render over plain HTTP
+   // and deny it.
    private IComponentRenderMode? RenderModeForPage =>  new InteractiveServerRenderMode(false);
 
     protected override Task OnInitializedAsync()

@@ -137,7 +137,7 @@
         {
             TimeoutException => L["The operation timed out. Please check your internet connection and try again."],
             HttpRequestException => L["Unable to connect to the server. Please check your network."],
-            UnauthorizedAccessException => L["You do not have permission to perform this action."],
+            ForbiddenAccessException or UnauthorizedAccessException => L["You do not have permission to perform this action."],
             FileNotFoundException => L["The requested resource could not be found."],
             InvalidOperationException => L["The current operation is invalid in this context."],
             ArgumentException => L["Invalid data was provided. Please check your input."],

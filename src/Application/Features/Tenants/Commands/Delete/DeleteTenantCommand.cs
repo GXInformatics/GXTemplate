@@ -5,6 +5,7 @@ using CleanArchitecture.Blazor.Application.Features.Tenants.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Tenants.Commands.Delete;
 
+[RequestAuthorize(Policy = Permissions.Tenants.Delete)]
 public class DeleteTenantCommand : ICacheInvalidatorRequest<Result>
 {
  public DeleteTenantCommand(string[] id)

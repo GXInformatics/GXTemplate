@@ -8,6 +8,7 @@ using CleanArchitecture.Blazor.Application.Features.Products.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.Products.Queries.Export;
 
+[RequestAuthorize(Policy = Permissions.Products.Export)]
 public class ExportProductsQuery : ProductAdvancedFilter, IRequest<Result<byte[]>>
 {
     public ExportType ExportType { get; set; }

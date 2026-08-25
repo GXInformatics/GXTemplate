@@ -8,6 +8,7 @@ using CleanArchitecture.Blazor.Application.Features.Tenants.DTOs;
 
 namespace CleanArchitecture.Blazor.Application.Features.Tenants.Queries.GetAll;
 
+[RequestAuthorize(Policy = Permissions.Tenants.View)]
 public class GetAllTenantsQuery : ICacheableRequest<IEnumerable<TenantDto>>
 {
     public string CacheKey => TenantCacheKey.GetAllCacheKey;

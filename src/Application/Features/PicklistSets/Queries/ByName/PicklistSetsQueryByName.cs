@@ -8,6 +8,7 @@ using CleanArchitecture.Blazor.Application.Features.PicklistSets.DTOs;
 
 namespace CleanArchitecture.Blazor.Application.Features.PicklistSets.Queries.ByName;
 
+[RequestAuthorize(Policy = Permissions.PicklistSets.View)]
 public class PicklistSetsQueryByName : ICacheableRequest<IEnumerable<PicklistSetDto>>
 {
     public PicklistSetsQueryByName(Picklist name)

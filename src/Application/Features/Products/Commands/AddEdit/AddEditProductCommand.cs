@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Components.Forms;
 
 namespace CleanArchitecture.Blazor.Application.Features.Products.Commands.AddEdit;
 
+[RequestAuthorize(Policy = Permissions.Products.Create)]
+[RequestAuthorize(Policy = Permissions.Products.Edit)]
 public class AddEditProductCommand : ICacheInvalidatorRequest<Result<int>>
 {
     public int Id { get; set; }

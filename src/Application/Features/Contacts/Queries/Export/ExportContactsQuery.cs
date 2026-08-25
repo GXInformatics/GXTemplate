@@ -22,6 +22,7 @@ using CleanArchitecture.Blazor.Application.Features.Contacts.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.Contacts.Queries.Export;
 
+[RequestAuthorize(Policy = Permissions.Contacts.Export)]
 public class ExportContactsQuery : ContactAdvancedFilter, ICacheableRequest<Result<byte[]>>
 {
       public ContactAdvancedSpecification Specification => new ContactAdvancedSpecification(this);

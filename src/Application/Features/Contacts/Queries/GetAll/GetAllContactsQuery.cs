@@ -21,6 +21,7 @@ using CleanArchitecture.Blazor.Application.Features.Contacts.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Contacts.Queries.GetAll;
 
+[RequestAuthorize(Policy = Permissions.Contacts.View)]
 public class GetAllContactsQuery : ICacheableRequest<IEnumerable<ContactDto>>
 {
    public string CacheKey => ContactCacheKey.GetAllCacheKey;

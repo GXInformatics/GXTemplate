@@ -8,6 +8,7 @@ using CleanArchitecture.Blazor.Application.Features.AuditTrails.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.AuditTrails.Queries.PaginationQuery;
 
+[RequestAuthorize(Policy = Permissions.AuditTrails.View)]
 public class AuditTrailsWithPaginationQuery : AuditTrailAdvancedFilter, ICacheableRequest<PaginatedData<AuditTrailDto>>
 {
     public AuditTrailAdvancedSpecification Specification => new(this);

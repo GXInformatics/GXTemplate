@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Security;
+using CleanArchitecture.Blazor.Application.Common.ExceptionHandlers;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Diagnostics;
 
@@ -75,7 +76,7 @@ internal sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> log
                 => (StatusCodes.Status400BadRequest, "Bad request."),
             KeyNotFoundException or FileNotFoundException
                 => (StatusCodes.Status404NotFound, "Resource not found."),
-            UnauthorizedAccessException or SecurityException
+            ForbiddenAccessException or UnauthorizedAccessException or SecurityException
                 => (StatusCodes.Status403Forbidden, "Access denied."),
             TimeoutException or TaskCanceledException
                 => (StatusCodes.Status504GatewayTimeout, "The request timed out."),

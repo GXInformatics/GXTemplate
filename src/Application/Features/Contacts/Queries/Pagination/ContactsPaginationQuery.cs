@@ -21,6 +21,7 @@ using CleanArchitecture.Blazor.Application.Features.Contacts.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.Contacts.Queries.Pagination;
 
+[RequestAuthorize(Policy = Permissions.Contacts.View)]
 public class ContactsWithPaginationQuery : ContactAdvancedFilter, ICacheableRequest<PaginatedData<ContactDto>>
 {
     public override string ToString()

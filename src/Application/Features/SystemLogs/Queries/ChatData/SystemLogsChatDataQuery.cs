@@ -6,6 +6,7 @@ using CleanArchitecture.Blazor.Application.Features.SystemLogs.DTOs;
 
 namespace CleanArchitecture.Blazor.Application.Features.SystemLogs.Queries.ChatData;
 
+[RequestAuthorize(Policy = Permissions.Logs.View)]
 public class SystemLogsTimeLineChatDataQuery : ICacheableRequest<List<SystemLogTimeLineDto>>
 {
     public DateTime LastDateTime { get; set; } = DateTime.Now.AddDays(-60);

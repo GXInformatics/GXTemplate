@@ -17,6 +17,7 @@ using CleanArchitecture.Blazor.Application.Features.Contacts.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Contacts.Commands.Import;
 
+    [RequestAuthorize(Policy = Permissions.Contacts.Import)]
     public class ImportContactsCommand: ICacheInvalidatorRequest<Result<int>>
     {
         public string FileName { get; set; }
@@ -29,6 +30,7 @@ namespace CleanArchitecture.Blazor.Application.Features.Contacts.Commands.Import
            Data = data;
         }
     }
+    [RequestAuthorize(Policy = Permissions.Contacts.Import)]
     public record class CreateContactsTemplateCommand : IRequest<Result<byte[]>>
     {
  

@@ -6,6 +6,8 @@ using CleanArchitecture.Blazor.Application.Features.Documents.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Documents.Commands.AddEdit;
 
+[RequestAuthorize(Policy = Permissions.Documents.Create)]
+[RequestAuthorize(Policy = Permissions.Documents.Edit)]
 public class AddEditDocumentCommand : ICacheInvalidatorRequest<Result<int>>
 {
     [Display(Name = "Id")] public int Id { get; set; }

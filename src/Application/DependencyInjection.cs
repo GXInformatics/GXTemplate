@@ -21,7 +21,10 @@ public static class DependencyInjection
             options.Assemblies = [typeof(CleanArchitecture.Blazor.Application.DependencyInjection), typeof(CleanArchitecture.Blazor.Domain.Common.DomainEvent)];
             options.NotificationPublisherType = typeof(ChannelBasedNoWaitPublisher);
             options.ServiceLifetime = ServiceLifetime.Scoped;
+            // AuthorizationBehaviour must stay FIRST: Mediator composes behaviours last-to-first, so
+            // the first entry is the outermost and nothing runs before deny-by-default has passed.
             options.PipelineBehaviors = [
+                typeof(AuthorizationBehaviour<,>),
                 typeof(ValidationBehavior<,>),
                 typeof(ResultExceptionBehavior<,>),
                 typeof(PerformanceBehaviour<,>),
@@ -31,6 +34,9 @@ public static class DependencyInjection
 
         });
        
+        // Deny-by-default is enforced at dispatch time by AuthorizationBehaviour; this fails the
+        // application at startup instead, so an unmarked request cannot reach a user at all.
+        RequestAuthorizationRegistry.AssertAllRequestsAreMarked(Assembly.GetExecutingAssembly());
 
         return services;
     }

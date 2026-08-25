@@ -5,6 +5,7 @@ using CleanArchitecture.Blazor.Application.Features.Documents.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Documents.Commands.Delete;
 
+[RequestAuthorize(Policy = Permissions.Documents.Delete)]
 public class DeleteDocumentCommand : ICacheInvalidatorRequest<Result>
 {
     public DeleteDocumentCommand(int[] id)

@@ -1,4 +1,5 @@
 @page "/account/invaliduser"
+@attribute [AllowAnonymous]
 @using CleanArchitecture.Blazor.Server.UI.Pages.Identity.Login
 @inject IStringLocalizer<InvalidUser> L
 <PageTitle>@ApplicationSettings.AppName - @L["Access Denied"]</PageTitle>

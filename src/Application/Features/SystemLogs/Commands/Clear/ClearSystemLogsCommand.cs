@@ -6,6 +6,7 @@ using CleanArchitecture.Blazor.Application.Features.SystemLogs.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.SystemLogs.Commands.Clear;
 
+[RequestAuthorize(Policy = Permissions.Logs.Purge)]
 public class ClearSystemLogsCommand : ICacheInvalidatorRequest<Result>
 {
     public string CacheKey => SystemLogsCacheKey.GetAllCacheKey;

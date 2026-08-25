@@ -15,6 +15,7 @@ using CleanArchitecture.Blazor.Application.Features.Contacts.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Contacts.Commands.Delete;
 
+[RequestAuthorize(Policy = Permissions.Contacts.Delete)]
 public class DeleteContactCommand:  ICacheInvalidatorRequest<Result>
 {
   public int[] Id {  get; }

@@ -21,6 +21,7 @@ using CleanArchitecture.Blazor.Application.Features.Contacts.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.Contacts.Queries.GetById;
 
+[RequestAuthorize(Policy = Permissions.Contacts.View)]
 public class GetContactByIdQuery : ICacheableRequest<Result<ContactDto>>
 {
    public required int Id { get; set; }

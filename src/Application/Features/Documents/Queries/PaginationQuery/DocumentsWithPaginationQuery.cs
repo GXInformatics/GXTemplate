@@ -9,6 +9,7 @@ using CleanArchitecture.Blazor.Application.Features.Documents.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.Documents.Queries.PaginationQuery;
 
+[RequestAuthorize(Policy = Permissions.Documents.View)]
 public class DocumentsWithPaginationQuery : AdvancedDocumentsFilter, ICacheableRequest<PaginatedData<DocumentDto>>
 {
     public AdvancedDocumentsSpecification Specification => new(this);

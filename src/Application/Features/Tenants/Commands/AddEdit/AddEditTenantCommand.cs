@@ -9,6 +9,8 @@ using System.ComponentModel.DataAnnotations; // IDataSourceService
 
 namespace CleanArchitecture.Blazor.Application.Features.Tenants.Commands.AddEdit;
 
+[RequestAuthorize(Policy = Permissions.Tenants.Create)]
+[RequestAuthorize(Policy = Permissions.Tenants.Edit)]
 public class AddEditTenantCommand : ICacheInvalidatorRequest<Result<string>>
 {
  [Display(Name="Tenant Id")] public string Id { get; set; } = Guid.NewGuid().ToString();

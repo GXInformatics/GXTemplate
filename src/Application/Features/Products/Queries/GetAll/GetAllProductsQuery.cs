@@ -7,12 +7,14 @@ using CleanArchitecture.Blazor.Application.Features.Products.DTOs;
 
 namespace CleanArchitecture.Blazor.Application.Features.Products.Queries.GetAll;
 
+[RequestAuthorize(Policy = Permissions.Products.View)]
 public class GetAllProductsQuery : ICacheableRequest<IEnumerable<ProductDto>>
 {
     public string CacheKey => ProductCacheKey.GetAllCacheKey;
     public IEnumerable<string>? Tags => ProductCacheKey.Tags;
 }
 
+[RequestAuthorize(Policy = Permissions.Products.View)]
 public class GetProductQuery : ICacheableRequest<ProductDto?>
 {
     public required int Id { get; set; }

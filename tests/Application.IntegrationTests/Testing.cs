@@ -1,8 +1,13 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Security.Claims;
 using System.Threading.Tasks;
+using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
+using CleanArchitecture.Blazor.Application.Common.Security;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure;
@@ -79,15 +84,17 @@ public class Testing
         services.AddSingleton<IUserContextAccessor>(provider =>
         {
             var mockUserContextAccessor = new Mock<IUserContextAccessor>();
-            if (!string.IsNullOrEmpty(_currentUserId))
-            {
-                var userContext = new UserContext(
-                    UserId: _currentUserId,
-                    UserName: "admin",
-                    DisplayName: null,
-                    Email: "admin@example.com");
-                mockUserContextAccessor.Setup(x => x.Current).Returns(userContext);
-            }
+            // Evaluated per call, not once at registration: this is a singleton, and _currentUserId
+            // is set by RunAsUserAsync after the container has already been built. Capturing it
+            // eagerly left Current null forever, which deny-by-default now turns into a denial.
+            mockUserContextAccessor.Setup(x => x.Current).Returns(() =>
+                string.IsNullOrEmpty(_currentUserId)
+                    ? null
+                    : new UserContext(
+                        UserId: _currentUserId,
+                        UserName: "admin",
+                        DisplayName: null,
+                        Email: "admin@example.com"));
             return mockUserContextAccessor.Object;
         });
 
@@ -142,7 +149,9 @@ public class Testing
     {
         using var scope = _scopeFactory.CreateScope();
         var userManager = scope.ServiceProvider.GetService<UserManager<ApplicationUser>>();
-        var user = new ApplicationUser { UserName = userName, Email = userName };
+        // Email = userName produced 'Demo', which Identity's EmailValidator rejects - this helper
+        // could never succeed, which is why no test used it before deny-by-default required one.
+        var user = new ApplicationUser { UserName = userName, Email = $"{userName}@example.com" };
         var result = await userManager.CreateAsync(user, password);
 
         if (roles.Any())
@@ -157,12 +166,36 @@ public class Testing
 
         if (result.Succeeded)
         {
+            // The application layer now denies any request whose permission the principal does not
+            // hold - see AuthorizationBehaviour. These tests exercise handlers, not authorization,
+            // so the harness user is granted the full permission set exactly as the seeded Admin
+            // role is. The authorization rules themselves are covered by AuthorizationBehaviourTests
+            // and RequestAuthorizationRegistryTests.
+            await GrantAllPermissionsAsync(userManager, user);
             _currentUserId = user.Id;
             return _currentUserId;
         }
 
         var errors = string.Join(Environment.NewLine, result.ToApplicationResult().Errors);
         throw new Exception($"Unable to create {userName}.{Environment.NewLine}{errors}");
+    }
+
+    /// <summary>
+    /// Grants every permission constant to the user, mirroring the reflection grant the seeder
+    /// applies to the Admin role (ApplicationDbContextInitializer.SeedRolesAsync).
+    /// </summary>
+    private static async Task GrantAllPermissionsAsync(UserManager<ApplicationUser> userManager, ApplicationUser user)
+    {
+        var permissions = typeof(Permissions).GetNestedTypes()
+            .SelectMany(module => module.GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy))
+            .Select(field => field.GetValue(null) as string)
+            .Where(value => !string.IsNullOrEmpty(value))
+            .Distinct();
+
+        foreach (var permission in permissions)
+        {
+            await userManager.AddClaimAsync(user, new Claim(ApplicationClaimTypes.Permission, permission!));
+        }
     }
 
     public static async Task ResetState()
@@ -180,6 +213,10 @@ public class Testing
             await connection.CloseAsync();
         }
         _currentUserId = null;
+
+        // Re-establish an authenticated principal after the wipe: with deny-by-default in the
+        // pipeline, a test that dispatches anything needs an ambient user context to authorize.
+        await RunAsDefaultUserAsync();
     }
 
     public static async Task<TEntity> FindAsync<TEntity>(params object[] keyValues)

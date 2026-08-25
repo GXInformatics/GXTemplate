@@ -7,6 +7,7 @@ using CleanArchitecture.Blazor.Application.Features.Products.DTOs;
 
 namespace CleanArchitecture.Blazor.Application.Features.Products.Commands.Import;
 
+[RequestAuthorize(Policy = Permissions.Products.Import)]
 public class ImportProductsCommand : ICacheInvalidatorRequest<Result<int>>
 {
     public ImportProductsCommand(string fileName, byte[] data)
@@ -21,6 +22,7 @@ public class ImportProductsCommand : ICacheInvalidatorRequest<Result<int>>
     public IEnumerable<string>? Tags => ProductCacheKey.Tags;
 }
 
+[RequestAuthorize(Policy = Permissions.Products.Import)]
 public record CreateProductsTemplateCommand : IRequest<Result<byte[]>>
 {
 }

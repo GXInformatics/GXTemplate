@@ -16,6 +16,8 @@ using CleanArchitecture.Blazor.Application.Features.Contacts.Caching;
 using CleanArchitecture.Blazor.Application.Features.Contacts.DTOs;
 namespace CleanArchitecture.Blazor.Application.Features.Contacts.Commands.AddEdit;
 
+[RequestAuthorize(Policy = Permissions.Contacts.Create)]
+[RequestAuthorize(Policy = Permissions.Contacts.Edit)]
 public class AddEditContactCommand: ICacheInvalidatorRequest<Result<int>>
 {
       [Display(Name ="Id")]

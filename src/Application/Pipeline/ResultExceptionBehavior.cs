@@ -24,6 +24,13 @@ public sealed class ResultExceptionBehavior<TRequest, TResponse> : IPipelineBeha
         {
             throw;
         }
+        catch (ForbiddenAccessException)
+        {
+            // A denial must never be downgraded into a failed Result that a call site can ignore.
+            // AuthorizationBehaviour runs outside this behaviour so its own denials never arrive here;
+            // this arm is for denials thrown deeper, by a handler doing its own ownership check.
+            throw;
+        }
         catch (NotFoundException exception)
         {
             _logger.LogError(

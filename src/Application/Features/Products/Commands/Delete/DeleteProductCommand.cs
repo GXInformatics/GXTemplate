@@ -6,6 +6,7 @@ using CleanArchitecture.Blazor.Application.Features.Products.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Products.Commands.Delete;
 
+[RequestAuthorize(Policy = Permissions.Products.Delete)]
 public class DeleteProductCommand : ICacheInvalidatorRequest<Result>
 {
     public DeleteProductCommand(int[] id)

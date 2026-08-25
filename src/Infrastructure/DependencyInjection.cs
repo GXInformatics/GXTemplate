@@ -13,6 +13,7 @@ using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Services.MultiTenant;
 using CleanArchitecture.Blazor.Infrastructure.Services.OpenAI;
 using MaxMind.GeoIP2;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
@@ -284,6 +285,15 @@ public static class DependencyInjection
             .AddScoped<IUserProfileState, UserProfileState>()
             .AddAuthorizationCore(options =>
             {
+                // Deny by default at the route layer: any endpoint that carries no authorization
+                // metadata of its own requires an authenticated user. The anonymous surface is then
+                // opted back in explicitly - [AllowAnonymous] on the identity and error pages, and
+                // AllowAnonymous() on the health, static-asset and Blazor circuit endpoints. Adding a
+                // page without an [Authorize] attribute now makes it authenticated-only rather than
+                // public, which is the safe direction to fail.
+                options.FallbackPolicy = new AuthorizationPolicyBuilder()
+                    .RequireAuthenticatedUser()
+                    .Build();
                 options.AddPolicy("CanPurge", policy => policy.RequireUserName(Users.Administrator));
                 // Here I stored necessary permissions/roles in a constant
                 foreach (var prop in typeof(Permissions).GetNestedTypes().SelectMany(c =>

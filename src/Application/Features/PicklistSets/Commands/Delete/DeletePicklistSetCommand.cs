@@ -5,6 +5,7 @@ using CleanArchitecture.Blazor.Application.Features.PicklistSets.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.PicklistSets.Commands.Delete;
 
+[RequestAuthorize(Policy = Permissions.PicklistSets.Delete)]
 public class DeletePicklistSetCommand : ICacheInvalidatorRequest<Result>
 {
     public DeletePicklistSetCommand(int[] id)

@@ -7,6 +7,7 @@ using CleanArchitecture.Blazor.Application.Features.Documents.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Documents.Queries.GetFileStream;
 
+[RequestAuthorize(Policy = Permissions.Documents.Download)]
 public class GetFileStreamQuery : ICacheableRequest<(string, byte[])>
 {
     public GetFileStreamQuery(int id, string? userId = null, string? tenantId = null)

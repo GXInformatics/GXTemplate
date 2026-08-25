@@ -9,6 +9,7 @@ using CleanArchitecture.Blazor.Application.Features.Products.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.Products.Queries.Pagination;
 
+[RequestAuthorize(Policy = Permissions.Products.View)]
 public class ProductsWithPaginationQuery : ProductAdvancedFilter, ICacheableRequest<PaginatedData<ProductDto>>
 {
     public ProductAdvancedSpecification Specification => new(this);

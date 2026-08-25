@@ -4,6 +4,8 @@
 using CleanArchitecture.Blazor.Application.Features.PicklistSets.Caching;
 namespace CleanArchitecture.Blazor.Application.Features.PicklistSets.Commands.AddEdit;
 
+[RequestAuthorize(Policy = Permissions.PicklistSets.Create)]
+[RequestAuthorize(Policy = Permissions.PicklistSets.Edit)]
 public class AddEditPicklistSetCommand : ICacheInvalidatorRequest<Result<int>>
 {
     [Description("Id")] public int Id { get; set; }

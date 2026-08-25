@@ -6,6 +6,7 @@ using CleanArchitecture.Blazor.Application.Features.AuditTrails.DTOs;
 
 namespace CleanArchitecture.Blazor.Application.Features.AuditTrails.Queries.Export;
 
+[RequestAuthorize(Policy = Permissions.AuditTrails.Export)]
 public class ExportAuditTrailsQuery : IRequest<byte[]>
 {
     public string Keyword { get; set; } = string.Empty;

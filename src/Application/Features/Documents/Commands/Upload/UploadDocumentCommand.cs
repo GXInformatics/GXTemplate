@@ -5,6 +5,7 @@ using CleanArchitecture.Blazor.Application.Features.Documents.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Documents.Commands.Upload;
 
+[RequestAuthorize(Policy = Permissions.Documents.Create)]
 public class UploadDocumentCommand : ICacheInvalidatorRequest<Result<int>>
 {
     public UploadDocumentCommand(List<UploadRequest> uploadRequests)

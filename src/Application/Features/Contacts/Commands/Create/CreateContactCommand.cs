@@ -16,6 +16,7 @@ using CleanArchitecture.Blazor.Application.Features.Contacts.Caching;
 
 namespace CleanArchitecture.Blazor.Application.Features.Contacts.Commands.Create;
 
+[RequestAuthorize(Policy = Permissions.Contacts.Create)]
 public class CreateContactCommand: ICacheInvalidatorRequest<Result<int>>
 {
       [Display(Name ="Id")]

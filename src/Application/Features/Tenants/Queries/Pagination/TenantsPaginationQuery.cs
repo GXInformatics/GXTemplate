@@ -7,6 +7,7 @@ using CleanArchitecture.Blazor.Application.Features.Tenants.DTOs;
 
 namespace CleanArchitecture.Blazor.Application.Features.Tenants.Queries.Pagination;
 
+[RequestAuthorize(Policy = Permissions.Tenants.View)]
 public class TenantsWithPaginationQuery : PaginationFilter, ICacheableRequest<PaginatedData<TenantDto>>
 {
     public TenantsPaginationSpecification Specification => new(this);
