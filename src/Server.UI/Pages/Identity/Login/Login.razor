@@ -14,7 +14,6 @@
 @inject ILogger<Login> Logger
 @inject IStringLocalizer<Login> L
 @inject IClientInfoAccessor ClientInfoAccessor
-@inject IWebHostEnvironment Environment
 
 <PageTitle>@_pageTitle</PageTitle>
 
@@ -90,15 +89,9 @@
 	protected override Task OnInitializedAsync()
 	{
 		_pageTitle = $"{ApplicationSettings.AppName} - {L["Sign In"]}";
-		if (Environment.IsDevelopment())
-		{
-			_formModel = new()
-			{
-				UserName = "administrator",
-				Password = "Password123!",
-				RememberMe = true
-			};
-		}
+		// The Development prefill of administrator/Password123! was removed in Pass 7-3: the
+		// administrator password is now generated per installation, so a hardcoded one could only
+		// ever be wrong - and a credential in source ships in every deployment of this template.
 		_userManager = ScopedServices.GetRequiredService<UserManager<ApplicationUser>>();
 		_dbContextFactory = ScopedServices.GetRequiredService<IApplicationDbContextFactory>();
 		return Task.CompletedTask;

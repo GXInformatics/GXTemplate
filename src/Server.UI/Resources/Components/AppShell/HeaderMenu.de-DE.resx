@@ -131,9 +131,6 @@
     <data name="Logout" xml:space="preserve">
     <value>Ausloggen</value>
   </data>
-    <data name="Navigate to GitHub" xml:space="preserve">
-    <value>Navigieren Sie zu GitHub</value>
-  </data>
     <data name="Nothing new :(" xml:space="preserve">
     <value>Nichts Neues :(</value>
   </data>

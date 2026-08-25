@@ -150,8 +150,8 @@
   <data name="Home" xml:space="preserve">
     <value>Startseite</value>
   </data>
-  <data name="E-Commerce" xml:space="preserve">
-    <value>E-Commerce</value>
+  <data name="Content" xml:space="preserve">
+    <value>Inhalte</value>
   </data>
   <data name="Products" xml:space="preserve">
     <value>Produkte</value>

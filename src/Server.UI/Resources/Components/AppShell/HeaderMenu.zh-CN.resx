@@ -131,9 +131,6 @@
     <data name="Logout" xml:space="preserve">
     <value>登出</value>
   </data>
-    <data name="Navigate to GitHub" xml:space="preserve">
-    <value>导航到 GitHub</value>
-  </data>
     <data name="Nothing new :(" xml:space="preserve">
     <value>没什么新鲜的 ：（</value>
   </data>

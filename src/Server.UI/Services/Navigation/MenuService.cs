@@ -15,7 +15,7 @@ public class MenuService : IMenuService
                 new() { Title = "Home", Icon = Icons.Material.Filled.Home, Href = "/" },
                 new()
                 {
-                    Title = "E-Commerce",
+                    Title = "Content",
                     Icon = Icons.Material.Filled.ShoppingCart,
                     PageStatus = PageStatus.Completed,
                     IsParent = true,

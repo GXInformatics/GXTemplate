@@ -38,6 +38,10 @@ public static class DependencyInjection
         // application at startup instead, so an unmarked request cannot reach a user at all.
         RequestAuthorizationRegistry.AssertAllRequestsAreMarked(Assembly.GetExecutingAssembly());
 
+        // Same idea one layer over: the administrator grant is two explicit lists rather than a
+        // reflection loop, so a new permission constant cannot be granted by accident.
+        AdministratorPermissionRegistry.AssertNoDivergence();
+
         return services;
     }
 }

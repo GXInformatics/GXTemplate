@@ -149,6 +149,10 @@ public static class DependencyInjection
         //app.UseDataProtectionKeyCheck();
         app.UseAuthentication();
         app.UseAuthorization();
+        // After authentication, so context.User carries the MustChangePassword claim; before the
+        // endpoints, so a flagged user cannot reach one. Only the HTTP half - in-circuit navigation
+        // is guarded by ForcePasswordChangeGuard inside AppLayout.
+        app.UseMiddleware<ForcePasswordChangeMiddleware>();
         app.UseAntiforgery();
         app.UseHttpsRedirection();
         // Framework and static assets must load for the anonymous login page - without this the

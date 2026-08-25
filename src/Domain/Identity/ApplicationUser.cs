@@ -36,4 +36,18 @@ public class ApplicationUser : IdentityUser
     public DateTime? LastModifiedAt { get; set; }
     public string? TimeZoneId { get; set; }
     public string? LanguageCode { get; set; }
+
+    /// <summary>
+    /// True while the account still holds a password it did not choose - the generated bootstrap
+    /// password, or one an administrator reset on the user's behalf. While it is set the user is
+    /// held on the change-password page and cannot reach anything else.
+    /// <para>
+    /// ASP.NET Core Identity has no built-in equivalent (<c>IdentityUser</c> carries
+    /// <c>EmailConfirmed</c>, <c>LockoutEnabled</c>, <c>TwoFactorEnabled</c> and the security stamp,
+    /// but nothing for "this password must be replaced"), so this is a GX addition. It is projected
+    /// onto the principal as a claim by <c>ApplicationUserClaimsPrincipalFactory</c> so that
+    /// enforcement costs no database round-trip per request.
+    /// </para>
+    /// </summary>
+    public bool MustChangePassword { get; set; }
 }

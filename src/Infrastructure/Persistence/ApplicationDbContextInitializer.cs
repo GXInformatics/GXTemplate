@@ -1,26 +1,45 @@
-﻿using System.Reflection;
+﻿using System.Security.Cryptography;
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Security;
 using CleanArchitecture.Blazor.Domain.Identity;
+using Microsoft.Extensions.Options;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence;
 
+/// <summary>
+/// Brings a database up to a state the application can actually run against.
+/// <para>
+/// Three stages, deliberately separate because they belong in different environments:
+/// <see cref="InitialiseAsync"/> applies migrations (always), <see cref="ProvisionAsync"/> creates
+/// the things the application cannot function without (always), and
+/// <see cref="SeedSampleDataAsync"/> adds material that only exists to make a development
+/// environment pleasant (Development only).
+/// </para>
+/// <para>
+/// Before Pass 7-3 the second and third were one method behind an <c>IsDevelopment()</c> gate, so a
+/// Production deployment came up with a correct, completely empty schema and no account to log in
+/// with. Every stage is idempotent: a second start provisions nothing and logs nothing.
+/// </para>
+/// </summary>
 public class ApplicationDbContextInitializer
 {
     private readonly ApplicationDbContext _context;
     private readonly ILogger<ApplicationDbContextInitializer> _logger;
     private readonly RoleManager<ApplicationRole> _roleManager;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IdentityOptions _identityOptions;
 
     public ApplicationDbContextInitializer(ILogger<ApplicationDbContextInitializer> logger,
         IDbContextFactory<ApplicationDbContext> dbContextFactory,
         UserManager<ApplicationUser> userManager,
-        RoleManager<ApplicationRole> roleManager)
+        RoleManager<ApplicationRole> roleManager,
+        IOptions<IdentityOptions> identityOptions)
     {
         _logger = logger;
         _context = dbContextFactory.CreateDbContext();
         _userManager = userManager;
         _roleManager = roleManager;
+        _identityOptions = identityOptions.Value;
     }
 
     public async Task InitialiseAsync()
@@ -37,25 +56,47 @@ public class ApplicationDbContextInitializer
         }
     }
 
-    public async Task SeedAsync()
+    /// <summary>
+    /// Everything the application needs to be usable at all, in EVERY environment: the roles its own
+    /// gates name, one organisation for users to belong to, and an administrator to sign in as.
+    /// </summary>
+    public async Task ProvisionAsync()
     {
         try
         {
-            await SeedTenantsAsync();
-            await SeedRolesAsync();
-            await SeedUsersAsync();
-            await SeedDataAsync();
+            await EnsureRolesAsync();
+            await EnsureDefaultTenantAsync();
+            await EnsureAdministratorAsync();
             _context.ChangeTracker.Clear();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "An error occurred while seeding the database");
+            _logger.LogError(ex, "An error occurred while provisioning the database");
             throw;
         }
     }
 
     /// <summary>
-    /// The claims granted to the non-administrator seed roles. Documents is the only demonstrable
+    /// Material that exists only to make a development environment pleasant to work in. Never runs
+    /// outside Development - a production database should start empty of examples.
+    /// </summary>
+    public async Task SeedSampleDataAsync()
+    {
+        try
+        {
+            await SeedSampleTenantAsync();
+            await SeedPicklistsAsync();
+            _context.ChangeTracker.Clear();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "An error occurred while seeding sample data");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The claims granted to the <see cref="Roles.Basic"/> role. Documents is the only demonstrable
     /// feature a plain user is meant to reach, so the grant is exactly what the Documents grid and
     /// its file download are gated on - <c>DocumentsWithPaginationQuery</c> requires View and
     /// <c>GetFileStreamQuery</c> requires Download. Search/Export/Import are deliberately absent:
@@ -68,230 +109,278 @@ public class ApplicationDbContextInitializer
         Permissions.Documents.Download
     ];
 
-    private static IEnumerable<string> GetAllPermissions()
+    /// <summary>
+    /// The name of the organisation created when a database has none. Deliberately generic: it is
+    /// provisioning, not sample data, and naming it after a place would be a guess about the
+    /// deployment.
+    /// </summary>
+    private const string DefaultTenantName = "Default";
+
+    private async Task EnsureRolesAsync()
     {
-        var allPermissions = new List<string>();
-        var modules = typeof(Permissions).GetNestedTypes();
+        if (await _roleManager.RoleExistsAsync(Roles.Admin)) return;
 
-        foreach (var module in modules)
+        _logger.LogInformation("Provisioning roles...");
+
+        var administratorRole = new ApplicationRole(Roles.Admin)
         {
-            var moduleName = string.Empty;
-            var moduleDescription = string.Empty;
-
-            var fields = module.GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
-
-            foreach (var fi in fields)
-            {
-                var propertyValue = fi.GetValue(null);
-
-                if (propertyValue is not null)
-                    allPermissions.Add((string)propertyValue);
-            }
-        }
-
-        return allPermissions;
-    }
-
-
-
-
-    private async Task SeedTenantsAsync()
-    {
-        if (await _context.Tenants.AnyAsync()) return;
-
-        _logger.LogInformation("Seeding organizations...");
-        var tenants = new[]
-        {
-                new Tenant { Name = "Main", Description = "Main Site" },
-                new Tenant { Name = "Europe", Description = "Europe Site" }
-            };
-
-        await _context.Tenants.AddRangeAsync(tenants);
-        await _context.SaveChangesAsync();
-    }
-
-    private async Task SeedRolesAsync()
-    {
-        var adminRoleName = Roles.Admin;
-        var userRoleName = Roles.Basic;
-        var usersRoleName = Roles.Users;
-
-        if (await _roleManager.RoleExistsAsync(adminRoleName)) return;
-
-        _logger.LogInformation("Seeding roles...");
-        var administratorRole = new ApplicationRole(adminRoleName)
-        {
-            Description = "Admin Group",
-            CreatedAt= DateTime.UtcNow,
+            Description = "Full access to every feature and every setting.",
+            CreatedAt = DateTime.UtcNow
         };
-        var userRole = new ApplicationRole(userRoleName)
+        var basicRole = new ApplicationRole(Roles.Basic)
         {
-            Description = "Basic Group",
-            CreatedAt = DateTime.UtcNow,
-        };
-        // Roles.Users gates navigation entries in MenuService, so the role has to exist for those
-        // entries to be reachable by anyone other than an administrator.
-        var usersRole = new ApplicationRole(usersRoleName)
-        {
-            Description = "Users Group",
-            CreatedAt = DateTime.UtcNow,
+            Description = "Ordinary member: can see and download documents.",
+            CreatedAt = DateTime.UtcNow
         };
 
         await _roleManager.CreateAsync(administratorRole);
-        await _roleManager.CreateAsync(userRole);
-        await _roleManager.CreateAsync(usersRole);
+        await _roleManager.CreateAsync(basicRole);
 
-        var permissions = GetAllPermissions();
-
-        foreach (var permission in permissions)
+        // The administrator grant is an explicit list checked against the Permissions constants at
+        // startup, not a reflection sweep - see AdministratorPermissionRegistry for why.
+        foreach (var permission in AdministratorPermissionRegistry.Granted)
         {
-            var claim = new Claim(ApplicationClaimTypes.Permission, permission);
-            await _roleManager.AddClaimAsync(administratorRole, claim);
+            await _roleManager.AddClaimAsync(
+                administratorRole, new Claim(ApplicationClaimTypes.Permission, permission));
+        }
 
-            if (BasicPermissions.Contains(permission))
-            {
-                await _roleManager.AddClaimAsync(userRole, claim);
-                await _roleManager.AddClaimAsync(usersRole, claim);
-            }
+        foreach (var permission in BasicPermissions)
+        {
+            await _roleManager.AddClaimAsync(
+                basicRole, new Claim(ApplicationClaimTypes.Permission, permission));
         }
     }
 
-    private async Task SeedUsersAsync()
+    private async Task EnsureDefaultTenantAsync()
     {
-        if (await _userManager.Users.AnyAsync()) return;
+        if (await _context.Tenants.AnyAsync()) return;
 
-        _logger.LogInformation("Seeding users...");
-        var tenants = await _context.Tenants.ToListAsync();
-        var adminUser = new ApplicationUser
+        _logger.LogInformation("Provisioning the default organisation...");
+        _context.Tenants.Add(new Tenant
+        {
+            Name = DefaultTenantName,
+            Description = "Created automatically because the application needs at least one organisation."
+        });
+        await _context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Creates an administrator when nobody holds the administrator role.
+    /// <para>
+    /// The test is role membership, not a username: an installation whose administrator was renamed,
+    /// or which has several, must not have a second one silently provisioned underneath it.
+    /// </para>
+    /// </summary>
+    private async Task EnsureAdministratorAsync()
+    {
+        var existing = await _userManager.GetUsersInRoleAsync(Roles.Admin);
+        if (existing.Count > 0) return;
+
+        var tenant = await _context.Tenants.FirstAsync();
+        var password = GenerateCompliantPassword();
+
+        var administrator = new ApplicationUser
         {
             UserName = Users.Administrator,
             Provider = "Local",
             IsActive = true,
-            TenantId = (await _context.Tenants.FirstAsync()).Id,
+            TenantId = tenant.Id,
             DisplayName = Users.Administrator,
-            Email = "admin@example.com",
+            Email = "administrator@localhost",
             EmailConfirmed = true,
-            ProfilePictureDataUrl = "https://s.gravatar.com/avatar/78be68221020124c23c665ac54e07074?s=80",
-            LanguageCode="en-US",
-            TimeZoneId= "Asia/Shanghai",
+            LanguageCode = "en-US",
+            TimeZoneId = TimeZoneInfo.Utc.Id,
             TwoFactorEnabled = false,
-            CreatedAt=DateTime.UtcNow,
-            TenantUsers = tenants.Select(t => new TenantUser { TenantId = t.Id }).ToList()
+            MustChangePassword = true,
+            CreatedAt = DateTime.UtcNow,
+            TenantUsers = [new TenantUser { TenantId = tenant.Id }]
         };
-        await _userManager.CreateAsync(adminUser, Users.DefaultPassword);
-        await _userManager.AddToRoleAsync(adminUser, Roles.Admin);
-        var demoUser = new ApplicationUser
+
+        var created = await _userManager.CreateAsync(administrator, password);
+        if (!created.Succeeded)
         {
-            UserName = Users.Demo,
-            IsActive = true,
-            Provider = "Local",
-            TenantId = (await _context.Tenants.FirstAsync()).Id,
-            DisplayName = Users.Demo,
-            SuperiorId = adminUser.Id,
-            Email = "demo@example.com",
-            EmailConfirmed = true,
-            LanguageCode = "de-DE",
-            TimeZoneId = "Europe/Berlin",
-            TenantUsers = new List<TenantUser> { new TenantUser { TenantId = tenants.First().Id } },
-            ProfilePictureDataUrl = "https://s.gravatar.com/avatar/ea753b0b0f357a41491408307ade445e?s=80",
-            CreatedAt = DateTime.UtcNow
-        };
+            throw new InvalidOperationException(
+                "Could not provision the administrator account: " +
+                string.Join("; ", created.Errors.Select(e => e.Description)));
+        }
 
-       
+        await _userManager.AddToRoleAsync(administrator, Roles.Admin);
 
-        await _userManager.CreateAsync(demoUser, Users.DefaultPassword);
-        await _userManager.AddToRoleAsync(demoUser, Roles.Basic);
+        // The only time this password is ever legible. It is not written to configuration, not to a
+        // file, and not returned anywhere - the Identity password hash is the only copy that
+        // survives this method.
+        // The :l format matters - without it Serilog renders string properties in quotes, which
+        // would make the operator copy a password with quotation marks around it.
+        _logger.LogWarning(
+            "\n================ ADMINISTRATOR ACCOUNT CREATED ================\n" +
+            "  Username: {UserName:l}\n" +
+            "  Password: {Password:l}\n" +
+            "This password was generated for this installation and is shown ONCE, here, now.\n" +
+            "It cannot be read back from the application. Copy it before this process exits.\n" +
+            "You will be required to change it the first time you sign in.\n" +
+            "===============================================================",
+            administrator.UserName, password);
     }
 
-    private async Task SeedDataAsync()
+    /// <summary>
+    /// A password that satisfies the configured Identity policy by construction rather than by
+    /// retrying until one happens to pass.
+    /// <para>
+    /// Drawn from <see cref="RandomNumberGenerator"/>, never <c>System.Random</c>: this value is a
+    /// credential, and <c>Random</c> is seeded predictably enough that a generated administrator
+    /// password would be guessable from the process start time.
+    /// </para>
+    /// </summary>
+    private string GenerateCompliantPassword()
     {
-        if (!await _context.PicklistSets.AnyAsync())
+        const string lower = "abcdefghijkmnopqrstuvwxyz";     // no l
+        const string upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";      // no I, O
+        const string digits = "23456789";                     // no 0, 1
+        const string symbols = "!@#$%^&*-_=+?";
+
+        var policy = _identityOptions.Password;
+        var required = new List<char>();
+
+        if (policy.RequireLowercase) required.Add(Pick(lower));
+        if (policy.RequireUppercase) required.Add(Pick(upper));
+        if (policy.RequireDigit) required.Add(Pick(digits));
+        if (policy.RequireNonAlphanumeric) required.Add(Pick(symbols));
+
+        // The pool always spans all four classes so RequiredUniqueChars is reachable whatever the
+        // policy demands of the mandatory prefix.
+        var pool = lower + upper + digits + symbols;
+
+        // Comfortably above any sane RequiredLength, and under the 30-character cap the sign-in form
+        // imposes on the field this will be typed into.
+        var length = Math.Clamp(Math.Max(policy.RequiredLength, 20), required.Count, 24);
+
+        var characters = new List<char>(required);
+        while (characters.Count < length) characters.Add(Pick(pool));
+
+        // Fisher-Yates over the same cryptographic source, so the mandatory characters do not sit in
+        // a fixed, predictable order at the front.
+        for (var i = characters.Count - 1; i > 0; i--)
         {
-
-            _logger.LogInformation("Seeding key values...");
-            var keyValues = new[]
-            {
-                new PicklistSet
-                {
-                    Name = Picklist.Status,
-                    Value = "initialization",
-                    Text = "Initialization",
-                    Description = "Status of workflow"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Status,
-                    Value = "processing",
-                    Text = "Processing",
-                    Description = "Status of workflow"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Status,
-                    Value = "pending",
-                    Text = "Pending",
-                    Description = "Status of workflow"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Status,
-                    Value = "done",
-                    Text = "Done",
-                    Description = "Status of workflow"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Brand,
-                    Value = "Apple",
-                    Text = "Apple",
-                    Description = "Brand of production"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Brand,
-                    Value = "Google",
-                    Text = "Google",
-                    Description = "Brand of production"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Brand,
-                    Value = "Microsoft",
-                    Text = "Microsoft",
-                    Description = "Brand of production"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Unit,
-                    Value = "EA",
-                    Text = "EA",
-                    Description = "Unit of product"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Unit,
-                    Value = "KM",
-                    Text = "KM",
-                    Description = "Unit of product"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Unit,
-                    Value = "PC",
-                    Text = "PC",
-                    Description = "Unit of product"
-                },
-                new PicklistSet
-                {
-                    Name = Picklist.Unit,
-                    Value = "L",
-                    Text = "L",
-                    Description = "Unit of product"
-                }
-            };
-
-            await _context.PicklistSets.AddRangeAsync(keyValues);
-            await _context.SaveChangesAsync();
+            var j = RandomNumberGenerator.GetInt32(i + 1);
+            (characters[i], characters[j]) = (characters[j], characters[i]);
         }
+
+        return new string(characters.ToArray());
+
+        static char Pick(string set) => set[RandomNumberGenerator.GetInt32(set.Length)];
+    }
+
+    private async Task SeedSampleTenantAsync()
+    {
+        const string sampleTenantName = "Europe";
+        if (await _context.Tenants.AnyAsync(t => t.Name == sampleTenantName)) return;
+
+        _logger.LogInformation("Seeding a second organisation...");
+        var tenant = new Tenant { Name = sampleTenantName, Description = "Europe Site" };
+        _context.Tenants.Add(tenant);
+        await _context.SaveChangesAsync();
+
+        // Keep the development administrator a member of every organisation, which is what makes
+        // tenant switching demonstrable at all.
+        var administrators = await _userManager.GetUsersInRoleAsync(Roles.Admin);
+        foreach (var administrator in administrators)
+        {
+            if (await _context.TenantUsers.AnyAsync(tu => tu.UserId == administrator.Id && tu.TenantId == tenant.Id))
+                continue;
+
+            _context.TenantUsers.Add(new TenantUser { UserId = administrator.Id, TenantId = tenant.Id });
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task SeedPicklistsAsync()
+    {
+        if (await _context.PicklistSets.AnyAsync()) return;
+
+        _logger.LogInformation("Seeding picklist values...");
+        var keyValues = new[]
+        {
+            new PicklistSet
+            {
+                Name = Picklist.Status,
+                Value = "initialization",
+                Text = "Initialization",
+                Description = "Status of workflow"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Status,
+                Value = "processing",
+                Text = "Processing",
+                Description = "Status of workflow"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Status,
+                Value = "pending",
+                Text = "Pending",
+                Description = "Status of workflow"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Status,
+                Value = "done",
+                Text = "Done",
+                Description = "Status of workflow"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Brand,
+                Value = "Apple",
+                Text = "Apple",
+                Description = "Brand of production"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Brand,
+                Value = "Google",
+                Text = "Google",
+                Description = "Brand of production"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Brand,
+                Value = "Microsoft",
+                Text = "Microsoft",
+                Description = "Brand of production"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Unit,
+                Value = "EA",
+                Text = "EA",
+                Description = "Unit of measure"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Unit,
+                Value = "KM",
+                Text = "KM",
+                Description = "Unit of measure"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Unit,
+                Value = "PC",
+                Text = "PC",
+                Description = "Unit of measure"
+            },
+            new PicklistSet
+            {
+                Name = Picklist.Unit,
+                Value = "L",
+                Text = "L",
+                Description = "Unit of measure"
+            }
+        };
+
+        await _context.PicklistSets.AddRangeAsync(keyValues);
+        await _context.SaveChangesAsync();
     }
 }

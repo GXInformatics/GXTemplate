@@ -137,7 +137,7 @@ public class Testing
 
     public static async Task<string> RunAsDefaultUserAsync()
     {
-        return await RunAsUserAsync("Demo", "Password123!", new string[] { });
+        return await RunAsUserAsync("TestUser", "Password123!", new string[] { });
     }
 
     public static async Task<string> RunAsAdministratorAsync()
@@ -149,7 +149,7 @@ public class Testing
     {
         using var scope = _scopeFactory.CreateScope();
         var userManager = scope.ServiceProvider.GetService<UserManager<ApplicationUser>>();
-        // Email = userName produced 'Demo', which Identity's EmailValidator rejects - this helper
+        // Email = userName produced a bare name, which Identity's EmailValidator rejects - this helper
         // could never succeed, which is why no test used it before deny-by-default required one.
         var user = new ApplicationUser { UserName = userName, Email = $"{userName}@example.com" };
         var result = await userManager.CreateAsync(user, password);

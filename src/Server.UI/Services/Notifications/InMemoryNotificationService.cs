@@ -79,17 +79,18 @@ public class InMemoryNotificationService : INotificationService
 
     public void Preload()
     {
+        // A single placeholder so the notification menu has something to render out of the box.
+        // Both image slots are deliberately empty: nothing renders them today, and the upstream CI
+        // badge and GitHub avatar that used to sit here pointed at a repository this template is no
+        // longer part of. Replace this with a real notification source.
         _messages.Add(new NotificationMessage(
-            "readme",
-            "Blazor Application is ready",
-            "We are paving the way for the future of Blazor",
+            "welcome",
+            "Welcome",
+            "This is a placeholder notification. Replace InMemoryNotificationService with a real source.",
             "Announcement",
-            new DateTime(2022, 01, 13),
-            "https://github.com/neozhu/CleanArchitectureWithBlazorServer/actions/workflows/dotnet.yml/badge.svg",
-            new[]
-            {
-                new NotificationAuthor("Hualin",
-                    "https://avatars.githubusercontent.com/u/1549611?s=48&v=4")
-            }, typeof(NotificationMessage)));
+            new DateTime(2026, 01, 01),
+            string.Empty,
+            new[] { new NotificationAuthor("System", string.Empty) },
+            typeof(NotificationMessage)));
     }
 }

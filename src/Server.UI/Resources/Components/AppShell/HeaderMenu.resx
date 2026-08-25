@@ -128,9 +128,6 @@
     <data name="Search (Cmd + K)" xml:space="preserve">
     <value>Search (Cmd + K)</value>
   </data>
-    <data name="Navigate to GitHub" xml:space="preserve">
-    <value>Navigate to GitHub</value>
-  </data>
     <data name="Toggle right-to-left" xml:space="preserve">
     <value>Toggle right-to-left</value>
   </data>

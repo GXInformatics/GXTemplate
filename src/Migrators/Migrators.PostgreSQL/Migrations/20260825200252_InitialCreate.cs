@@ -140,6 +140,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                     last_modified_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     time_zone_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     language_code = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
+                    must_change_password = table.Column<bool>(type: "boolean", nullable: false),
                     user_name = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
                     normalized_user_name = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
                     email = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
