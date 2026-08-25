@@ -232,7 +232,7 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
                 logger.LogError(ex, "Error during login for user {userName}", userName);
                 return Results.StatusCode(500);
             }
-        });
+        }).AllowAnonymous(); // issues the sign-in cookie; the caller is by definition not yet authenticated
 
         // Configure two-factor authentication verification endpoint
         accountGroup.MapGet("2fa/verify", async (HttpContext context,
@@ -264,7 +264,7 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
             // Verify the authenticator token
             var result = await signInManager.TwoFactorAuthenticatorSignInAsync(token, remember, remember);
             return HandleSignInResult(result, returnUrl);
-        });
+        }).AllowAnonymous(); // completes two-factor sign-in; the cookie does not exist until it succeeds
 
         // Configure two-factor authentication recovery code endpoint
         accountGroup.MapGet("2fa/recovery", async (HttpContext context,
@@ -294,7 +294,7 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
             // Attempt sign-in with recovery code
             var result = await signInManager.TwoFactorRecoveryCodeSignInAsync(recoveryCode);
             return HandleSignInResult(result, returnUrl);
-        });
+        }).AllowAnonymous(); // completes recovery-code sign-in; same pre-authentication position
 
         // Configure external login initiation endpoint
         accountGroup.MapPost("/performexternallogin", (
@@ -320,7 +320,7 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
             var properties = signInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl);
             logger.LogInformation("Redirecting to external login provider {Provider} with return URL {ReturnUrl}", provider, returnUrl);
             return TypedResults.Challenge(properties, [provider??string.Empty]);
-        });
+        }).AllowAnonymous(); // starts the external provider challenge from the anonymous login page
 
         // Configure external login callback handling endpoint
         accountGroup.MapGet("externallogin", async (
@@ -389,7 +389,7 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
                 LinkExternalLogin.PageUrl,
                 QueryString.Create(query));
             return Results.Redirect(redirectUrl);
-        });
+        }).AllowAnonymous(); // the external provider redirects here; the visitor is still anonymous
         
         // Configure external login account linking endpoint
         accountGroup.MapGet("/performlinkexternallogin", async (
@@ -483,7 +483,7 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
                 return Results.Redirect("/account/login");
             }
 
-        });
+        }).AllowAnonymous(); // provisions or links an account after external login, before any cookie
         
         // Configure user logout endpoint
         accountGroup.MapPost("/logout", async (
@@ -581,7 +581,7 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
             var user = string.IsNullOrEmpty(username) ? null : await userManager.FindByNameAsync(username);
             var optionsJson = await signInManager.MakePasskeyRequestOptionsAsync(user);
             return TypedResults.Content(optionsJson, contentType: "application/json");
-        });
+        }).AllowAnonymous(); // hands out the passkey challenge used to sign in (not to register one)
 
         accountGroup.MapPost("/LoginWithPasskey", async (HttpContext context,
             [FromServices] UserManager<ApplicationUser> userManager,
@@ -598,7 +598,7 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
             }
             var result = await signInManager.PasskeySignInAsync(credential);
             return HandleSignInResult(result, "/", true);
-        });
+        }).AllowAnonymous(); // completes passkey sign-in
 
 
 
