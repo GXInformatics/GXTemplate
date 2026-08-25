@@ -17,7 +17,7 @@ public class AdvancedDocumentsSpecification : Specification<Document>
             .Where(x => x.CreatedAt >= todayrange.Start && x.CreatedAt < todayrange.End.AddDays(1), filter.ListView == DocumentListView.TODAY)
             .Where(x => x.CreatedAt >= last30daysrange.Start, filter.ListView == DocumentListView.LAST_30_DAYS)
             .Where(
-                x => x.Title.Contains(filter.Keyword) || x.Description.Contains(filter.Keyword) ||
-                     x.Content.Contains(filter.Keyword), !string.IsNullOrEmpty(filter.Keyword));
+                x => x.Title.Contains(filter.Keyword) || x.Description.Contains(filter.Keyword),
+                !string.IsNullOrEmpty(filter.Keyword));
     }
 }

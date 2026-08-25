@@ -11,9 +11,7 @@ public interface IApplicationDbContext: IAsyncDisposable
     DbSet<AuditTrail> AuditTrails { get; set; }
     DbSet<Document> Documents { get; set; }
     DbSet<PicklistSet> PicklistSets { get; set; }
-    DbSet<Product> Products { get; set; }
     DbSet<Tenant> Tenants { get; set; }
     DbSet<TenantUser> TenantUsers { get; set; }
-    DbSet<Contact> Contacts { get; set; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
 }

@@ -1,0 +1,56 @@
+# Git normalises text files to LF in the repository and checks them out with the
+# platform's endings. Without this, whether a file arrives as CRLF or LF depends on each
+# developer's core.autocrlf setting, which is how a repository ends up with both in the
+# same file. Declaring it here makes the answer a property of the repository.
+* text=auto
+
+# Sources and content. Listed explicitly so a new tool that does not consult text=auto
+# still gets the right answer.
+*.cs        text diff=csharp
+*.razor     text
+*.cshtml    text
+*.csproj    text
+*.slnx      text
+*.props     text
+*.targets   text
+*.json      text
+*.js        text
+*.css       text
+*.scss      text
+*.html      text
+*.md        text
+*.yml       text
+*.yaml      text
+*.xml       text
+*.nuspec    text
+*.resx      text
+*.sql       text
+*.config    text
+
+# Windows-only tooling reads these; they must stay CRLF wherever they are checked out.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Shell scripts and container files are consumed by Linux tooling; LF regardless of host.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+.dockerignore text eol=lf
+*.dcproj    text
+
+# Binary. Never touched, never diffed as text.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.eot       binary
+*.exe       binary
+*.dll       binary
+*.db        binary
+*.snk       binary

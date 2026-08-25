@@ -23,9 +23,7 @@
         "**/[Bb]in/**",
         "**/[Oo]bj/**",
         ".template.config/**/*",
-        "templates/**/*",
         ".vs/**/*",
-        ".vscode/**/*",
         "doc/**/*",
         "**/*.filelist",
         "**/*.user",
@@ -37,10 +35,7 @@
         "launchSettings.json",
         "*.exe",
         "src/Server.UI/Files/**",
-        "graphify-out/**",
-        "docs/**/*",
-        ".codex/**/*",
-        ".agents/**/*"
+        "docs/**/*"
       ]
     }
   ]

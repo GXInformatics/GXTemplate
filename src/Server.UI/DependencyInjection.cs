@@ -87,8 +87,7 @@ public static class DependencyInjection
 
         services.AddControllers();
 
-        services.AddScoped<IApplicationHubWrapper, ServerHubWrapper>()
-            .AddSignalR(options =>
+        services.AddSignalR(options =>
             {
                 options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
                 options.AddFilter<UserContextHubFilter>();

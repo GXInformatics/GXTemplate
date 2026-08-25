@@ -3,6 +3,8 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
+using CleanArchitecture.Blazor.Application.Common.Models;
 using CleanArchitecture.Blazor.Application.Common.PublishStrategies;
 using CleanArchitecture.Blazor.Application.Features.PicklistSets.DTOs;
 using CleanArchitecture.Blazor.Domain.Entities;
@@ -20,18 +22,6 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Features.Notifications;
 public class RemainingNotificationMediatorSmokeTests
 {
     [Test]
-    public async Task Publish_ShouldReach_ProductUpdatedEventHandler()
-    {
-        var notification = new ProductUpdatedEvent(new Product { Id = 7, Name = "Updated Product" });
-        var message = await PublishAndCaptureAsync(
-            "CleanArchitecture.Blazor.Application.Features.Products.EventHandlers.ProductUpdatedEventHandler",
-            "ProductUpdatedEvent",
-            notification);
-
-        Assert.That(message, Does.Contain("ProductUpdatedEvent"));
-    }
-
-    [Test]
     public async Task Publish_ShouldReach_DocumentDeletedEventHandler()
     {
         var notification = new DocumentDeletedEvent(new Document { Id = 9, URL = string.Empty });
@@ -41,6 +31,39 @@ public class RemainingNotificationMediatorSmokeTests
             notification);
 
         Assert.That(message, Does.Contain("skipping file deletion"));
+    }
+
+    [Test]
+    public async Task Publish_ShouldReach_DocumentCreatedEventHandler()
+    {
+        // Replaces DocumentCreatedEventHandlerTests, whose subject (enqueueing OCR) left with the OCR
+        // pipeline. The handler itself survives as the upload-notification point, so the smoke test
+        // keeps covering that it is reached and that it reads the ambient principal.
+        var userContextAccessor = new Mock<IUserContextAccessor>();
+        userContextAccessor.SetupGet(x => x.Current)
+            .Returns(new UserContext("user-123", "neo", TenantId: "tenant-1"));
+
+        using var logProvider = new TestLogProvider(
+            "CleanArchitecture.Blazor.Application.Features.Documents.EventHandlers.DocumentCreatedEventHandler",
+            "Document upload successful");
+
+        await PublishAndAwaitAsync(
+            new DocumentCreatedEvent(new Document { Id = 42, Title = "invoice.png" }),
+            services =>
+            {
+                services.AddSingleton(userContextAccessor.Object);
+                services.AddLogging(builder =>
+                {
+                    builder.ClearProviders();
+                    builder.AddProvider(logProvider);
+                });
+            });
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var message = await logProvider.WaitForMatchAsync(timeout.Token);
+
+        Assert.That(message, Does.Contain("42"));
+        Assert.That(message, Does.Contain("neo"));
     }
 
     [Test]

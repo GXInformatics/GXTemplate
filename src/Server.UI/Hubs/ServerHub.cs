@@ -71,12 +71,6 @@ public class ServerHub : Hub<ISignalRHub>
     {
         await Clients.All.SendNotification(message).ConfigureAwait(false);
     }
-
-    public async Task Completed(int id,string message)
-    {
-        await Clients.All.Completed(id,message).ConfigureAwait(false);
-    }
-
     // Client -> Server: notify open/close of a specific page component
     public async Task NotifyPageComponentOpen(string pageComponent)
     {

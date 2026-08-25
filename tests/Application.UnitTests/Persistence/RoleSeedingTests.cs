@@ -15,9 +15,11 @@ using NUnit.Framework;
 namespace CleanArchitecture.Blazor.Application.UnitTests.Persistence;
 
 /// <summary>
-/// <c>Roles.Users</c> gates three navigation entries in MenuService (Chatbot, Analytics, Banking), but
-/// the seeder only ever created Admin and Basic, so the role did not exist, nobody could hold it, and
-/// those entries were reachable by administrators alone. The seeder now creates it.
+/// <c>Roles.Users</c> used to gate three navigation entries in MenuService (Chatbot, Analytics,
+/// Banking) that the seeder never granted anyone, so the role did not exist and those entries were
+/// reachable by administrators alone. The seeder now creates it; the entries themselves were deleted
+/// with the demo features, which leaves the role with no gate of its own - what it is FOR is a Pass
+/// 7-3 decision. These tests pin what the seeder actually produces in the meantime.
 /// </summary>
 [TestFixture]
 public class RoleSeedingTests
@@ -108,7 +110,10 @@ public class RoleSeedingTests
         var usersClaims = (await roleManager.GetClaimsAsync(users!))
             .Where(c => c.Type == ApplicationClaimTypes.Permission).Select(c => c.Value).ToArray();
 
-        basicClaims.Should().NotBeEmpty("Basic is seeded with the Permissions.Products grant");
+        basicClaims.Should().BeEquivalentTo(
+            new[] { Permissions.Documents.View, Permissions.Documents.Download },
+            "Basic is seeded with exactly the Documents claims the app enforces - View gates the grid "
+            + "query and Download gates the file stream");
         usersClaims.Should().BeEquivalentTo(basicClaims,
             "Basic is the nearest precedent for an ordinary-member role, and nothing else in the "
             + "template says what Users should hold");

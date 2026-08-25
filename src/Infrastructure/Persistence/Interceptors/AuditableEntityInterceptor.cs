@@ -351,7 +351,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
         var now = _dateTime.Now;
         var auditTrails = new List<AuditTrail>();
 
-        foreach (var entry in context.ChangeTracker.Entries<IAuditTrial>())
+        foreach (var entry in context.ChangeTracker.Entries<IAuditable>())
         {
             if (IsValidAuditEntry(entry))
             {

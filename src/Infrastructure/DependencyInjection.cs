@@ -11,7 +11,6 @@ using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Services.MultiTenant;
-using CleanArchitecture.Blazor.Infrastructure.Services.OpenAI;
 using MaxMind.GeoIP2;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
@@ -79,11 +78,6 @@ public static class DependencyInjection
         services.Configure<MinioOptions>(configuration.GetSection(MinioOptions.Key))
             .AddSingleton(s => s.GetRequiredService<IOptions<MinioOptions>>().Value);
 
-        services.Configure<AISettings>(configuration.GetSection(AISettings.Key))
-            .AddSingleton(s => s.GetRequiredService<IOptions<AISettings>>().Value)
-            .AddSingleton<IAISettings>(s => s.GetRequiredService<IOptions<AISettings>>().Value);
-
-       
         return services;
     }
     #endregion
@@ -182,16 +176,13 @@ public static class DependencyInjection
 
        
         return services
-            .AddSingleton<IDocumentOcrQueue, DocumentOcrQueue>()
-            .AddHostedService<DocumentOcrBackgroundService>()
             .AddScoped<IValidationService, ValidationService>()
             .AddScoped<IExcelService, ExcelService>()
             .AddScoped<IFileUploadService, MinioFileUploadService>()
             .AddScoped<IPDFService, PDFService>()
             .AddScoped<IPermissionQueryService, PermissionQueryService>()
             .AddScoped<AdministratorProtectionService>()
-            .AddScoped<PermissionAssignmentService>()
-            .AddTransient<IDocumentOcrJob, DocumentOcrJob>();
+            .AddScoped<PermissionAssignmentService>();
     }
     #endregion
 

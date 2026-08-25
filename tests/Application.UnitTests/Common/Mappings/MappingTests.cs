@@ -4,11 +4,9 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using CleanArchitecture.Blazor.Application.Common.Mappings;
 using CleanArchitecture.Blazor.Application.Features.AuditTrails.DTOs;
-using CleanArchitecture.Blazor.Application.Features.Contacts.DTOs;
 using CleanArchitecture.Blazor.Application.Features.Documents.DTOs;
 using CleanArchitecture.Blazor.Application.Features.Identity.DTOs;
 using CleanArchitecture.Blazor.Application.Features.PicklistSets.DTOs;
-using CleanArchitecture.Blazor.Application.Features.Products.DTOs;
 using CleanArchitecture.Blazor.Application.Features.SystemLogs.DTOs;
 using CleanArchitecture.Blazor.Application.Features.Tenants.DTOs;
 using CleanArchitecture.Blazor.Domain.Entities;
@@ -43,8 +41,6 @@ public class MappingTests
     [Test]
     [TestCase(typeof(Document), typeof(DocumentDto), true)]
     [TestCase(typeof(Tenant), typeof(TenantDto), true)]
-    [TestCase(typeof(Product), typeof(ProductDto), true)]
-    [TestCase(typeof(Contact), typeof(ContactDto), true)]
     [TestCase(typeof(PicklistSet), typeof(PicklistSetDto), true)]
     [TestCase(typeof(ApplicationUser), typeof(ApplicationUserDto), false)]
     [TestCase(typeof(ApplicationUser), typeof(UserBriefDto), false)]

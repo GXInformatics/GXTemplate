@@ -34,22 +34,22 @@ public class SaveChangesInterceptorRegressionTests
 
         await using var context = await CreateContextAsync(new DispatchDomainEventsInterceptor(mediator.Object));
 
-        var contact = new Contact { Name = "Regression Test Contact" };
-        contact.AddDomainEvent(new ContactCreatedEvent(contact));
+        var picklistSet = new PicklistSet { Value = "Regression Test Value" };
+        picklistSet.AddDomainEvent(new PicklistSetCreatedEvent(picklistSet));
 
-        context.Contacts.Add(contact);
+        context.PicklistSets.Add(picklistSet);
         await context.SaveChangesAsync();
 
         mediator.Verify(x => x.Publish(
-                It.Is<DomainEvent>(evt => evt.GetType() == typeof(ContactCreatedEvent) &&
-                                          ((ContactCreatedEvent)evt).Item == contact),
+                It.Is<DomainEvent>(evt => evt.GetType() == typeof(PicklistSetCreatedEvent) &&
+                                          ((PicklistSetCreatedEvent)evt).Item == picklistSet),
                 It.IsAny<CancellationToken>()),
             Times.Once);
-        Assert.That(contact.DomainEvents, Is.Empty);
+        Assert.That(picklistSet.DomainEvents, Is.Empty);
     }
 
     [Test]
-    public async Task DispatchDomainEventsInterceptor_ShouldPublishUpdatedContactDomainEvents()
+    public async Task DispatchDomainEventsInterceptor_ShouldPublishUpdatedPicklistSetDomainEvents()
     {
         var mediator = new Mock<IMediator>();
         mediator.Setup(x => x.Publish(It.IsAny<DomainEvent>(), It.IsAny<CancellationToken>()))
@@ -57,29 +57,29 @@ public class SaveChangesInterceptorRegressionTests
 
         await using var context = await CreateContextAsync(new DispatchDomainEventsInterceptor(mediator.Object));
 
-        var contact = new Contact { Name = "Updated Contact" };
-        context.Contacts.Add(contact);
+        var picklistSet = new PicklistSet { Value = "Updated Value" };
+        context.PicklistSets.Add(picklistSet);
         await context.SaveChangesAsync();
 
         mediator.Reset();
         mediator.Setup(x => x.Publish(It.IsAny<DomainEvent>(), It.IsAny<CancellationToken>()))
             .Returns(ValueTask.CompletedTask);
 
-        contact.Description = "Updated description";
-        contact.AddDomainEvent(new ContactUpdatedEvent(contact));
+        picklistSet.Description = "Updated description";
+        picklistSet.AddDomainEvent(new PicklistSetUpdatedEvent(picklistSet));
 
         await context.SaveChangesAsync();
 
         mediator.Verify(x => x.Publish(
-                It.Is<DomainEvent>(evt => evt.GetType() == typeof(ContactUpdatedEvent) &&
-                                          ((ContactUpdatedEvent)evt).Item == contact),
+                It.Is<DomainEvent>(evt => evt.GetType() == typeof(PicklistSetUpdatedEvent) &&
+                                          ((PicklistSetUpdatedEvent)evt).Item == picklistSet),
                 It.IsAny<CancellationToken>()),
             Times.Once);
-        Assert.That(contact.DomainEvents, Is.Empty);
+        Assert.That(picklistSet.DomainEvents, Is.Empty);
     }
 
     [Test]
-    public async Task DispatchDomainEventsInterceptor_ShouldPublishDeletedContactDomainEvents()
+    public async Task DispatchDomainEventsInterceptor_ShouldPublishDeletedPicklistSetDomainEvents()
     {
         var mediator = new Mock<IMediator>();
         mediator.Setup(x => x.Publish(It.IsAny<DomainEvent>(), It.IsAny<CancellationToken>()))
@@ -87,25 +87,25 @@ public class SaveChangesInterceptorRegressionTests
 
         await using var context = await CreateContextAsync(new DispatchDomainEventsInterceptor(mediator.Object));
 
-        var contact = new Contact { Name = "Deleted Contact" };
-        context.Contacts.Add(contact);
+        var picklistSet = new PicklistSet { Value = "Deleted Value" };
+        context.PicklistSets.Add(picklistSet);
         await context.SaveChangesAsync();
 
         mediator.Reset();
         mediator.Setup(x => x.Publish(It.IsAny<DomainEvent>(), It.IsAny<CancellationToken>()))
             .Returns(ValueTask.CompletedTask);
 
-        contact.AddDomainEvent(new ContactDeletedEvent(contact));
-        context.Contacts.Remove(contact);
+        picklistSet.AddDomainEvent(new PicklistSetDeletedEvent(picklistSet));
+        context.PicklistSets.Remove(picklistSet);
 
         await context.SaveChangesAsync();
 
         mediator.Verify(x => x.Publish(
-                It.Is<DomainEvent>(evt => evt.GetType() == typeof(ContactDeletedEvent) &&
-                                          ((ContactDeletedEvent)evt).Item == contact),
+                It.Is<DomainEvent>(evt => evt.GetType() == typeof(PicklistSetDeletedEvent) &&
+                                          ((PicklistSetDeletedEvent)evt).Item == picklistSet),
                 It.IsAny<CancellationToken>()),
             Times.Once);
-        Assert.That(contact.DomainEvents, Is.Empty);
+        Assert.That(picklistSet.DomainEvents, Is.Empty);
     }
 
     [Test]

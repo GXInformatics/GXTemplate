@@ -46,7 +46,6 @@ public class UploadDocumentCommandHandler : IRequestHandler<UploadDocumentComman
             {
                 Title = fileName,
                 URL = uploadResult.Data!.Url,
-                Status = JobStatus.Queueing,
                 IsPublic = true,
                 DocumentType = DocumentType.Image
             };

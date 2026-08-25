@@ -7,7 +7,7 @@ using CleanArchitecture.Blazor.Domain.Common.Entities;
 
 namespace CleanArchitecture.Blazor.Domain.Entities;
 
-public class PicklistSet : BaseAuditableEntity, IAuditTrial
+public class PicklistSet : BaseAuditableEntity, IAuditable
 {
     public Picklist Name { get; set; } = Picklist.Brand;
     public string? Value { get; set; }

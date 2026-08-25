@@ -73,9 +73,9 @@ public class HangfireDashboardAuthorizationFilterTests
     [Test]
     public async Task AuthenticatedCallerWithoutThePermission_IsDeniedByBothFilters()
     {
-        // The seeded Basic role holds only Permissions.Products.*, so this is the Demo user's position.
+        // The seeded Basic role holds only Permissions.Documents.View/Download, so this is an ordinary member's position.
         using var provider = BuildServices();
-        var context = ContextFor(Authenticated("Permissions.Products.View"), provider);
+        var context = ContextFor(Authenticated("Permissions.Documents.View"), provider);
 
         new HangfireDashboardAuthorizationFilter().Authorize(context).Should().BeFalse();
         (await new HangfireDashboardAsyncAuthorizationFilter().AuthorizeAsync(context)).Should().BeFalse();

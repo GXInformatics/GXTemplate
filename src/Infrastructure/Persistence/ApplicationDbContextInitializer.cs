@@ -54,6 +54,20 @@ public class ApplicationDbContextInitializer
         }
     }
 
+    /// <summary>
+    /// The claims granted to the non-administrator seed roles. Documents is the only demonstrable
+    /// feature a plain user is meant to reach, so the grant is exactly what the Documents grid and
+    /// its file download are gated on - <c>DocumentsWithPaginationQuery</c> requires View and
+    /// <c>GetFileStreamQuery</c> requires Download. Search/Export/Import are deliberately absent:
+    /// nothing enforces them server-side today, and granting unenforced claims would misrepresent
+    /// what the role can actually do.
+    /// </summary>
+    private static readonly string[] BasicPermissions =
+    [
+        Permissions.Documents.View,
+        Permissions.Documents.Download
+    ];
+
     private static IEnumerable<string> GetAllPermissions()
     {
         var allPermissions = new List<string>();
@@ -134,7 +148,7 @@ public class ApplicationDbContextInitializer
             var claim = new Claim(ApplicationClaimTypes.Permission, permission);
             await _roleManager.AddClaimAsync(administratorRole, claim);
 
-            if (permission.StartsWith("Permissions.Products"))
+            if (BasicPermissions.Contains(permission))
             {
                 await _roleManager.AddClaimAsync(userRole, claim);
                 await _roleManager.AddClaimAsync(usersRole, claim);
@@ -277,52 +291,6 @@ public class ApplicationDbContextInitializer
             };
 
             await _context.PicklistSets.AddRangeAsync(keyValues);
-            await _context.SaveChangesAsync();
-        }
-
-        if (!await _context.Products.AnyAsync())
-        {
-
-            _logger.LogInformation("Seeding products...");
-            var products = new[]
-            {
-                new Product
-                {
-                    Brand = "Apple",
-                    Name = "IPhone 13 Pro",
-                    Description =
-                    "Apple iPhone 13 Pro smartphone. Announced Sep 2021. Features 6.1″ display, Apple A15 Bionic chipset, 3095 mAh battery, 1024 GB storage.",
-                    Unit = "EA",
-                    Price = 999.98m
-                },
-                new Product
-                {
-                    Brand = "Sony",
-                    Name = "WH-1000XM4",
-                    Description = "Sony WH-1000XM4 Wireless Noise-Canceling Over-Ear Headphones. Features industry-leading noise cancellation, up to 30 hours of battery life, touch sensor controls.",
-                    Unit = "EA",
-                    Price = 349.99m
-                },
-                new Product
-                {
-                    Brand = "Nintendo",
-                    Name = "Switch OLED Model",
-                    Description = "Nintendo Switch OLED Model console. Released October 2021. Features 7″ OLED screen, 64GB internal storage, enhanced audio, dock with wired LAN port.",
-                    Unit = "EA",
-                    Price = 349.99m
-                },
-                new Product
-                {
-                    Brand = "Apple",
-                    Name = "MacBook Air M1",
-                    Description = "Apple MacBook Air with M1 chip. Features 13.3″ Retina display, Apple M1 chip with 8‑core CPU, 8GB RAM, 256GB SSD storage, up to 18 hours of battery life.",
-                    Unit = "EA",
-                    Price = 999.99m
-                }
-
-            };
-
-            await _context.Products.AddRangeAsync(products);
             await _context.SaveChangesAsync();
         }
     }

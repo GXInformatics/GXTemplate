@@ -5,8 +5,8 @@ using CleanArchitecture.Blazor.Application.Common.Security;
 namespace CleanArchitecture.Blazor.Infrastructure.Services;
 //// <summary>
 /// Implementation of the IPermissionService using reflection to evaluate access rights
-/// based on a naming convention. For example, an access rights model named "ContactsAccessRights"
-/// will be associated with permission claims like "Permissions.Contacts.Create".
+/// based on a naming convention. For example, an access rights model named "DocumentsAccessRights"
+/// will be associated with permission claims like "Permissions.Documents.Create".
 /// </summary>
 public class PermissionService : IPermissionService
 {
@@ -71,7 +71,7 @@ public class PermissionService : IPermissionService
         var permissions = new List<string>();
         var permissionsType = typeof(Permissions);
         
-        // Get all nested types (permission classes like Products, Contacts, etc.)
+        // Get all nested types (permission classes like Documents, PicklistSets, etc.)
         var nestedTypes = permissionsType.GetNestedTypes(BindingFlags.Public | BindingFlags.Static);
         
         foreach (var nestedType in nestedTypes)
@@ -96,7 +96,7 @@ public class PermissionService : IPermissionService
     /// <summary>
     /// Retrieves the access rights for the specified access rights model type by checking each permission using reflection.
     /// The access rights model type must follow the naming convention where the type name ends with "AccessRights".
-    /// For instance, "ContactsAccessRights" maps to permission claims like "Permissions.Contacts.Create".
+    /// For instance, "DocumentsAccessRights" maps to permission claims like "Permissions.Documents.Create".
     /// </summary>
     /// <typeparam name="TAccessRights">The type of the access rights model. Must have a parameterless constructor.</typeparam>
     /// <returns>
@@ -110,14 +110,14 @@ public class PermissionService : IPermissionService
 
         var accessRightsResult = new TAccessRights();
 
-        // Ensure the type name ends with "AccessRights" (e.g., "ContactsAccessRights").
+        // Ensure the type name ends with "AccessRights" (e.g., "DocumentsAccessRights").
         var typeName = typeof(TAccessRights).Name;
         if (!typeName.EndsWith("AccessRights", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("TAccessRights type name must end with 'AccessRights'");
         }
 
-        // Extract the section name from the type name (e.g., "Contacts" from "ContactsAccessRights").
+        // Extract the section name from the type name (e.g., "Documents" from "DocumentsAccessRights").
         var sectionName = typeName.Substring(0, typeName.Length - "AccessRights".Length);
 
         // Get all public instance properties of TAccessRights.
@@ -131,7 +131,7 @@ public class PermissionService : IPermissionService
             // Only process boolean properties that are writable.
             if (prop.PropertyType == typeof(bool) && prop.CanWrite)
             {
-                // Construct the permission claim string, e.g., "Permissions.Contacts.Create".
+                // Construct the permission claim string, e.g., "Permissions.Documents.Create".
                 var permissionClaim = $"Permissions.{sectionName}.{prop.Name}";
                 // Start the permission check task for the given claim.
                 tasks[prop] = _authService.AuthorizeAsync(user, permissionClaim);

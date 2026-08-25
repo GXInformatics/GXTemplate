@@ -18,23 +18,25 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Security;
 [TestFixture]
 public class RequestAuthorizationRegistryTests
 {
+    private const int ExpectedRequestTypeCount = 22;
+
     private static Assembly ApplicationAssembly =>
         typeof(CleanArchitecture.Blazor.Application.DependencyInjection).Assembly;
 
     /// <summary>
-    /// The denominator is hard-coded on purpose. Its job is not to compute the count but to force a
+    /// The expected number of request types. Hard-coded on purpose. Its job is not to compute the count but to force a
     /// conscious update: adding or removing a request should make someone confirm the new number and
     /// the authorization decision that came with it, rather than the suite silently tracking a drift.
     /// If this fails, check the new request carries the right RequestAuthorizeAttribute, then update
     /// the number here.
     /// </summary>
     [Test]
-    public void TheApplicationDeclaresExactlyFortyRequestTypes()
+    public void TheApplicationDeclaresTheExpectedNumberOfRequestTypes()
     {
         var requests = RequestAuthorizationRegistry.FindRequestTypes(ApplicationAssembly);
 
-        requests.Should().HaveCount(40,
-            "the Mediator source-generated registry contained 40 request types when deny-by-default landed");
+        requests.Should().HaveCount(ExpectedRequestTypeCount,
+            "the Mediator source-generated registry contained this many request types when the count was last confirmed");
     }
 
     [Test]
@@ -91,7 +93,7 @@ public class RequestAuthorizationRegistryTests
 
     // ---- probes ----------------------------------------------------------------------------------
 
-    [RequestAuthorize(Policy = "Permissions.Products.View")]
+    [RequestAuthorize(Policy = "Permissions.Documents.View")]
     public sealed record MarkedProbe : IRequest<string>;
 
     public sealed record UnmarkedProbe : IRequest<string>;

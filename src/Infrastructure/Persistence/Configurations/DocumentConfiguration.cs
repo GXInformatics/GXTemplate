@@ -11,7 +11,6 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
     public void Configure(EntityTypeBuilder<Document> builder)
     {
         builder.Property(t => t.DocumentType).HasConversion<string>();
-        builder.Property(x => x.Content).HasMaxLength(4000);
         builder.Ignore(e => e.DomainEvents);
         builder.HasOne(x => x.CreatedBy)
             .WithMany()

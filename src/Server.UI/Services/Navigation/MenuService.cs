@@ -23,20 +23,8 @@ public class MenuService : IMenuService
                     {
                         new()
                         {
-                            Title = "Products",
-                            Href = "/pages/products",
-                            PageStatus = PageStatus.Completed
-                        },
-                        new()
-                        {
                             Title = "Documents",
                             Href = "/pages/documents",
-                            PageStatus = PageStatus.Completed
-                        },
-                        new()
-                        {
-                            Title = "Contacts",
-                            Href = "/pages/contacts",
                             PageStatus = PageStatus.Completed
                         }
                     }

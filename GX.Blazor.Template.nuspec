@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+    <metadata>
+        <id>GX.Blazor.Template</id>
+        <version>0.1.0-preview.1</version>
+        <title>GX Blazor Server Solution Template</title>
+        <authors>GX Informatics Limited</authors>
+        <description>
+            A Blazor Server solution template for .NET 10, laid out in Clean Architecture layers.
+            Ships multi-tenant ASP.NET Core Identity with permission claims, deny-by-default
+            authorization on every request, transactional audit trails, structured logging into the
+            application database, and Documents and PicklistSets as worked examples.
+        </description>
+        <summary>
+            Blazor Server solution template for .NET 10 in Clean Architecture layers, with
+            multi-tenant identity, deny-by-default authorization and transactional auditing.
+        </summary>
+        <releaseNotes>
+            0.1.0-preview.1
+            - First GX release, derived from CleanArchitectureWithBlazorServer.
+            - Deny-by-default request authorization with a startup assertion.
+            - Audit rows written in the same transaction as the change they describe.
+            - Structural per-principal cache scoping.
+            - Demo features (Products, Contacts, chatbot, document OCR) removed.
+        </releaseNotes>
+
+        <license type="expression">MIT</license>
+        <requireLicenseAcceptance>false</requireLicenseAcceptance>
+        <copyright>Copyright (c) 2019 Jason Taylor and contributors; portions copyright (c) GX Informatics Limited</copyright>
+        <tags>blazor blazor-server clean-architecture multi-tenant dotnet10 template csharp</tags>
+        <icon>icon.png</icon>
+
+        <packageTypes>
+            <packageType name="Template"/>
+        </packageTypes>
+    </metadata>
+
+    <files>
+        <file src=".template.config\icon.png"/>
+        <file src=".\**" target="content"
+              exclude=".template.config\**;*.exe;**\bin\**;**\obj\**;**\.vs\**;**\wwwroot\dist\**;**\.git\**;**\.github\**;**\LICENSE;**\README.md;docs\**;doc\**;"/>
+    </files>
+
+</package>

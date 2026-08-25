@@ -5,15 +5,12 @@
 @using CleanArchitecture.Blazor.Application.Features.Documents.Queries.PaginationQuery
 @using CleanArchitecture.Blazor.Application.Features.Documents.Specifications
 @using CleanArchitecture.Blazor.Domain.Common.Enums
-@using CleanArchitecture.Blazor.Server.UI.Hubs
 @using CleanArchitecture.Blazor.Server.UI.Pages.Documents.Components
 @using CleanArchitecture.Blazor.Application.Features.Documents.Caching
 @using CleanArchitecture.Blazor.Application.Features.Documents.Commands.AddEdit
 @using CleanArchitecture.Blazor.Application.Features.Documents.Commands.Delete
 
-@implements IDisposable
 @inject BlazorDownloadFileService _downloadFileService
-@inject HubClient _hubClient
 @inject IStringLocalizer<Documents> _localizer
 
 <PageTitle>@_title</PageTitle>
@@ -133,40 +130,6 @@
 				</div>
 			</CellTemplate>
 		</PropertyColumn>
-		<PropertyColumn Property="x => x.Status" Title="@_localizer[_currentDto.GetMemberDisplayName(x => x.Status)]">
-			<CellTemplate>
-				<div class="d-flex flex-column">
-					<div>
-						@switch (context.Item.Status)
-						{
-							case JobStatus.Queueing:
-								<MudChip Variant="Variant.Outlined" Size="Size.Small" Color="Color.Default" Disabled="true">
-									@context.Item.Status
-								</MudChip>
-								break;
-							case JobStatus.Doing:
-								<MudChip Icon="@Icons.Material.Outlined.DocumentScanner" Variant="Variant.Outlined" Size="Size.Small" Color="Color.Info">
-									@context.Item.Status
-								</MudChip>
-								break;
-							case JobStatus.Done:
-								<MudChip Icon="@Icons.Material.Filled.Done" Variant="Variant.Filled" Size="Size.Small" Color="Color.Success">
-									@context.Item.Status
-								</MudChip>
-								break;
-							default:
-								<MudChip Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary">
-									@context.Item.Status
-								</MudChip>
-								break;
-						}
-					</div>
-					<div class="mud-text-secondary">
-						<MudHighlighter Text="@context.Item.Content" HighlightedText="@_searchString" />
-					</div>
-				</div>
-			</CellTemplate>
-		</PropertyColumn>
 		<PropertyColumn Property="x => x.DocumentType" Title="@_localizer[_currentDto.GetMemberDisplayName(x => x.DocumentType)]">
 			<CellTemplate>
 				<div class="d-flex flex-column">
@@ -230,50 +193,7 @@
 		_title =$"{ApplicationSettings.AppName} - { _localizer[_currentDto.GetClassDescription()]}";
 		_accessRights = await PermissionService.GetAccessRightsAsync<DocumentsAccessRights>();
 
-		// Subscribe to hub events
-		_hubClient.JobCompletedEvent += OnJobCompleted;
-		_hubClient.JobStartedEvent += OnJobStarted;
-		await _hubClient.StartAsync();
-
 		Query = new DocumentsWithPaginationQuery { CurrentUser = UserProfile };
-	}
-
-	public void Dispose()
-	{
-		// Unsubscribe from hub events
-		_hubClient.JobCompletedEvent -= OnJobCompleted;
-		_hubClient.JobStartedEvent -= OnJobStarted;
-	}
-
-	#endregion
-
-	#region Hub Event Handlers
-
-	private void OnJobCompleted(object? sender, JobCompletedEventArgs e)
-	{
-		// Refresh grid data and display a notification based on job result.
-		InvokeAsync(async () =>
-		{
-			await _dataGrid.ReloadServerData();
-			if (e.Message.StartsWith("Error"))
-			{
-				Snackbar.Add(string.Format(_localizer["{0}"], e.Id), Severity.Error);
-			}
-			else
-			{
-				Snackbar.Add(string.Format(_localizer["{0}: {1} completed"], e.Id, e.Message), Severity.Success);
-			}
-		});
-	}
-
-	private void OnJobStarted(object? sender, JobStartedEventArgs e)
-	{
-		// Refresh grid data and notify job start.
-		InvokeAsync(async () =>
-		{
-			await _dataGrid.ReloadServerData();
-			Snackbar.Add(string.Format(_localizer["{0}: {1} job started"], e.Id, e.Message), Severity.Info);
-		});
 	}
 
 	#endregion

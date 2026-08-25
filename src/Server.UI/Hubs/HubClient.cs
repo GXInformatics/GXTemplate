@@ -21,10 +21,6 @@ public sealed class HubClient : IAsyncDisposable
 
         _hubConnection.On<string, string>(nameof(ISignalRHub.Disconnect), OnLogoutEventAsync);
 
-        _hubConnection.On<int, string>(nameof(ISignalRHub.Start), OnJobStartedEventAsync);
-
-        _hubConnection.On<int, string>(nameof(ISignalRHub.Completed), OnJobCompletedEventAsync);
-
         _hubConnection.On<string>(nameof(ISignalRHub.SendNotification), OnNotificationReceivedEventAsync);
 
         _hubConnection.On<string, string>(nameof(ISignalRHub.SendMessage),OnMessageReceivedEventAsync);
@@ -51,18 +47,6 @@ public sealed class HubClient : IAsyncDisposable
     private Task OnLogoutEventAsync(string connectionId, string userName)
     {
         LogoutEvent?.Invoke(this, new UserStateChangeEventArgs(connectionId, userName));
-        return Task.CompletedTask;
-    }
-
-    private Task OnJobStartedEventAsync(int id, string message)
-    {
-        JobStartedEvent?.Invoke(this, new JobStartedEventArgs(id, message));
-        return Task.CompletedTask;
-    }
-
-    private Task OnJobCompletedEventAsync(int id, string message)
-    {
-        JobCompletedEvent?.Invoke(this, new JobCompletedEventArgs(id, message));
         return Task.CompletedTask;
     }
 
@@ -105,8 +89,6 @@ public sealed class HubClient : IAsyncDisposable
     // Event handlers
     public event EventHandler<UserStateChangeEventArgs>? LoginEvent;
     public event EventHandler<UserStateChangeEventArgs>? LogoutEvent;
-    public event EventHandler<JobStartedEventArgs>? JobStartedEvent;
-    public event EventHandler<JobCompletedEventArgs>? JobCompletedEvent;
     public event EventHandler<NotificationReceivedEventArgs>? NotificationReceivedEvent;
     public event EventHandler<MessageReceivedEventArgs>? MessageReceivedEvent;
     public event EventHandler<PageComponentEventArgs>? PageComponentOpenedEvent;
@@ -171,26 +153,6 @@ public class UserStateChangeEventArgs : EventArgs
     public string UserName { get; set; }
 }
 
-public class JobStartedEventArgs : EventArgs
-{
-    public JobStartedEventArgs(int id,string message)
-    {
-        Message = message;
-        Id=id;
-    }
-    public string Message { get; }
-    public int Id { get; }
-}
-public class JobCompletedEventArgs : EventArgs
-{
-    public JobCompletedEventArgs(int id,string message)
-    {
-        Message = message;
-        Id = id;
-    }
-    public string Message { get; }
-    public int Id { get; }
-}
 public class NotificationReceivedEventArgs : EventArgs
 {
     public NotificationReceivedEventArgs(string message)

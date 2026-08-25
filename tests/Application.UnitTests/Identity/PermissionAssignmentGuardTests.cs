@@ -34,7 +34,7 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Identity;
 [TestFixture]
 public class PermissionAssignmentGuardTests
 {
-    private const string Granted = "Permissions.Products.View";
+    private const string Granted = "Permissions.Documents.View";
     private const string NotHeld = "Permissions.Users.Delete";
 
     private SqliteConnection _connection = null!;
@@ -309,12 +309,12 @@ public class PermissionAssignmentGuardTests
     [Test]
     public async Task ABulkGrantComputesTheActorExactlyOnce()
     {
-        var actor = await CreateUserAsync("actor", Array.Empty<string>(), new[] { Granted, "Permissions.Products.Edit", "Permissions.Products.Create" });
+        var actor = await CreateUserAsync("actor", Array.Empty<string>(), new[] { Granted, "Permissions.Documents.Edit", "Permissions.Documents.Create" });
         var target = await CreateUserAsync("target", Array.Empty<string>(), Array.Empty<string>());
         ActAs(actor);
         _countingFactory = null;
 
-        var models = new[] { Granted, "Permissions.Products.Edit", "Permissions.Products.Create" }
+        var models = new[] { Granted, "Permissions.Documents.Edit", "Permissions.Documents.Create" }
             .Select(p => UserModel(target.Id, p)).ToList();
         await CreateService(countPrincipalBuilds: true).AssignUserBulkAsync(models);
 

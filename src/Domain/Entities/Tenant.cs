@@ -2,7 +2,7 @@
 
 namespace CleanArchitecture.Blazor.Domain.Entities;
 
-public class Tenant : IEntity<string>
+public class Tenant : IEntity<string>, IAuditable
 {
     public string? Name { get; set; }
     public string? Description { get; set; }

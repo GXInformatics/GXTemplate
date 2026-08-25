@@ -2,6 +2,7 @@
 using System.Data;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using NpgsqlTypes;
@@ -88,7 +89,7 @@ public static class SerilogExtensions
                 WriteToNpgsql(serilogConfig, connectionString);
                 break;
             case DbProviderKeys.SqLite:
-                WriteToSqLite(serilogConfig, "\\BlazorDashboardDb.db");
+                WriteToSqLite(serilogConfig, connectionString);
                 break;
         }
     }
@@ -185,15 +186,28 @@ public static class SerilogExtensions
         ));
     }
 
-    private static void WriteToSqLite(LoggerConfiguration serilogConfig, string dbname)
+    /// <summary>
+    /// Mirrors the MSSQL and PostgreSQL sinks: the sink writes into the application's own database,
+    /// into the SystemLogs table that EF's migration creates, and does not create that table itself.
+    /// EF owns the schema; the sink is only a writer. The sink's column set was built for this
+    /// entity, so the two agree by construction rather than by accident.
+    /// </summary>
+    private static void WriteToSqLite(LoggerConfiguration serilogConfig, string? connectionString)
     {
-        var sqlPath = Environment.CurrentDirectory + dbname;
+        if (string.IsNullOrEmpty(connectionString)) return;
+
+        // The sink takes a file path, not a connection string. Reading it back through the builder
+        // keeps the log database and the application database the same file whatever form the
+        // configured connection string takes.
+        var sqlPath = new SqliteConnectionStringBuilder(connectionString).DataSource;
+        if (string.IsNullOrEmpty(sqlPath)) return;
+
         const string tableName = "SystemLogs";
         serilogConfig.WriteTo.Async(wt => wt.SQLite(
             sqlPath,
             tableName,
             LogEventLevel.Information
-        ).CreateLogger());
+        ));
     }
 
 

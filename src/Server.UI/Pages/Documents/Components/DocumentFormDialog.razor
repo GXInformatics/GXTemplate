@@ -34,19 +34,6 @@
                                   @bind-Value="Model.Description">
                     </MudTextField>
                 </MudItem>
-                <MudItem xs="12">
-                    <MudTextField Label="@L["Content"]"
-                                  Lines="8" ReadOnly
-                                  For="@(() => Model.Content)"
-                                  @bind-Value="Model.Content">
-                    </MudTextField>
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <MudTextField Label="@L["Job Status"]"
-                                  For="@(() => Model.Status)"
-                                  @bind-Value="Model.Status">
-                    </MudTextField>
-                </MudItem>
                 <MudItem xs="12" sm="6">
                     <MudCheckBox Label="@L["Is Public"]"
                                  For="@(() => Model.IsPublic)"

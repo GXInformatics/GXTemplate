@@ -324,6 +324,50 @@ public class TransactionalAuditTests
         row.auditType.Should().Be(nameof(AuditType.Create), "AuditType is stored as its string name");
     }
 
+    // ---- Tenant opt-in ----------------------------------------------------------------------------
+
+    [Test]
+    public async Task Tenant_IsAudited_AndItsAuditRowCommitsWithTheTenant()
+    {
+        // Tenant opted into IAuditable in Pass 7-2. It is the only audited entity that is not a
+        // BaseAuditableEntity and whose key is a client-generated string, so it exercises a different
+        // path through the key resolution than PicklistSet does.
+        await using var ctx = CreateContext();
+        var tenant = new Tenant { Name = "Contoso", Description = "audit test" };
+        ctx.Tenants.Add(tenant);
+        await ctx.SaveChangesAsync();
+
+        CommittedCount("SELECT COUNT(*) FROM Tenants WHERE Name = $n", ("$n", "Contoso")).Should().Be(1);
+        CommittedAuditRows().Should().Be(1, "the tenant's audit row committed with the tenant");
+
+        var row = CommittedAuditRow();
+        row.auditType.Should().Be(nameof(AuditType.Create));
+        row.primaryKey.Should().Be($"{{\"Id\":\"{tenant.Id}\"}}",
+            "the string key is recorded as written, not as a temporary sentinel");
+        row.changes.Should().Contain("\"Name\":{\"old\":null,\"new\":\"Contoso\"}");
+    }
+
+    [Test]
+    public async Task Tenant_AuditRowRollsBackWithTheTenantWhenTheAuditWriteFails()
+    {
+        var userContext = new Mock<IUserContextAccessor>();
+        userContext.SetupGet(x => x.Current).Returns(new UserContext("no-such-user", "ghost"));
+        var dateTime = new Mock<IDateTime>();
+        dateTime.SetupGet(x => x.Now).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
+
+        await using var ctx = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(_connectionString)
+            .AddInterceptors(new AuditableEntityInterceptor(userContext.Object, dateTime.Object))
+            .Options);
+        ctx.Tenants.Add(new Tenant { Name = "doomed-tenant" });
+
+        var act = async () => await ctx.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+        CommittedCount("SELECT COUNT(*) FROM Tenants WHERE Name = $n", ("$n", "doomed-tenant")).Should().Be(0);
+        CommittedAuditRows().Should().Be(0);
+    }
+
     // ---- no transaction hijack --------------------------------------------------------------------
 
     [Test]

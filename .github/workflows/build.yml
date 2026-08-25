@@ -1,0 +1,54 @@
+# The one CI workflow: restore, build, run every test project.
+#
+# The integration tests need a real SQL Server, so the job runs one as a service container and
+# points the test settings at it through DatabaseSettings__ConnectionString. Without it those
+# tests fail at OneTimeSetUp rather than being skipped, which would look like a broken build.
+#
+# NOTE: GitHub Actions is currently disabled for this repository. This workflow is the definition
+# to run once Actions is re-enabled; until then it is inert.
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "Your_password123"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P Your_password123 -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DatabaseSettings__DBProvider: mssql
+      DatabaseSettings__ConnectionString: "Server=localhost,1433;Database=BlazorDashboard.Test;User Id=sa;Password=Your_password123;TrustServerCertificate=True;MultipleActiveResultSets=true;"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore CleanArchitecture.Blazor.slnx
+
+      - name: Build
+        run: dotnet build CleanArchitecture.Blazor.slnx --configuration Debug --no-restore
+
+      - name: Test
+        run: dotnet test CleanArchitecture.Blazor.slnx --configuration Debug --no-build --verbosity normal

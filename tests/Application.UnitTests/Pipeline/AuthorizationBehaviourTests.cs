@@ -26,8 +26,8 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Pipeline;
 public class AuthorizationBehaviourTests
 {
     private const string UserId = "user-1";
-    private const string GrantedPolicy = "Permissions.Products.View";
-    private const string OtherPolicy = "Permissions.Products.Edit";
+    private const string GrantedPolicy = "Permissions.Documents.View";
+    private const string OtherPolicy = "Permissions.Documents.Edit";
 
     // ---- request doubles -------------------------------------------------------------------------
     // Declared in the test assembly, so they are invisible to the startup assertion over Application.
@@ -298,7 +298,7 @@ public class AuthorizationBehaviourTests
         CleanArchitecture.Blazor.Application.DependencyInjection.AddApplication(services);
 
         // Any request type will do; each gets the full applicable set, in PipelineBehaviors order.
-        var probe = typeof(CleanArchitecture.Blazor.Application.Features.Products.Queries.Pagination.ProductsWithPaginationQuery);
+        var probe = typeof(CleanArchitecture.Blazor.Application.Features.Documents.Queries.PaginationQuery.DocumentsWithPaginationQuery);
 
         return services
             .Where(d => d.ServiceType.IsGenericType &&
