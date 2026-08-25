@@ -40,32 +40,7 @@ public class MenuService : IMenuService
                             PageStatus = PageStatus.Completed
                         }
                     }
-                },
-                 new()
-                {
-                    Title = "Chatbot",
-                    Roles = new[] { Roles.Admin, Roles.Users },
-                    Icon = Icons.Material.Filled.ChatBubble,
-                    Href ="/ai/chatbot",
-                    PageStatus = PageStatus.Completed
-                },
-                new()
-                {
-                    Title = "Analytics",
-                    Roles = new[] { Roles.Admin, Roles.Users },
-                    Icon = Icons.Material.Filled.Analytics,
-                    Href = "/analytics",
-                    PageStatus = PageStatus.ComingSoon
-                },
-                new()
-                {
-                    Title = "Banking",
-                    Roles = new[] { Roles.Admin, Roles.Users },
-                    Icon = Icons.Material.Filled.Money,
-                    Href = "/banking",
-                    PageStatus = PageStatus.ComingSoon
                 }
-               
             }
         },
         new MenuSectionModel

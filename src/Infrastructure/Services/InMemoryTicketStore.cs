@@ -22,11 +22,12 @@ namespace CleanArchitecture.Blazor.Infrastructure.Services
             Duration = TimeSpan.FromDays(7),
 
             // —— Resilience: fail-safe & timeouts ——
-            // Keep fail-safe short: if dependencies are flaky, we can serve a recent value briefly,
-            // but avoid long windows for security-sensitive data.
-            IsFailSafeEnabled = true,
-            FailSafeMaxDuration = TimeSpan.FromMinutes(20),
-            FailSafeThrottleDuration = TimeSpan.FromSeconds(15),
+            // Fail-safe is OFF for authentication tickets. It exists to serve a logically expired
+            // value rather than fail, which is the wrong trade here: the entry's Duration IS the
+            // session lifetime, so serving past it keeps an expired session usable - previously for
+            // up to FailSafeMaxDuration. RetrieveAsync uses GetOrDefaultAsync, which with fail-safe
+            // on can return exactly such a stale ticket.
+            IsFailSafeEnabled = false,
 
             // Factory timeouts mostly affect GetOrSet (not used here), but are kept for consistency.
             FactorySoftTimeout = TimeSpan.FromMilliseconds(250),
@@ -116,8 +117,8 @@ namespace CleanArchitecture.Blazor.Infrastructure.Services
         {
             if (string.IsNullOrWhiteSpace(key)) return null;
 
-            // No factory: return null when missing.
-            // With fail-safe enabled, a recent prior value may be served on transient failures.
+            // No factory: return null when missing. Fail-safe is disabled for this cache, so an
+            // entry past its Duration is gone rather than served as a still-valid session.
             return await Cache.GetOrDefaultAsync<AuthenticationTicket>(key).ConfigureAwait(false);
         }
 
@@ -153,10 +154,9 @@ namespace CleanArchitecture.Blazor.Infrastructure.Services
             {
                 Duration = ttl,
 
-                // Keep resilience but short for auth data.
-                IsFailSafeEnabled = true,
-                FailSafeMaxDuration = TimeSpan.FromMinutes(20),
-                FailSafeThrottleDuration = TimeSpan.FromSeconds(15),
+                // Off, for the same reason as DefaultEntryOptions: Duration here is the ticket's own
+                // remaining lifetime, and nothing should outlive it.
+                IsFailSafeEnabled = false,
 
                 // We do not typically need eager refresh for tickets; renew happens via app logic.
                 // EagerRefreshThreshold = ...
