@@ -14,11 +14,6 @@ public interface IIdentitySettings
     int RequiredLength { get; }
 
     /// <summary>
-    ///     Gets or sets a value indicating what the maximum required length of a password should be.
-    /// </summary>
-    int MaxLength { get; }
-
-    /// <summary>
     ///     Gets or sets a value indicating whether the password should require a non-alphanumeric(not: 0-9, A-Z) character.
     /// </summary>
     bool RequireNonAlphanumeric { get; }

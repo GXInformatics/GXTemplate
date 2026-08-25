@@ -25,10 +25,12 @@ namespace CleanArchitecture.Blazor.Application.Common.Security;
 public static class AdministratorPermissionRegistry
 {
     private const string ExcludedEmailTemplates =
-        "The email-template management page does not exist in this template - only four orphaned " +
-        "localisation .resx files under Resources/Pages/SystemManagement survive it. Granting a " +
-        "permission for a page nobody can reach advertises a capability the application does not " +
-        "have. Grant these if and when the page is built.";
+        "There is no email-template management page in this template - no route, no component, no " +
+        "request type. Granting a permission for a feature nobody can reach advertises a capability " +
+        "the application does not have. The constants stay so the permission names are reserved and " +
+        "the intent is visible; grant them if and when the page is built. (The .cshtml templates " +
+        "under Resources/EmailTemplates are a different thing entirely - they are the bodies of the " +
+        "welcome, activation and recovery emails, and they are live.)";
 
     /// <summary>
     /// Every permission granted to the administrator role at provisioning time.

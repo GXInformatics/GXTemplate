@@ -39,7 +39,10 @@ public static class SerilogExtensions
                 .Enrich.FromLogContext()
                 .Enrich.WithUtcTime()
                 .Enrich.WithUserInfo()
-                .WriteTo.Async(wt => wt.File("./log/log-.txt", rollingInterval: RollingInterval.Day))
+                // The file sink persists; the bootstrap banner must not. See BootstrapSecretProperty.
+                .WriteTo.Logger(lc => lc
+                    .Filter.ByExcluding(CarriesBootstrapSecret)
+                    .WriteTo.Async(wt => wt.File("./log/log-.txt", rollingInterval: RollingInterval.Day)))
                 .WriteTo.Async(wt =>
                     wt.Console(
                         outputTemplate:
@@ -48,10 +51,33 @@ public static class SerilogExtensions
         );
     }
 
+    /// <summary>
+    /// Marks a log event as carrying a secret that must never leave the console - today, the one-off
+    /// administrator password written at bootstrap.
+    /// <para>
+    /// The marker is a property rather than a substring of the message on purpose: matching on
+    /// wording would silently stop filtering the first time someone rephrases the banner, and a
+    /// filter that fails open is worse than none. The producing side sets it via
+    /// <c>ILogger.BeginScope</c>, which Serilog surfaces as an event property because
+    /// <c>Enrich.FromLogContext()</c> is configured above.
+    /// </para>
+    /// </summary>
+    public const string BootstrapSecretProperty = "BootstrapSecret";
+
+    private static bool CarriesBootstrapSecret(LogEvent logEvent) =>
+        logEvent.Properties.ContainsKey(BootstrapSecretProperty);
+
     private static void ApplyConfigPreferences(this LoggerConfiguration serilogConfig, IConfiguration configuration)
     {
-        WriteToSeq(serilogConfig, configuration);
-        WriteToDatabase(serilogConfig, configuration);
+        // Seq ships events to a remote server and the database sink writes them to a table the
+        // SystemLogs page reads back. Both outlive the console, so both drop the banner. The console
+        // sink above is deliberately the only one that keeps it.
+        serilogConfig.WriteTo.Logger(lc =>
+        {
+            lc.Filter.ByExcluding(CarriesBootstrapSecret);
+            WriteToSeq(lc, configuration);
+            WriteToDatabase(lc, configuration);
+        });
     }
     private static void WriteToSeq(LoggerConfiguration serilogConfig, IConfiguration configuration)
     {

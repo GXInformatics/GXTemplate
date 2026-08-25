@@ -2,6 +2,7 @@
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Security;
 using CleanArchitecture.Blazor.Domain.Identity;
+using CleanArchitecture.Blazor.Infrastructure.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence;
@@ -209,6 +210,15 @@ public class ApplicationDbContextInitializer
         // The only time this password is ever legible. It is not written to configuration, not to a
         // file, and not returned anywhere - the Identity password hash is the only copy that
         // survives this method.
+        // The scope marks this event so the file, database and Seq sinks drop it - the console is
+        // the only place the password is ever written. Serilog surfaces scope state as event
+        // properties because Enrich.FromLogContext() is configured; SerilogExtensions.CarriesBootstrapSecret
+        // is the matching half.
+        using var secretScope = _logger.BeginScope(new Dictionary<string, object>
+        {
+            [SerilogExtensions.BootstrapSecretProperty] = true
+        });
+
         // The :l format matters - without it Serilog renders string properties in quotes, which
         // would make the operator copy a password with quotation marks around it.
         _logger.LogWarning(

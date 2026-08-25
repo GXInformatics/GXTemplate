@@ -13,6 +13,13 @@
         <UserSecretsId>8118d19e-a6db-4446-bdb6-fa62b17f843d</UserSecretsId>
         <LangVersion>default</LangVersion>
     </PropertyGroup>
+
+    <ItemGroup>
+        <!-- So the unit tests can reach internal helpers such as
+             IdentityComponentsEndpointRouteBuilderExtensions.ResolveLocalReturnUrl without widening
+             the assembly's public surface just to make a rule testable. -->
+        <InternalsVisibleTo Include="CleanArchitecture.Blazor.Application.UnitTests" />
+    </ItemGroup>
  
 
     <ItemGroup>

@@ -67,6 +67,46 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
     }
 
     /// <summary>
+    /// Returns <paramref name="candidate"/> when it is a local URL, and <paramref name="fallback"/>
+    /// otherwise.
+    /// <para>
+    /// Mirrors the framework's own local-URL rule (<c>UrlHelperBase.IsLocalUrl</c>): a path starting
+    /// with a single <c>/</c>, or with <c>~/</c>, is local; everything else - absolute URLs,
+    /// protocol-relative <c>//host</c>, and the backslash variant <c>/\host</c> that some browsers
+    /// normalise into one - is not.
+    /// </para>
+    /// <para>
+    /// Written as a testable static rather than left to <c>TypedResults.LocalRedirect</c>, which
+    /// THROWS on a non-local value. Throwing is the wrong response here: by the time this is called
+    /// the user has already been signed out, so failing the request leaves them with a 500 instead
+    /// of the login page while their session is genuinely gone.
+    /// </para>
+    /// </summary>
+    public static string ResolveLocalReturnUrl(string? candidate, string fallback)
+    {
+        return IsLocalUrl(candidate) ? candidate! : fallback;
+
+        static bool IsLocalUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+
+            // "/path" is local; "//host" and "/\host" are not.
+            if (url[0] == '/')
+            {
+                return url.Length == 1 || (url[1] != '/' && url[1] != '\\');
+            }
+
+            // "~/path" is local; "~" alone or "~\" is not.
+            if (url[0] == '~')
+            {
+                return url.Length > 1 && url[1] == '/';
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Validates that the request originates from the same domain to prevent CSRF attacks.
     /// </summary>
     /// <param name="context">The HTTP context of the request.</param>
@@ -481,12 +521,17 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
         accountGroup.MapPost("/logout", async (
             ClaimsPrincipal user,
             SignInManager<ApplicationUser> signInManager,
-            [FromForm] string returnUrl) =>
+            [FromForm] string? returnUrl = null) =>
         {
             // Sign out the current user and clear authentication cookies
             await signInManager.SignOutAsync().ConfigureAwait(false);
             logger.LogInformation("{UserName} has logged out.", user.Identity?.Name);
-            return TypedResults.LocalRedirect($"{returnUrl}");
+
+            // The sign-out has already happened by this point, so nothing about the return URL is a
+            // reason to fail the request. A missing one falls back to the login page; a non-local
+            // one is DISCARDED rather than followed, because honouring it would turn an
+            // unauthenticated-by-then endpoint into an open redirect.
+            return TypedResults.LocalRedirect(ResolveLocalReturnUrl(returnUrl, RedirectUrls.Login));
         }).RequireAuthorization().DisableAntiforgery();
 
 
