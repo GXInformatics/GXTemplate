@@ -186,20 +186,6 @@
             {
                 //update user
                 var existingRoles = await _userManager.GetRolesAsync(existingUser);
-                var dbContext = await _dbContextFactory.CreateAsync();
-                var tenantUsers = await dbContext.TenantUsers.Where(x => x.UserId == Model.Id).ToListAsync();
-                if (tenantUsers.Any())
-                {
-                    dbContext.TenantUsers.RemoveRange(tenantUsers);
-                }
-                if (Model.Tenants.Any())
-                {
-                    foreach (var tenant in Model.Tenants)
-                    {
-                        dbContext.TenantUsers.Add(new TenantUser { TenantId = tenant.Id, UserId = Model.Id });
-                    }
-                    await dbContext.SaveChangesAsync(default);
-                }
                 existingUser.Email = Model.Email;
                 existingUser.PhoneNumber = Model.PhoneNumber;
                 existingUser.ProfilePictureDataUrl = Model.ProfilePictureDataUrl;
@@ -216,34 +202,55 @@
                 existingUser.TimeZoneId = Model.TimeZoneId;
                 existingUser.LastModifiedAt = DateTime.UtcNow;
                 var updateResult = await _userManager.UpdateAsync(existingUser);
-                if (updateResult.Succeeded)
+                if (!updateResult.Succeeded)
                 {
-                    // Role membership is rewritten only once the profile update has succeeded. Doing
-                    // it first - as this method used to - left the user with no roles at all whenever
-                    // the update failed, with nothing to put them back.
-                    if (existingRoles.Any())
-                    {
-                        await _userManager.RemoveFromRolesAsync(existingUser, existingRoles);
-                    }
-                    if (Model.AssignedRoles is { Length: > 0 })
-                    {
-                        await _userManager.AddToRolesAsync(existingUser, Model.AssignedRoles);
-                    }
+                    Snackbar.Add(string.Join(",", updateResult.Errors.Select(e => e.Description)), Severity.Error);
+                    return;
+                }
 
-                    // Role membership was rewritten above (all roles removed, then the selected ones
-                    // re-added). If the effective set changed, bump the security stamp so any session the
-                    // user already has fails its next revalidation instead of carrying stale role claims
-                    // for the remaining cookie lifetime - see IdentityRevalidatingAuthenticationStateProvider.
-                    var assignedRoles = Model.AssignedRoles ?? Array.Empty<string>();
-                    if (!existingRoles.OrderBy(r => r, StringComparer.Ordinal)
-                            .SequenceEqual(assignedRoles.OrderBy(r => r, StringComparer.Ordinal), StringComparer.Ordinal))
+                // Tenant membership is rewritten only once the profile update has succeeded, for the
+                // same reason as the role rewrite below: running it first left the user's tenant rows
+                // already replaced whenever the update failed, with nothing to put them back.
+                var dbContext = await _dbContextFactory.CreateAsync();
+                var tenantUsers = await dbContext.TenantUsers.Where(x => x.UserId == Model.Id).ToListAsync();
+                if (tenantUsers.Any())
+                {
+                    dbContext.TenantUsers.RemoveRange(tenantUsers);
+                }
+                if (Model.Tenants.Any())
+                {
+                    foreach (var tenant in Model.Tenants)
                     {
-                        await _userManager.UpdateSecurityStampAsync(existingUser);
-                        // The stamp bump only forces re-authentication. UserContextLoader caches the
-                        // ambient UserContext - Roles included - for an hour, so without this the old
-                        // role set would stay ambient for the rest of that hour.
-                        _userContextLoader.ClearUserContextCache(existingUser.Id);
+                        dbContext.TenantUsers.Add(new TenantUser { TenantId = tenant.Id, UserId = Model.Id });
                     }
+                    await dbContext.SaveChangesAsync(default);
+                }
+
+                // Role membership is rewritten only once the profile update has succeeded. Doing
+                // it first - as this method used to - left the user with no roles at all whenever
+                // the update failed, with nothing to put them back.
+                if (existingRoles.Any())
+                {
+                    await _userManager.RemoveFromRolesAsync(existingUser, existingRoles);
+                }
+                if (Model.AssignedRoles is { Length: > 0 })
+                {
+                    await _userManager.AddToRolesAsync(existingUser, Model.AssignedRoles);
+                }
+
+                // Role membership was rewritten above (all roles removed, then the selected ones
+                // re-added). If the effective set changed, bump the security stamp so any session the
+                // user already has fails its next revalidation instead of carrying stale role claims
+                // for the remaining cookie lifetime - see IdentityRevalidatingAuthenticationStateProvider.
+                var assignedRoles = Model.AssignedRoles ?? Array.Empty<string>();
+                if (!existingRoles.OrderBy(r => r, StringComparer.Ordinal)
+                        .SequenceEqual(assignedRoles.OrderBy(r => r, StringComparer.Ordinal), StringComparer.Ordinal))
+                {
+                    await _userManager.UpdateSecurityStampAsync(existingUser);
+                    // The stamp bump only forces re-authentication. UserContextLoader caches the
+                    // ambient UserContext - Roles included - for an hour, so without this the old
+                    // role set would stay ambient for the rest of that hour.
+                    _userContextLoader.ClearUserContextCache(existingUser.Id);
                 }
             }
             else

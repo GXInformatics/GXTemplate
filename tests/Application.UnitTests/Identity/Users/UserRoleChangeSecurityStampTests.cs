@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
+using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
@@ -35,6 +36,9 @@ public class UserRoleChangeSecurityStampTests
 {
     private SqliteConnection _connection = null!;
     private ServiceProvider _provider = null!;
+
+    private const string TenantA = "tenant-a";
+    private const string TenantB = "tenant-b";
 
     [SetUp]
     public async Task SetUp()
@@ -67,6 +71,10 @@ public class UserRoleChangeSecurityStampTests
         {
             await roleManager.CreateAsync(new ApplicationRole { Name = role });
         }
+
+        db.Tenants.Add(new Tenant { Id = TenantA, Name = "Tenant A" });
+        db.Tenants.Add(new Tenant { Id = TenantB, Name = "Tenant B" });
+        await db.SaveChangesAsync();
     }
 
     [TearDown]
@@ -100,40 +108,91 @@ public class UserRoleChangeSecurityStampTests
                       select r.Name!).ToArrayAsync();
     }
 
+    /// <summary>Reads tenant membership straight from the database through a scope of its own.</summary>
+    private async Task<string[]> StoredTenantIdsAsync(string userId)
+    {
+        using var scope = _provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        return await db.TenantUsers.Where(x => x.UserId == userId).Select(x => x.TenantId!).ToArrayAsync();
+    }
+
+    private async Task AssignTenantsAsync(string userId, params string[] tenantIds)
+    {
+        using var scope = _provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        foreach (var tenantId in tenantIds)
+        {
+            db.TenantUsers.Add(new TenantUser { TenantId = tenantId, UserId = userId });
+        }
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Replays the tenant-membership rewrite the dialog performs: drop every current row, add the
+    /// selected ones. The save sits inside the non-empty check exactly as the component has it.
+    /// </summary>
+    private async Task RewriteTenantsAsync(string userId, string[] assignedTenantIds)
+    {
+        using var scope = _provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var tenantUsers = await db.TenantUsers.Where(x => x.UserId == userId).ToListAsync();
+        if (tenantUsers.Any())
+        {
+            db.TenantUsers.RemoveRange(tenantUsers);
+        }
+        if (assignedTenantIds.Length > 0)
+        {
+            foreach (var tenantId in assignedTenantIds)
+            {
+                db.TenantUsers.Add(new TenantUser { TenantId = tenantId, UserId = userId });
+            }
+            await db.SaveChangesAsync();
+        }
+    }
+
     /// <summary>
     /// Replays UserFormDialog.SubmitAsync's edit path: apply the profile changes, and only once that
     /// update has succeeded rewrite role membership, bump the stamp if the effective set changed, and
     /// drop the user's cached UserContext.
     /// </summary>
-    private static async Task<IdentityResult> ApplyEditAsync(
+    private async Task<IdentityResult> ApplyEditAsync(
         UserManager<ApplicationUser> userManager,
         IUserContextLoader userContextLoader,
         ApplicationUser existingUser,
         string[] assignedRoles,
-        Action<ApplicationUser>? applyProfileChanges = null)
+        Action<ApplicationUser>? applyProfileChanges = null,
+        string[]? assignedTenantIds = null)
     {
         var existingRoles = await userManager.GetRolesAsync(existingUser);
 
         applyProfileChanges?.Invoke(existingUser);
         existingUser.LastModifiedAt = DateTime.UtcNow;
         var updateResult = await userManager.UpdateAsync(existingUser);
-        if (updateResult.Succeeded)
+        if (!updateResult.Succeeded)
         {
-            if (existingRoles.Any())
-            {
-                await userManager.RemoveFromRolesAsync(existingUser, existingRoles);
-            }
-            if (assignedRoles.Length > 0)
-            {
-                await userManager.AddToRolesAsync(existingUser, assignedRoles);
-            }
+            // The component surfaces the errors and returns without closing the dialog.
+            return updateResult;
+        }
 
-            if (!existingRoles.OrderBy(r => r, StringComparer.Ordinal)
-                    .SequenceEqual(assignedRoles.OrderBy(r => r, StringComparer.Ordinal), StringComparer.Ordinal))
-            {
-                await userManager.UpdateSecurityStampAsync(existingUser);
-                userContextLoader.ClearUserContextCache(existingUser.Id);
-            }
+        if (assignedTenantIds is not null)
+        {
+            await RewriteTenantsAsync(existingUser.Id, assignedTenantIds);
+        }
+
+        if (existingRoles.Any())
+        {
+            await userManager.RemoveFromRolesAsync(existingUser, existingRoles);
+        }
+        if (assignedRoles.Length > 0)
+        {
+            await userManager.AddToRolesAsync(existingUser, assignedRoles);
+        }
+
+        if (!existingRoles.OrderBy(r => r, StringComparer.Ordinal)
+                .SequenceEqual(assignedRoles.OrderBy(r => r, StringComparer.Ordinal), StringComparer.Ordinal))
+        {
+            await userManager.UpdateSecurityStampAsync(existingUser);
+            userContextLoader.ClearUserContextCache(existingUser.Id);
         }
         return updateResult;
     }
@@ -143,14 +202,19 @@ public class UserRoleChangeSecurityStampTests
     /// so a failed update left the user with no roles and nothing to restore them. Kept only so the
     /// regression it caused is demonstrated rather than asserted.
     /// </summary>
-    private static async Task<IdentityResult> ApplyEditWithPreFixOrderAsync(
+    private async Task<IdentityResult> ApplyEditWithPreFixOrderAsync(
         UserManager<ApplicationUser> userManager, ApplicationUser existingUser, string[] assignedRoles,
-        Action<ApplicationUser>? applyProfileChanges = null)
+        Action<ApplicationUser>? applyProfileChanges = null,
+        string[]? assignedTenantIds = null)
     {
         var existingRoles = await userManager.GetRolesAsync(existingUser);
         if (existingRoles.Any())
         {
             await userManager.RemoveFromRolesAsync(existingUser, existingRoles);
+        }
+        if (assignedTenantIds is not null)
+        {
+            await RewriteTenantsAsync(existingUser.Id, assignedTenantIds);
         }
 
         applyProfileChanges?.Invoke(existingUser);
@@ -338,6 +402,53 @@ public class UserRoleChangeSecurityStampTests
         (await userManager.GetSecurityStampAsync(user)).Should().Be(before,
             "nothing changed, so no session should be invalidated");
         loader.ClearedUserIds.Should().BeEmpty();
+    }
+
+    // ---- ordering of the tenant rewrite ---------------------------------------------------------
+
+    [Test]
+    public async Task WhenTheProfileUpdateFails_TenantMembershipIsUntouched()
+    {
+        var (userManager, user) = await CreateUserAsync("Basic");
+        await AssignTenantsAsync(user.Id, TenantA);
+        var takenName = await SeedAConflictingUserNameAsync();
+
+        var result = await ApplyEditAsync(userManager, new RecordingUserContextLoader(), user, new[] { "Basic" },
+            u => u.UserName = takenName, new[] { TenantB });
+
+        result.Succeeded.Should().BeFalse("the user name collides with another account");
+        (await StoredTenantIdsAsync(user.Id)).Should().BeEquivalentTo(new[] { TenantA },
+            "a failed profile update must not cost the user their tenant memberships");
+    }
+
+    [Test]
+    public async Task WhenTheProfileUpdateFails_TheOldOrderReplacedTheTenantMemberships()
+    {
+        // The same scenario against the pre-fix sequence, so the regression is shown, not asserted.
+        var (userManager, user) = await CreateUserAsync("Basic");
+        await AssignTenantsAsync(user.Id, TenantA);
+        var takenName = await SeedAConflictingUserNameAsync();
+
+        var result = await ApplyEditWithPreFixOrderAsync(userManager, user, new[] { "Basic" },
+            u => u.UserName = takenName, new[] { TenantB });
+
+        result.Succeeded.Should().BeFalse();
+        (await StoredTenantIdsAsync(user.Id)).Should().BeEquivalentTo(new[] { TenantB },
+            "the rewrite had already committed by the time the update was rejected");
+    }
+
+    [Test]
+    public async Task WhenTheProfileUpdateSucceeds_TenantMembershipIsRewritten()
+    {
+        var (userManager, user) = await CreateUserAsync("Basic");
+        await AssignTenantsAsync(user.Id, TenantA);
+
+        var result = await ApplyEditAsync(userManager, new RecordingUserContextLoader(), user, new[] { "Basic" },
+            assignedTenantIds: new[] { TenantB });
+
+        result.Succeeded.Should().BeTrue();
+        (await StoredTenantIdsAsync(user.Id)).Should().BeEquivalentTo(new[] { TenantB },
+            "the reorder must not stop the rewrite happening on the success path");
     }
 
     // ---- helpers --------------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -91,6 +92,77 @@ public class DatabaseSettingsValidationTests
         results.Select(r => r.ErrorMessage).Should().BeEquivalentTo(
             "DatabaseSettings.DBProvider is not configured",
             "DatabaseSettings.ConnectionString is not configured");
+    }
+
+    // ---- supported-provider check ---------------------------------------------------------------
+
+    [Test]
+    public void AnUnsupportedProvider_FailsValidationNamingTheValueAndTheSupportedSet()
+    {
+        // Before this check a non-empty but unusable value passed validation and only blew up later,
+        // in UseDatabase's default arm, as "DB Provider mysql is not supported."
+        var options = BindOptions(new Dictionary<string, string?>
+        {
+            ["DatabaseSettings:DBProvider"] = "mysql",
+            ["DatabaseSettings:ConnectionString"] = "Server=localhost;Database=app"
+        });
+
+        var act = () => options.Value;
+
+        var failure = act.Should().Throw<OptionsValidationException>().Which.Failures.Single();
+        failure.Should().Contain("'mysql' is not supported");
+        failure.Should().Contain(DbProviderKeys.SqLite)
+            .And.Contain(DbProviderKeys.SqlServer)
+            .And.Contain(DbProviderKeys.Npgsql);
+    }
+
+    [TestCase(DbProviderKeys.SqLite)]
+    [TestCase(DbProviderKeys.SqlServer)]
+    [TestCase(DbProviderKeys.Npgsql)]
+    public void EverySupportedProviderKey_Validates(string provider)
+    {
+        var options = BindOptions(new Dictionary<string, string?>
+        {
+            ["DatabaseSettings:DBProvider"] = provider,
+            ["DatabaseSettings:ConnectionString"] = "Data Source=app.db"
+        });
+
+        options.Value.DBProvider.Should().Be(provider);
+    }
+
+    [Test]
+    public void TheProviderCheckIsCaseInsensitive_MatchingUseDatabase()
+    {
+        // UseDatabase switches on DBProvider.ToLowerInvariant(), so "SQLite" is usable and must not
+        // be rejected here.
+        var options = BindOptions(new Dictionary<string, string?>
+        {
+            ["DatabaseSettings:DBProvider"] = "SQLite",
+            ["DatabaseSettings:ConnectionString"] = "Data Source=app.db"
+        });
+
+        options.Value.DBProvider.Should().Be("SQLite");
+    }
+
+    [Test]
+    public void TheSupportedSetIsReadFromDbProviderKeys_NotAHandWrittenList()
+    {
+        // Guards the reflection: if a fourth key is added to DbProviderKeys the validator picks it up
+        // automatically, and this test says so rather than the set silently drifting.
+        var settings = new DatabaseSettings { ConnectionString = "x", DBProvider = "definitely-not-a-provider" };
+
+        var message = settings.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(settings))
+            .Single().ErrorMessage!;
+
+        var declared = typeof(DbProviderKeys)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!);
+
+        foreach (var key in declared)
+        {
+            message.Should().Contain(key);
+        }
     }
 }
 #nullable restore
