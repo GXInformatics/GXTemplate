@@ -100,6 +100,7 @@ public class ApplicationDbContextInitializer
     {
         var adminRoleName = Roles.Admin;
         var userRoleName = Roles.Basic;
+        var usersRoleName = Roles.Users;
 
         if (await _roleManager.RoleExistsAsync(adminRoleName)) return;
 
@@ -114,9 +115,17 @@ public class ApplicationDbContextInitializer
             Description = "Basic Group",
             CreatedAt = DateTime.UtcNow,
         };
+        // Roles.Users gates navigation entries in MenuService, so the role has to exist for those
+        // entries to be reachable by anyone other than an administrator.
+        var usersRole = new ApplicationRole(usersRoleName)
+        {
+            Description = "Users Group",
+            CreatedAt = DateTime.UtcNow,
+        };
 
         await _roleManager.CreateAsync(administratorRole);
         await _roleManager.CreateAsync(userRole);
+        await _roleManager.CreateAsync(usersRole);
 
         var permissions = GetAllPermissions();
 
@@ -128,6 +137,7 @@ public class ApplicationDbContextInitializer
             if (permission.StartsWith("Permissions.Products"))
             {
                 await _roleManager.AddClaimAsync(userRole, claim);
+                await _roleManager.AddClaimAsync(usersRole, claim);
             }
         }
     }

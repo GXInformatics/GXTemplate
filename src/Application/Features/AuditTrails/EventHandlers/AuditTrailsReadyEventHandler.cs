@@ -23,23 +23,20 @@ public class AuditTrailsReadyEventHandler : INotificationHandler<AuditTrailsRead
         if (notification.AuditTrails.Count == 0)
             return;
 
-        // Fire and forget - schedule work on background thread pool
-        _ = Task.Run(async () =>
+        // This handler is already invoked off the request path: ChannelBasedNoWaitPublisher queues
+        // it and drains the queue on its own background task. Awaiting the write here therefore
+        // costs the caller nothing, and it is what makes completing that channel mean the rows are
+        // persisted - an extra Task.Run would return on scheduling and drop the rows at shutdown.
+        try
         {
-            try
-            {
-                // Create new scope to avoid disposed service provider issues
-                await using var db = await _dbContextFactory.CreateAsync(CancellationToken.None);
-                await db.AuditTrails.AddRangeAsync(notification.AuditTrails, CancellationToken.None);
-                await db.SaveChangesAsync(CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to persist {Count} audit trails asynchronously", notification.AuditTrails.Count);
-            }
-        }, CancellationToken.None);
-
-        // Return immediately without waiting
-        await ValueTask.CompletedTask;
+            // Create new scope to avoid disposed service provider issues
+            await using var db = await _dbContextFactory.CreateAsync(CancellationToken.None);
+            await db.AuditTrails.AddRangeAsync(notification.AuditTrails, CancellationToken.None);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to persist {Count} audit trails asynchronously", notification.AuditTrails.Count);
+        }
     }
 }

@@ -17,8 +17,12 @@ public class SystemLogsWithPaginationQuery : SystemLogAdvancedFilter, ICacheable
 
     public override string ToString()
     {
+        // The specification derives its date window from CurrentUser.LocalTimeOffset, so the offset
+        // is part of what this query returns and must be part of what identifies its cache entry.
+        // Keying on the offset rather than on the user id keeps entries shareable between users in
+        // the same zone - system logs are not otherwise principal-scoped.
         return
-            $"Listview:{ListView},{Level},Search:{Keyword},OrderBy:{OrderBy} {SortDirection},{PageNumber},{PageSize}";
+            $"Listview:{ListView},{Level},LocalTimeOffset:{CurrentUser?.LocalTimeOffset},Search:{Keyword},OrderBy:{OrderBy} {SortDirection},{PageNumber},{PageSize}";
     }
 }
 

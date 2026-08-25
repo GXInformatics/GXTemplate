@@ -64,8 +64,16 @@ public static class DependencyInjection
             .AddSingleton(s => s.GetRequiredService<IOptions<AppConfigurationSettings>>().Value)
             .AddSingleton<IApplicationSettings>(s => s.GetRequiredService<IOptions<AppConfigurationSettings>>().Value);
 
-        services.Configure<DatabaseSettings>(configuration.GetSection(DATABASE_SETTINGS_KEY))
-            .AddSingleton(s => s.GetRequiredService<IOptions<DatabaseSettings>>().Value);
+        // DatabaseSettings implements IValidatableObject; ValidateDataAnnotations runs that
+        // Validate() method (Validator.TryValidateObject invokes IValidatableObject after the
+        // property attributes), so the settings class stays the single definition of the rules.
+        // ValidateOnStart turns a misconfiguration into a startup failure with those messages
+        // instead of an obscure failure at first database use.
+        services.AddOptions<DatabaseSettings>()
+            .Bind(configuration.GetSection(DATABASE_SETTINGS_KEY))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton(s => s.GetRequiredService<IOptions<DatabaseSettings>>().Value);
 
         services.Configure<MinioOptions>(configuration.GetSection(MinioOptions.Key))
             .AddSingleton(s => s.GetRequiredService<IOptions<MinioOptions>>().Value);

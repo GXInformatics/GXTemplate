@@ -1,24 +1,34 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
+using System.Threading;
 using System.Threading.Tasks;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
+using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
+using ZiggyCreatures.Caching.Fusion;
 
 namespace CleanArchitecture.Blazor.Application.UnitTests.Identity.Users;
 
 /// <summary>
-/// Covers the security-stamp behaviour that UserFormDialog's edit path relies on: when a user's role
-/// membership is rewritten, the stamp must change so the user's existing authentication cookie fails
-/// its next revalidation (IdentityRevalidatingAuthenticationStateProvider compares the stamp claim on
-/// the principal against the stored stamp every 30 minutes). Before the fix no site bumped the stamp,
-/// so stale role claims survived for the whole cookie lifetime.
+/// Covers the edit path of UserFormDialog: the security-stamp bump that invalidates a user's existing
+/// session when their role membership changes, the cached-context invalidation that goes with it, and
+/// the ordering that keeps a failed profile update from wiping the user's roles.
+///
+/// The role-change logic lives inside a .razor component with no headless entry point and the project
+/// carries no bUnit reference, so these tests replay the component's exact sequence against a real
+/// UserManager on SQLite. <see cref="ApplyEditAsync"/> mirrors SubmitAsync step for step; the single
+/// call site in the component is verified by inspection.
 /// </summary>
 [TestFixture]
 public class UserRoleChangeSecurityStampTests
@@ -79,30 +89,97 @@ public class UserRoleChangeSecurityStampTests
         return (userManager, user);
     }
 
-    /// <summary>
-    /// Replays the role-membership rewrite that UserFormDialog.SubmitAsync performs on an existing
-    /// user: remove every current role, re-add the selected ones, then bump the stamp if the effective
-    /// set changed.
-    /// </summary>
-    private static async Task ApplyRoleChangeAsync(
-        UserManager<ApplicationUser> userManager, ApplicationUser user, string[] assignedRoles)
+    /// <summary>Reads role membership straight from the database through a scope of its own.</summary>
+    private async Task<string[]> StoredRolesAsync(string userId)
     {
-        var existingRoles = await userManager.GetRolesAsync(user);
+        using var scope = _provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        return await (from ur in db.UserRoles
+                      join r in db.Roles on ur.RoleId equals r.Id
+                      where ur.UserId == userId
+                      select r.Name!).ToArrayAsync();
+    }
+
+    /// <summary>
+    /// Replays UserFormDialog.SubmitAsync's edit path: apply the profile changes, and only once that
+    /// update has succeeded rewrite role membership, bump the stamp if the effective set changed, and
+    /// drop the user's cached UserContext.
+    /// </summary>
+    private static async Task<IdentityResult> ApplyEditAsync(
+        UserManager<ApplicationUser> userManager,
+        IUserContextLoader userContextLoader,
+        ApplicationUser existingUser,
+        string[] assignedRoles,
+        Action<ApplicationUser>? applyProfileChanges = null)
+    {
+        var existingRoles = await userManager.GetRolesAsync(existingUser);
+
+        applyProfileChanges?.Invoke(existingUser);
+        existingUser.LastModifiedAt = DateTime.UtcNow;
+        var updateResult = await userManager.UpdateAsync(existingUser);
+        if (updateResult.Succeeded)
+        {
+            if (existingRoles.Any())
+            {
+                await userManager.RemoveFromRolesAsync(existingUser, existingRoles);
+            }
+            if (assignedRoles.Length > 0)
+            {
+                await userManager.AddToRolesAsync(existingUser, assignedRoles);
+            }
+
+            if (!existingRoles.OrderBy(r => r, StringComparer.Ordinal)
+                    .SequenceEqual(assignedRoles.OrderBy(r => r, StringComparer.Ordinal), StringComparer.Ordinal))
+            {
+                await userManager.UpdateSecurityStampAsync(existingUser);
+                userContextLoader.ClearUserContextCache(existingUser.Id);
+            }
+        }
+        return updateResult;
+    }
+
+    /// <summary>
+    /// The sequence this method used to have: roles were stripped before the fallible profile update,
+    /// so a failed update left the user with no roles and nothing to restore them. Kept only so the
+    /// regression it caused is demonstrated rather than asserted.
+    /// </summary>
+    private static async Task<IdentityResult> ApplyEditWithPreFixOrderAsync(
+        UserManager<ApplicationUser> userManager, ApplicationUser existingUser, string[] assignedRoles,
+        Action<ApplicationUser>? applyProfileChanges = null)
+    {
+        var existingRoles = await userManager.GetRolesAsync(existingUser);
         if (existingRoles.Any())
         {
-            await userManager.RemoveFromRolesAsync(user, existingRoles);
-        }
-        if (assignedRoles.Length > 0)
-        {
-            await userManager.AddToRolesAsync(user, assignedRoles);
+            await userManager.RemoveFromRolesAsync(existingUser, existingRoles);
         }
 
-        if (!existingRoles.OrderBy(r => r, StringComparer.Ordinal)
-                .SequenceEqual(assignedRoles.OrderBy(r => r, StringComparer.Ordinal), StringComparer.Ordinal))
+        applyProfileChanges?.Invoke(existingUser);
+        existingUser.LastModifiedAt = DateTime.UtcNow;
+        var updateResult = await userManager.UpdateAsync(existingUser);
+        if (updateResult.Succeeded && assignedRoles.Length > 0)
         {
-            await userManager.UpdateSecurityStampAsync(user);
+            await userManager.AddToRolesAsync(existingUser, assignedRoles);
         }
+        return updateResult;
     }
+
+    /// <summary>
+    /// Seeds a second account and returns its user name. Assigning that name to the user under edit
+    /// makes UpdateAsync fail on Identity's uniqueness validator - the realistic way this dialog's
+    /// update fails, since the form lets an administrator retype the user name and the email.
+    /// Validation runs before anything is written, which is exactly why the role rewrite must not
+    /// have happened yet.
+    /// </summary>
+    private async Task<string> SeedAConflictingUserNameAsync()
+    {
+        using var scope = _provider.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var other = new ApplicationUser { UserName = "already-taken", Email = "taken@example.com" };
+        (await userManager.CreateAsync(other, "Password123!")).Succeeded.Should().BeTrue();
+        return other.UserName!;
+    }
+
+    // ---- security stamp -------------------------------------------------------------------------
 
     [Test]
     public async Task RemovingARole_ChangesTheSecurityStamp()
@@ -110,7 +187,7 @@ public class UserRoleChangeSecurityStampTests
         var (userManager, user) = await CreateUserAsync("Admin");
         var before = await userManager.GetSecurityStampAsync(user);
 
-        await ApplyRoleChangeAsync(userManager, user, new[] { "Basic" });
+        await ApplyEditAsync(userManager, new RecordingUserContextLoader(), user, new[] { "Basic" });
 
         var after = await userManager.GetSecurityStampAsync(user);
         after.Should().NotBe(before, "a demoted user's existing session must fail its next revalidation");
@@ -123,7 +200,7 @@ public class UserRoleChangeSecurityStampTests
         var (userManager, user) = await CreateUserAsync("Admin");
         var before = await userManager.GetSecurityStampAsync(user);
 
-        await ApplyRoleChangeAsync(userManager, user, Array.Empty<string>());
+        await ApplyEditAsync(userManager, new RecordingUserContextLoader(), user, Array.Empty<string>());
 
         (await userManager.GetSecurityStampAsync(user)).Should().NotBe(before);
         (await userManager.GetRolesAsync(user)).Should().BeEmpty();
@@ -135,7 +212,7 @@ public class UserRoleChangeSecurityStampTests
         var (userManager, user) = await CreateUserAsync("Basic");
         var before = await userManager.GetSecurityStampAsync(user);
 
-        await ApplyRoleChangeAsync(userManager, user, new[] { "Admin", "Basic" });
+        await ApplyEditAsync(userManager, new RecordingUserContextLoader(), user, new[] { "Admin", "Basic" });
 
         (await userManager.GetSecurityStampAsync(user)).Should().NotBe(before);
     }
@@ -148,9 +225,152 @@ public class UserRoleChangeSecurityStampTests
         var (userManager, user) = await CreateUserAsync("Basic", "Admin");
         var before = await userManager.GetSecurityStampAsync(user);
 
-        await ApplyRoleChangeAsync(userManager, user, new[] { "Admin", "Basic" });
+        await ApplyEditAsync(userManager, new RecordingUserContextLoader(), user, new[] { "Admin", "Basic" });
 
         (await userManager.GetSecurityStampAsync(user)).Should().Be(before);
+    }
+
+    // ---- cached user context --------------------------------------------------------------------
+
+    [Test]
+    public async Task ARoleChange_ClearsTheUsersCachedContext_SoTheNextLoadSeesTheNewRoles()
+    {
+        var (userManager, user) = await CreateUserAsync("Basic");
+        var scopeFactory = new CountingScopeFactory(_provider.GetRequiredService<IServiceScopeFactory>());
+        var loader = new UserContextLoader(
+            scopeFactory, new FusionCache(new FusionCacheOptions()), NullLogger<UserContextLoader>.Instance);
+        var principal = Principal(user.Id);
+
+        var primed = await loader.LoadAsync(principal);
+        primed!.Roles.Should().BeEquivalentTo(new[] { "Basic" });
+        scopeFactory.ScopesCreated.Should().Be(1);
+
+        await ApplyEditAsync(userManager, loader, user, new[] { "Admin" });
+
+        var reloaded = await loader.LoadAsync(principal);
+        scopeFactory.ScopesCreated.Should().Be(2, "the cached entry was cleared, so the factory ran again");
+        reloaded!.Roles.Should().BeEquivalentTo(new[] { "Admin" },
+            "the ambient context must not keep serving the role set the user no longer has");
+    }
+
+    [Test]
+    public async Task WithoutTheCacheClear_TheOldRolesStayAmbient()
+    {
+        // Demonstrates what the clear is for: the stamp bump forces re-authentication, but the loader
+        // caches the context - Roles included - for an hour, so the stale set would survive that long.
+        var (userManager, user) = await CreateUserAsync("Basic");
+        var scopeFactory = new CountingScopeFactory(_provider.GetRequiredService<IServiceScopeFactory>());
+        var loader = new UserContextLoader(
+            scopeFactory, new FusionCache(new FusionCacheOptions()), NullLogger<UserContextLoader>.Instance);
+        var principal = Principal(user.Id);
+
+        await loader.LoadAsync(principal);
+        await ApplyEditAsync(userManager, new RecordingUserContextLoader(), user, new[] { "Admin" });
+
+        var reloaded = await loader.LoadAsync(principal);
+        scopeFactory.ScopesCreated.Should().Be(1);
+        reloaded!.Roles.Should().BeEquivalentTo(new[] { "Basic" }, "this is the stale read the fix removes");
+    }
+
+    [Test]
+    public async Task AnEditThatDoesNotChangeMembership_ClearsNothing()
+    {
+        var (userManager, user) = await CreateUserAsync("Basic");
+        var loader = new RecordingUserContextLoader();
+
+        await ApplyEditAsync(userManager, loader, user, new[] { "Basic" });
+
+        loader.ClearedUserIds.Should().BeEmpty("a rename or a phone-number change must not evict anything");
+    }
+
+    [Test]
+    public async Task AMembershipChange_ClearsExactlyThatUsersEntry()
+    {
+        var (userManager, user) = await CreateUserAsync("Basic");
+        var loader = new RecordingUserContextLoader();
+
+        await ApplyEditAsync(userManager, loader, user, new[] { "Admin" });
+
+        loader.ClearedUserIds.Should().Equal(user.Id);
+    }
+
+    // ---- ordering of the role rewrite -----------------------------------------------------------
+
+    [Test]
+    public async Task WhenTheProfileUpdateFails_RoleMembershipIsUntouched()
+    {
+        var (userManager, user) = await CreateUserAsync("Basic", "Admin");
+        var takenName = await SeedAConflictingUserNameAsync();
+
+        var result = await ApplyEditAsync(userManager, new RecordingUserContextLoader(), user, new[] { "Basic" },
+            u => u.UserName = takenName);
+
+        result.Succeeded.Should().BeFalse("the user name collides with another account");
+        (await StoredRolesAsync(user.Id)).Should().BeEquivalentTo(new[] { "Basic", "Admin" },
+            "a failed profile update must not cost the user their roles");
+    }
+
+    [Test]
+    public async Task WhenTheProfileUpdateFails_TheOldOrderLostTheRoles()
+    {
+        // The same scenario against the pre-fix sequence, so the regression is shown, not asserted.
+        var (userManager, user) = await CreateUserAsync("Basic", "Admin");
+        var takenName = await SeedAConflictingUserNameAsync();
+
+        var result = await ApplyEditWithPreFixOrderAsync(userManager, user, new[] { "Basic" },
+            u => u.UserName = takenName);
+
+        result.Succeeded.Should().BeFalse();
+        (await StoredRolesAsync(user.Id)).Should().BeEmpty(
+            "stripping roles before the fallible update left nothing to restore them");
+    }
+
+    [Test]
+    public async Task WhenTheProfileUpdateFails_TheSecurityStampIsNotBumped()
+    {
+        var (userManager, user) = await CreateUserAsync("Basic");
+        var before = await userManager.GetSecurityStampAsync(user);
+        var takenName = await SeedAConflictingUserNameAsync();
+        var loader = new RecordingUserContextLoader();
+
+        await ApplyEditAsync(userManager, loader, user, new[] { "Admin" }, u => u.UserName = takenName);
+
+        (await userManager.GetSecurityStampAsync(user)).Should().Be(before,
+            "nothing changed, so no session should be invalidated");
+        loader.ClearedUserIds.Should().BeEmpty();
+    }
+
+    // ---- helpers --------------------------------------------------------------------------------
+
+    private static ClaimsPrincipal Principal(string userId) =>
+        new(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, userId) },
+            authenticationType: "TestAuth"));
+
+    /// <summary>Records which users' cached contexts were evicted; loads nothing.</summary>
+    private sealed class RecordingUserContextLoader : IUserContextLoader
+    {
+        public List<string> ClearedUserIds { get; } = new();
+
+        public Task<UserContext?> LoadAsync(ClaimsPrincipal principal, CancellationToken cancellationToken = default) =>
+            Task.FromResult<UserContext?>(null);
+
+        public void ClearUserContextCache(string userId) => ClearedUserIds.Add(userId);
+    }
+
+    /// <summary>Counts how many times UserContextLoader's cache factory actually ran.</summary>
+    private sealed class CountingScopeFactory : IServiceScopeFactory
+    {
+        private readonly IServiceScopeFactory _inner;
+        public int ScopesCreated { get; private set; }
+
+        public CountingScopeFactory(IServiceScopeFactory inner) => _inner = inner;
+
+        public IServiceScope CreateScope()
+        {
+            ScopesCreated++;
+            return _inner.CreateScope();
+        }
     }
 }
 #nullable restore

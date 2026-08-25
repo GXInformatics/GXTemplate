@@ -4,6 +4,7 @@
 @using CleanArchitecture.Blazor.Domain.Common.Enums
 @using System.ComponentModel.DataAnnotations
 @using CleanArchitecture.Blazor.Server.UI.Resources.ValidationMessages
+@using CleanArchitecture.Blazor.Infrastructure.Services.Identity
 
 @inject IStringLocalizer<Identity.Users.Users> L
 @inject IFileUploadService UploadService
@@ -127,6 +128,7 @@
     private UserManager<ApplicationUser> _userManager = null!;
     private RoleManager<ApplicationRole> _roleManager = null!;
     private IApplicationDbContextFactory _dbContextFactory = null!;
+    private IUserContextLoader _userContextLoader = null!;
     private sealed class RoleSelectionItem
     {
         public string RoleName { get; set; } = string.Empty;
@@ -139,6 +141,7 @@
         _roleManager = ScopedServices.GetRequiredService<RoleManager<ApplicationRole>>();
         _userManager = ScopedServices.GetRequiredService<UserManager<ApplicationUser>>();
         _dbContextFactory = ScopedServices.GetRequiredService<IApplicationDbContextFactory>();
+        _userContextLoader = ScopedServices.GetRequiredService<IUserContextLoader>();
         _formEditContext = new EditContext(Model);
         var roleNames = await _roleManager.Roles.Select(x => x.Name).ToListAsync();
         _roleSelections = roleNames
@@ -183,10 +186,6 @@
             {
                 //update user
                 var existingRoles = await _userManager.GetRolesAsync(existingUser);
-                if (existingRoles.Any())
-                {
-                    await _userManager.RemoveFromRolesAsync(existingUser, existingRoles);
-                }
                 var dbContext = await _dbContextFactory.CreateAsync();
                 var tenantUsers = await dbContext.TenantUsers.Where(x => x.UserId == Model.Id).ToListAsync();
                 if (tenantUsers.Any())
@@ -219,21 +218,32 @@
                 var updateResult = await _userManager.UpdateAsync(existingUser);
                 if (updateResult.Succeeded)
                 {
+                    // Role membership is rewritten only once the profile update has succeeded. Doing
+                    // it first - as this method used to - left the user with no roles at all whenever
+                    // the update failed, with nothing to put them back.
+                    if (existingRoles.Any())
+                    {
+                        await _userManager.RemoveFromRolesAsync(existingUser, existingRoles);
+                    }
                     if (Model.AssignedRoles is { Length: > 0 })
                     {
                         await _userManager.AddToRolesAsync(existingUser, Model.AssignedRoles);
                     }
-                }
 
-                // Role membership was rewritten above (all roles removed, then the selected ones
-                // re-added). If the effective set changed, bump the security stamp so any session the
-                // user already has fails its next revalidation instead of carrying stale role claims
-                // for the remaining cookie lifetime - see IdentityRevalidatingAuthenticationStateProvider.
-                var assignedRoles = Model.AssignedRoles ?? Array.Empty<string>();
-                if (!existingRoles.OrderBy(r => r, StringComparer.Ordinal)
-                        .SequenceEqual(assignedRoles.OrderBy(r => r, StringComparer.Ordinal), StringComparer.Ordinal))
-                {
-                    await _userManager.UpdateSecurityStampAsync(existingUser);
+                    // Role membership was rewritten above (all roles removed, then the selected ones
+                    // re-added). If the effective set changed, bump the security stamp so any session the
+                    // user already has fails its next revalidation instead of carrying stale role claims
+                    // for the remaining cookie lifetime - see IdentityRevalidatingAuthenticationStateProvider.
+                    var assignedRoles = Model.AssignedRoles ?? Array.Empty<string>();
+                    if (!existingRoles.OrderBy(r => r, StringComparer.Ordinal)
+                            .SequenceEqual(assignedRoles.OrderBy(r => r, StringComparer.Ordinal), StringComparer.Ordinal))
+                    {
+                        await _userManager.UpdateSecurityStampAsync(existingUser);
+                        // The stamp bump only forces re-authentication. UserContextLoader caches the
+                        // ambient UserContext - Roles included - for an hour, so without this the old
+                        // role set would stay ambient for the rest of that hour.
+                        _userContextLoader.ClearUserContextCache(existingUser.Id);
+                    }
                 }
             }
             else

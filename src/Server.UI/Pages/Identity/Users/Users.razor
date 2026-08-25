@@ -398,7 +398,9 @@
                     Email = "",
                     UserName = "",
                     AssignedRoles = Array.Empty<string>(),
-                    TimeZoneId = TimeZoneInfo.Local.Id,
+                    // UTC, not TimeZoneInfo.Local: the server's zone says nothing about where the
+                    // new user is, and would otherwise vary with the deployment host.
+                    TimeZoneId = TimeZoneInfo.Utc.Id,
                     LanguageCode = CultureInfo.CurrentCulture.Name
 
                 });

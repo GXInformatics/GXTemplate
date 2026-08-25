@@ -132,7 +132,9 @@
 			ErrorMessageResourceType = typeof(ValidationMessages),
 			ErrorMessageResourceName = nameof(ValidationMessages.TimeZoneRequired))]
 		[Display(Name = "Time Zone")]
-		public string TimeZoneId { get; set; } = TimeZoneInfo.Local.Id;
+		// UTC, not TimeZoneInfo.Local: the server's zone says nothing about where the person
+		// linking the account is, and would otherwise vary with the deployment host.
+		public string TimeZoneId { get; set; } = TimeZoneInfo.Utc.Id;
 
 		[Required(
 			ErrorMessageResourceType = typeof(ValidationMessages),
