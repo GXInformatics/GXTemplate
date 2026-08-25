@@ -139,22 +139,17 @@
 		user.Email = _formModel.Email;
 		user.UserName = _formModel.UserName;
 		user.CreatedAt = DateTime.UtcNow;
+		// The seeder creates this role on first run. Self-registration used to create it when
+		// missing, which meant an anonymous request could write to AspNetRoles; a missing role is a
+		// deployment fault, so registration now fails loudly instead - and before the account is
+		// created, so nobody is left registered without a role.
 		var role = await _roleManager.Roles.Where(x => x.Name == Roles.Basic).FirstOrDefaultAsync();
 		if (role is null)
 		{
-			role = new ApplicationRole
-			{
-				Name = Roles.Basic,
-				NormalizedName = Roles.Basic.ToUpperInvariant(),
-				CreatedAt = DateTime.UtcNow
-			};
-			var roleResult = await _roleManager.CreateAsync(role);
-			if (!roleResult.Succeeded)
-			{
-				_statusMessage = string.Join(", ", roleResult.Errors.Select(error => error.Description));
-				Snackbar.Add(_statusMessage, Severity.Error);
-				return;
-			}
+			Logger.LogError("Registration blocked: the {RoleName} role does not exist. The database has not been seeded.", Roles.Basic);
+			_statusMessage = L["Registration is unavailable because the application is not fully configured. Please contact support."];
+			Snackbar.Add(_statusMessage, Severity.Error);
+			return;
 		}
 		var result = await _userManager.CreateAsync(user, _formModel.Password);
 		if (!result.Succeeded)

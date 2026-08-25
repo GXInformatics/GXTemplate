@@ -129,6 +129,7 @@
     private RoleManager<ApplicationRole> _roleManager = null!;
     private IApplicationDbContextFactory _dbContextFactory = null!;
     private IUserContextLoader _userContextLoader = null!;
+    private AdministratorProtectionService _administratorProtection = null!;
     private sealed class RoleSelectionItem
     {
         public string RoleName { get; set; } = string.Empty;
@@ -142,6 +143,7 @@
         _userManager = ScopedServices.GetRequiredService<UserManager<ApplicationUser>>();
         _dbContextFactory = ScopedServices.GetRequiredService<IApplicationDbContextFactory>();
         _userContextLoader = ScopedServices.GetRequiredService<IUserContextLoader>();
+        _administratorProtection = ScopedServices.GetRequiredService<AdministratorProtectionService>();
         _formEditContext = new EditContext(Model);
         var roleNames = await _roleManager.Roles.Select(x => x.Name).ToListAsync();
         _roleSelections = roleNames
@@ -186,6 +188,19 @@
             {
                 //update user
                 var existingRoles = await _userManager.GetRolesAsync(existingUser);
+
+                // Checked before anything is written, so a refused edit leaves the user untouched.
+                try
+                {
+                    await _administratorProtection.EnsureRoleRewriteKeepsAnAdministratorAsync(
+                        existingUser.Id, existingRoles, Model.AssignedRoles ?? Array.Empty<string>());
+                }
+                catch (ForbiddenAccessException ex)
+                {
+                    Snackbar.Add(ex.Message, Severity.Error);
+                    return;
+                }
+
                 existingUser.Email = Model.Email;
                 existingUser.PhoneNumber = Model.PhoneNumber;
                 existingUser.ProfilePictureDataUrl = Model.ProfilePictureDataUrl;
@@ -217,14 +232,14 @@
                 {
                     dbContext.TenantUsers.RemoveRange(tenantUsers);
                 }
-                if (Model.Tenants.Any())
+                foreach (var tenant in Model.Tenants)
                 {
-                    foreach (var tenant in Model.Tenants)
-                    {
-                        dbContext.TenantUsers.Add(new TenantUser { TenantId = tenant.Id, UserId = Model.Id });
-                    }
-                    await dbContext.SaveChangesAsync(default);
+                    dbContext.TenantUsers.Add(new TenantUser { TenantId = tenant.Id, UserId = Model.Id });
                 }
+                // The save is outside the "any tenants selected" check on purpose: it used to sit
+                // inside it, so clearing a user's tenants to the empty set staged the removal and
+                // never persisted it - the rows survived the edit.
+                await dbContext.SaveChangesAsync(default);
 
                 // Role membership is rewritten only once the profile update has succeeded. Doing
                 // it first - as this method used to - left the user with no roles at all whenever

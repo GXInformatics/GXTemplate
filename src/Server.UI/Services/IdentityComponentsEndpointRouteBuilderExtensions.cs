@@ -429,22 +429,14 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
                 TenantUsers = new List<TenantUser> { new TenantUser { TenantId = tenantId } }
             };
             
-            // Ensure the basic role exists for the tenant
+            // The seeder creates this role on first run. Creating it here would let an anonymous
+            // external-login callback write to AspNetRoles; a missing role is a deployment fault,
+            // so provisioning fails loudly instead - and before the account is created.
             var role = await roleManager.Roles.Where(x=> x.Name == Application.Common.Constants.Roles.Basic).FirstOrDefaultAsync();
             if (role is null)
             {
-                role = new ApplicationRole
-                {
-                    Name = Application.Common.Constants.Roles.Basic,
-                    NormalizedName = Application.Common.Constants.Roles.Basic.ToUpperInvariant(),
-                    CreatedAt= DateTime.UtcNow,
-                };
-                var roleResult = await roleManager.CreateAsync(role);
-                if (!roleResult.Succeeded)
-                {
-                    logger.LogError("Failed to create role.");
-                    return Results.BadRequest("Failed to create role for tenant.");
-                }
+                logger.LogError("External login provisioning blocked: the {RoleName} role does not exist. The database has not been seeded.", Application.Common.Constants.Roles.Basic);
+                return Results.BadRequest("The application is not fully configured; account provisioning is unavailable.");
             }
             
             // Create the user account

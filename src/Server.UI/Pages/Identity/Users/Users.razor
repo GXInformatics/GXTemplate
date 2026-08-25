@@ -254,6 +254,7 @@
     private RoleManager<ApplicationRole> _roleManager = null!;
     private IApplicationDbContextFactory _dbContextFactory = null!;
     private PermissionAssignmentService _permissionAssignmentService = null!;
+    private AdministratorProtectionService _administratorProtection = null!;
 
     // Page state and data
     private int _defaultPageSize = 15;
@@ -299,6 +300,7 @@
         _userManager = ScopedServices.GetRequiredService<UserManager<ApplicationUser>>();
         _dbContextFactory = ScopedServices.GetRequiredService<IApplicationDbContextFactory>();
         _permissionAssignmentService = ScopedServices.GetRequiredService<PermissionAssignmentService>();
+        _administratorProtection = ScopedServices.GetRequiredService<AdministratorProtectionService>();
     }
 
     public void Dispose()
@@ -488,6 +490,17 @@
     {
         var user = await _userManager.FindByIdAsync(model.Id)
         ?? throw new NotFoundException($"User not found: {model.Id}");
+
+        try
+        {
+            await _administratorProtection.EnsureNotRemovingLastAdministratorAsync(user.Id, "deleted");
+        }
+        catch (ForbiddenAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            return;
+        }
+
         var result = await _userManager.DeleteAsync(user);
         if (result.Succeeded)
         {
@@ -519,6 +532,19 @@
     {
         var deleteIds = _selectedUsers.Select(u => u.Id).ToArray();
         var usersToDelete = await _userManager.Users.Where(x => deleteIds.Contains(x.Id)).ToListAsync();
+
+        try
+        {
+            foreach (var user in usersToDelete)
+            {
+                await _administratorProtection.EnsureNotRemovingLastAdministratorAsync(user.Id, "deleted");
+            }
+        }
+        catch (ForbiddenAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            return;
+        }
 
         foreach (var user in usersToDelete)
         {
@@ -672,6 +698,10 @@
             await _permissionAssignmentService.AssignUserBulkAsync(models);
             Snackbar.Add(L["Authorization has been changed"], Severity.Info);
         }
+        catch (ForbiddenAccessException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
         finally
         {
             _isProcessing = false;
@@ -685,6 +715,11 @@
         {
             await _permissionAssignmentService.AssignUserAsync(model);
             Snackbar.Add(model.Assigned ? L["Permission assigned successfully"] : L["Permission removed successfully"], Severity.Info);
+        }
+        catch (ForbiddenAccessException ex)
+        {
+            model.Assigned = !model.Assigned; // the checkbox never took effect - put it back
+            Snackbar.Add(ex.Message, Severity.Error);
         }
         finally
         {

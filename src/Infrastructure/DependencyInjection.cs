@@ -183,6 +183,7 @@ public static class DependencyInjection
             .AddScoped<IFileUploadService, MinioFileUploadService>()
             .AddScoped<IPDFService, PDFService>()
             .AddScoped<IPermissionQueryService, PermissionQueryService>()
+            .AddScoped<AdministratorProtectionService>()
             .AddScoped<PermissionAssignmentService>()
             .AddTransient<IDocumentOcrJob, DocumentOcrJob>();
     }

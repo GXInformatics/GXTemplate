@@ -140,6 +140,27 @@ public class UserRoleChangeSecurityStampTests
         {
             db.TenantUsers.RemoveRange(tenantUsers);
         }
+        foreach (var tenantId in assignedTenantIds)
+        {
+            db.TenantUsers.Add(new TenantUser { TenantId = tenantId, UserId = userId });
+        }
+        // Outside the non-empty check: see RewriteTenantsWithPreFixSaveAsync for what that cost.
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// The shape the dialog used to have: the save sat inside the "any tenants selected" check, so a
+    /// clear-to-empty staged the removal and never persisted it. Kept only to demonstrate the bug.
+    /// </summary>
+    private async Task RewriteTenantsWithPreFixSaveAsync(string userId, string[] assignedTenantIds)
+    {
+        using var scope = _provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var tenantUsers = await db.TenantUsers.Where(x => x.UserId == userId).ToListAsync();
+        if (tenantUsers.Any())
+        {
+            db.TenantUsers.RemoveRange(tenantUsers);
+        }
         if (assignedTenantIds.Length > 0)
         {
             foreach (var tenantId in assignedTenantIds)
@@ -449,6 +470,33 @@ public class UserRoleChangeSecurityStampTests
         result.Succeeded.Should().BeTrue();
         (await StoredTenantIdsAsync(user.Id)).Should().BeEquivalentTo(new[] { TenantB },
             "the reorder must not stop the rewrite happening on the success path");
+    }
+
+    [Test]
+    public async Task ClearingTenantsToEmpty_RemovesTheRows()
+    {
+        var (userManager, user) = await CreateUserAsync("Basic");
+        await AssignTenantsAsync(user.Id, TenantA, TenantB);
+
+        var result = await ApplyEditAsync(userManager, new RecordingUserContextLoader(), user, new[] { "Basic" },
+            assignedTenantIds: Array.Empty<string>());
+
+        result.Succeeded.Should().BeTrue();
+        (await StoredTenantIdsAsync(user.Id)).Should().BeEmpty(
+            "clearing every tenant must persist the removal, not stage it and drop it");
+    }
+
+    [Test]
+    public async Task ClearingTenantsToEmpty_WasSilentlyIgnoredBeforeTheSaveWasHoisted()
+    {
+        // The same scenario against the pre-fix shape, so the regression is shown, not asserted.
+        var (_, user) = await CreateUserAsync("Basic");
+        await AssignTenantsAsync(user.Id, TenantA, TenantB);
+
+        await RewriteTenantsWithPreFixSaveAsync(user.Id, Array.Empty<string>());
+
+        (await StoredTenantIdsAsync(user.Id)).Should().BeEquivalentTo(new[] { TenantA, TenantB },
+            "the removal was staged on a context that was never saved");
     }
 
     // ---- helpers --------------------------------------------------------------------------------
