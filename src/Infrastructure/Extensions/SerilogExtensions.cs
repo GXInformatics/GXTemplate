@@ -69,34 +69,14 @@ public static class SerilogExtensions
 
     private static void ApplyConfigPreferences(this LoggerConfiguration serilogConfig, IConfiguration configuration)
     {
-        // Seq ships events to a remote server and the database sink writes them to a table the
-        // SystemLogs page reads back. Both outlive the console, so both drop the banner. The console
-        // sink above is deliberately the only one that keeps it.
+        // The database sink writes to a table the SystemLogs page reads back, so it outlives the
+        // console and drops the banner. The console sink above is deliberately the only one that
+        // keeps it.
         serilogConfig.WriteTo.Logger(lc =>
         {
             lc.Filter.ByExcluding(CarriesBootstrapSecret);
-            WriteToSeq(lc, configuration);
             WriteToDatabase(lc, configuration);
         });
-    }
-    private static void WriteToSeq(LoggerConfiguration serilogConfig, IConfiguration configuration)
-    {
-        var serverUrl = "https://seq.blazorserver.com";
-        var apiKey = "none";
-        var restrictedToMinimumLevel = "Verbose";
-
-        if (!string.IsNullOrEmpty(serverUrl))
-        {
-            var minimumLevel = Enum.TryParse<LogEventLevel>(restrictedToMinimumLevel, true, out var level)
-                ? level
-                : LogEventLevel.Verbose;
-
-            serilogConfig.WriteTo.Seq(
-                serverUrl,
-                apiKey: string.IsNullOrEmpty(apiKey) || apiKey == "none" ? null : apiKey,
-                restrictedToMinimumLevel: minimumLevel
-            );
-        }
     }
     private static void WriteToDatabase(LoggerConfiguration serilogConfig, IConfiguration configuration)
     {

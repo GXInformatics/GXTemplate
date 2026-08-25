@@ -210,7 +210,7 @@ public class ApplicationDbContextInitializer
         // The only time this password is ever legible. It is not written to configuration, not to a
         // file, and not returned anywhere - the Identity password hash is the only copy that
         // survives this method.
-        // The scope marks this event so the file, database and Seq sinks drop it - the console is
+        // The scope marks this event so the file and database sinks drop it - the console is
         // the only place the password is ever written. Serilog surfaces scope state as event
         // properties because Enrich.FromLogContext() is configured; SerilogExtensions.CarriesBootstrapSecret
         // is the matching half.

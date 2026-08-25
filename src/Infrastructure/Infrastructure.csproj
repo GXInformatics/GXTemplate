@@ -25,7 +25,6 @@
         <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
         <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
         <PackageReference Include="Blazor.Serilog.Sinks.SQLite" Version="1.1.0" />
-        <PackageReference Include="Serilog.Sinks.Seq" Version="9.1.0" />
     </ItemGroup>
     <ItemGroup>
         <ProjectReference Include="..\Application\Application.csproj" />
