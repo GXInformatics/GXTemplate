@@ -4,8 +4,15 @@ namespace CleanArchitecture.Blazor.Application.Common.PublishStrategies;
 
 /// <summary>
 /// High-performance publisher using Channel with backpressure control
+/// <para>
+/// It implements <see cref="IAsyncDisposable"/> so the DI container actually disposes it. The
+/// class already had a DisposeAsync that completes the channel and awaits the drain, but without
+/// the interface the container never called it: it checks the resolved instance for IDisposable /
+/// IAsyncDisposable at runtime. The channel was therefore never completed, the drain never ran, and
+/// the background reader stayed pending for the life of the process - one per scope.
+/// </para>
 /// </summary>
-public class ChannelBasedNoWaitPublisher : INotificationPublisher
+public class ChannelBasedNoWaitPublisher : INotificationPublisher, IAsyncDisposable, IDisposable
 {
     private readonly ILogger<ChannelBasedNoWaitPublisher> _logger;
     private readonly Channel<(Func<CancellationToken, ValueTask> Callback, string NotificationType)> _channel;
@@ -75,12 +82,7 @@ public class ChannelBasedNoWaitPublisher : INotificationPublisher
 
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposeState, 1) != 0)
-        {
-            return;
-        }
-
-        _writer.TryComplete();
+        if (!BeginDispose()) return;
 
         try
         {
@@ -90,5 +92,37 @@ public class ChannelBasedNoWaitPublisher : INotificationPublisher
         {
             // The reader observed a normal channel shutdown while draining.
         }
+    }
+
+    /// <summary>
+    /// Synchronous disposal, present because a service that implements <i>only</i>
+    /// <see cref="IAsyncDisposable"/> makes <c>IServiceScope.Dispose()</c> throw
+    /// ("type only implements IAsyncDisposable"), and the application disposes some scopes
+    /// synchronously. It drains on the same terms as <see cref="DisposeAsync"/>.
+    /// </summary>
+    public void Dispose()
+    {
+        if (!BeginDispose()) return;
+
+        try
+        {
+            _processingTask.GetAwaiter().GetResult();
+        }
+        catch (ChannelClosedException)
+        {
+            // The reader observed a normal channel shutdown while draining.
+        }
+    }
+
+    /// <summary>Completes the channel exactly once. Returns false if disposal already happened.</summary>
+    private bool BeginDispose()
+    {
+        if (Interlocked.Exchange(ref _disposeState, 1) != 0)
+        {
+            return false;
+        }
+
+        _writer.TryComplete();
+        return true;
     }
 }

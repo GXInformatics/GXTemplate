@@ -3,6 +3,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 
@@ -108,14 +109,12 @@ public class SaveChangesInterceptorRegressionTests
     }
 
     [Test]
-    public async Task AuditableEntityInterceptor_ShouldPublishAuditTrailsReadyEventForAuditedEntities()
+    public async Task AuditableEntityInterceptor_ShouldWriteAuditTrailsInTheSameSaveAsTheEntity()
     {
-        var mediator = new Mock<IMediator>();
-        AuditTrailsReadyEvent? publishedEvent = null;
-        mediator.Setup(x => x.Publish(It.IsAny<AuditTrailsReadyEvent>(), It.IsAny<CancellationToken>()))
-            .Callback<AuditTrailsReadyEvent, CancellationToken>((notification, _) => publishedEvent = notification)
-            .Returns(ValueTask.CompletedTask);
-
+        // This assertion is the inverse of the one it replaces. Audit rows used to be handed to a
+        // notification handler that persisted them on another context, so the test verified that an
+        // AuditTrailsReadyEvent was published. They are now written in the same transaction, so what
+        // matters is that the rows are in the database when SaveChangesAsync returns.
         var userContextAccessor = new Mock<IUserContextAccessor>();
         userContextAccessor.SetupGet(x => x.Current)
             .Returns(new UserContext("user-123", "regression-user"));
@@ -124,7 +123,16 @@ public class SaveChangesInterceptorRegressionTests
         dateTime.SetupGet(x => x.Now).Returns(new DateTime(2026, 3, 29, 9, 0, 0, DateTimeKind.Utc));
 
         await using var context = await CreateContextAsync(
-            new AuditableEntityInterceptor(userContextAccessor.Object, dateTime.Object, mediator.Object));
+            new AuditableEntityInterceptor(userContextAccessor.Object, dateTime.Object));
+
+        // AuditTrail.UserId is a real foreign key to AspNetUsers, so the acting user must exist.
+        // Under the previous design a dangling id only lost the audit row (the handler swallowed the
+        // failure); it now rolls the whole operation back, which is the point of the redesign.
+        context.Users.Add(new CleanArchitecture.Blazor.Domain.Identity.ApplicationUser
+        {
+            Id = "user-123", UserName = "regression-user", Email = "regression-user@example.com"
+        });
+        await context.SaveChangesAsync();
 
         context.PicklistSets.Add(new PicklistSet
         {
@@ -136,12 +144,11 @@ public class SaveChangesInterceptorRegressionTests
 
         await context.SaveChangesAsync();
 
-        mediator.Verify(x => x.Publish(It.IsAny<AuditTrailsReadyEvent>(), It.IsAny<CancellationToken>()), Times.Once);
-        Assert.That(publishedEvent, Is.Not.Null);
-        Assert.That(publishedEvent!.AuditTrails, Has.Count.EqualTo(1));
-        var auditTrail = publishedEvent.AuditTrails.First();
-        Assert.That(auditTrail.TableName, Is.EqualTo(nameof(PicklistSet)));
-        Assert.That(auditTrail.UserId, Is.EqualTo("user-123"));
+        var auditTrails = await context.AuditTrails.ToListAsync();
+        Assert.That(auditTrails, Has.Count.EqualTo(1));
+        Assert.That(auditTrails[0].TableName, Is.EqualTo(nameof(PicklistSet)));
+        Assert.That(auditTrails[0].UserId, Is.EqualTo("user-123"));
+        Assert.That(auditTrails[0].AuditType, Is.EqualTo(AuditType.Create));
     }
 
     private static async Task<ApplicationDbContext> CreateContextAsync(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors)

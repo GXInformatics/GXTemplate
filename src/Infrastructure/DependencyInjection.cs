@@ -92,6 +92,12 @@ public static class DependencyInjection
     private static IServiceCollection AddDatabaseServices(this IServiceCollection services,
         IConfiguration configuration)
     {
+        // Interceptor ORDER IS LOAD-BEARING and is asserted by InterceptorOrderingTests.
+        // AuditableEntityInterceptor must come first: it opens a transaction in SavingChanges and
+        // holds it across the save so the audit rows commit atomically with the business change.
+        // EF invokes interceptors in registration order, so registering it first means its commit
+        // happens before DispatchDomainEventsInterceptor publishes - events are never published for
+        // a change that the audit write subsequently rolled back.
         services.AddScoped<IDateTime, DateTimeService>()
             .AddScoped<ISaveChangesInterceptor, AuditableEntityInterceptor>()
             .AddScoped<ISaveChangesInterceptor, DispatchDomainEventsInterceptor>();

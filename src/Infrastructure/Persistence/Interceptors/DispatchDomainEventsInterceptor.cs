@@ -7,6 +7,22 @@ namespace CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
 
 /// <summary>
 /// Interceptor for dispatching domain events when saving changes in the database.
+/// <para>
+/// Deleted entities are dispatched from <c>SavingChanges</c>, because the change tracker detaches
+/// them once the save completes and their events would otherwise be unreachable. Everything else is
+/// dispatched from <c>SavedChanges</c>.
+/// </para>
+/// <para>
+/// <b>This interceptor opens no transaction.</b> It used to wrap both dispatch blocks in one, but
+/// neither wrapped the save: the base <c>SavingChangesAsync</c>/<c>SavedChangesAsync</c> calls are
+/// pass-throughs, so each transaction enclosed only the publishing and committed nothing. They also
+/// made this interceptor incompatible with <see cref="AuditableEntityInterceptor"/>, which holds a
+/// real transaction across the save - a second <c>BeginTransaction</c> on the same connection throws.
+/// </para>
+/// <para>
+/// It also skips entirely while the audit rows are being written (<see cref="AuditWriteScope"/>), so
+/// domain events are published once, from the outer save, after the audit transaction has committed.
+/// </para>
 /// </summary>
 public class DispatchDomainEventsInterceptor : SaveChangesInterceptor
 {
@@ -28,40 +44,9 @@ public class DispatchDomainEventsInterceptor : SaveChangesInterceptor
         CancellationToken cancellationToken = default)
     {
         var context = eventData.Context;
-        if (context == null)
-            return await base.SavingChangesAsync(eventData, result, cancellationToken);
-
-        var domainEventEntities = context.ChangeTracker
-            .Entries<BaseEntity>()
-            .Where(e => e.Entity.DomainEvents.Any() && e.State == EntityState.Deleted)
-            .Select(e => e.Entity)
-            .ToList();
-
-        var domainEvents = domainEventEntities
-            .SelectMany(e => e.DomainEvents)
-            .ToList();
-
-        if (domainEvents.Any())
+        if (context is not null && !AuditWriteScope.IsActive(context))
         {
-            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-            try
-            {
-                var saveResult = await base.SavingChangesAsync(eventData, result, cancellationToken);
-
-                domainEventEntities.ForEach(e => e.ClearDomainEvents());
-                foreach (var domainEvent in domainEvents)
-                {
-                    await PublishDomainEvent(domainEvent, cancellationToken);
-                }
-
-                await transaction.CommitAsync(cancellationToken);
-                return saveResult;
-            }
-            catch
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                throw;
-            }
+            await DispatchAsync(context, EntityState.Deleted, matches: true, cancellationToken);
         }
 
         return await base.SavingChangesAsync(eventData, result, cancellationToken);
@@ -73,67 +58,66 @@ public class DispatchDomainEventsInterceptor : SaveChangesInterceptor
         int result,
         CancellationToken cancellationToken = default)
     {
-        var context = eventData.Context;
-        if (context == null)
-            return await base.SavedChangesAsync(eventData, result, cancellationToken);
+        var saveResult = await base.SavedChangesAsync(eventData, result, cancellationToken);
 
-        var domainEventEntities = context.ChangeTracker
+        var context = eventData.Context;
+        if (context is not null && !AuditWriteScope.IsActive(context))
+        {
+            await DispatchAsync(context, EntityState.Deleted, matches: false, cancellationToken);
+        }
+
+        return saveResult;
+    }
+
+    /// <inheritdoc/>
+    public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
+    {
+        var context = eventData.Context;
+        if (context is not null && !AuditWriteScope.IsActive(context))
+        {
+            DispatchAsync(context, EntityState.Deleted, matches: true, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+
+        return base.SavingChanges(eventData, result);
+    }
+
+    /// <inheritdoc/>
+    public override int SavedChanges(SaveChangesCompletedEventData eventData, int result)
+    {
+        var saveResult = base.SavedChanges(eventData, result);
+
+        var context = eventData.Context;
+        if (context is not null && !AuditWriteScope.IsActive(context))
+        {
+            DispatchAsync(context, EntityState.Deleted, matches: false, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+
+        return saveResult;
+    }
+
+    /// <summary>
+    /// Publishes and clears the domain events of every tracked <see cref="BaseEntity"/> whose state
+    /// does (or does not) equal <paramref name="state"/>.
+    /// </summary>
+    private async Task DispatchAsync(
+        DbContext context, EntityState state, bool matches, CancellationToken cancellationToken)
+    {
+        var entities = context.ChangeTracker
             .Entries<BaseEntity>()
-            .Where(e => e.Entity.DomainEvents.Any() && e.State != EntityState.Deleted)
+            .Where(e => e.Entity.DomainEvents.Any() && (e.State == state) == matches)
             .Select(e => e.Entity)
             .ToList();
 
-        var domainEvents = domainEventEntities
-            .SelectMany(e => e.DomainEvents)
-            .ToList();
+        if (entities.Count == 0) return;
 
-        if (domainEvents.Any())
-        {
-            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-            try
-            {
-                var saveResult = await base.SavedChangesAsync(eventData, result, cancellationToken);
-
-                domainEventEntities.ForEach(e => e.ClearDomainEvents());
-                foreach (var domainEvent in domainEvents)
-                {
-                    await PublishDomainEvent(domainEvent, cancellationToken);
-                }
-
-                await transaction.CommitAsync(cancellationToken);
-                return saveResult;
-            }
-            catch
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                throw;
-            }
-        }
-
-        return await base.SavedChangesAsync(eventData, result, cancellationToken);
-    }
-
-    private async Task DispatchDomainEvents(DbContext? context)
-    {
-        if (context == null) return;
-
-        var entities = context.ChangeTracker
-            .Entries<BaseEntity>()
-            .Where(e => e.Entity.DomainEvents.Any())
-            .Select(e => e.Entity);
-
-        var domainEvents = entities
-            .SelectMany(e => e.DomainEvents)
-            .ToList();
-
-        entities.ToList().ForEach(e => e.ClearDomainEvents());
+        var domainEvents = entities.SelectMany(e => e.DomainEvents).ToList();
+        entities.ForEach(e => e.ClearDomainEvents());
 
         foreach (var domainEvent in domainEvents)
-            await PublishDomainEvent(domainEvent, CancellationToken.None);
-    }
-
-    private async ValueTask PublishDomainEvent(DomainEvent domainEvent, CancellationToken cancellationToken)
-    {
-        await _mediator.Publish(domainEvent, cancellationToken);
+        {
+            await _mediator.Publish(domainEvent, cancellationToken);
+        }
     }
 }
