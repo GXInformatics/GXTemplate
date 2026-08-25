@@ -19,19 +19,20 @@ public class GetFileStreamQuery : ICacheableRequest<(string, byte[])>
     public int Id { get; set; }
 
     /// <summary>
-    /// Id of the requesting user. Part of <see cref="CacheKey"/> so that two principals can never
-    /// share a cached entry, and checked against the ambient user context by the handler.
+    /// Id of the requesting user. No longer part of <see cref="CacheKey"/> - the declared
+    /// <see cref="Scope"/> supplies it from the ambient context - but still checked against that
+    /// context by the handler, so a request carrying someone else's principal is refused.
     /// </summary>
     public string? UserId { get; set; }
 
-    /// <summary>
-    /// Tenant of the requesting user. Part of <see cref="CacheKey"/> for the same reason as
-    /// <see cref="UserId"/>.
-    /// </summary>
+    /// <summary>Tenant of the requesting user; same role as <see cref="UserId"/>.</summary>
     public string? TenantId { get; set; }
 
-    public string CacheKey => DocumentCacheKey.GetStreamByIdKey(Id, UserId, TenantId);
+    public string CacheKey => DocumentCacheKey.GetStreamByIdKey(Id);
     public IEnumerable<string>? Tags => DocumentCacheKey.Tags;
+    
+    /// <summary>document visibility is per owner and per tenant - see the handler's ownership check.</summary>
+    public CacheScope Scope => CacheScope.PerUserAndTenant;
 }
 
 public class GetFileStreamQueryHandler : IRequestHandler<GetFileStreamQuery, (string, byte[])>
@@ -55,9 +56,9 @@ public class GetFileStreamQueryHandler : IRequestHandler<GetFileStreamQuery, (st
         var currentUser = _userContextAccessor.Current;
         if (currentUser is null) throw NotFound(request.Id);
 
-        // CacheKey is built from the principal carried on the request, so a request whose carried
-        // principal disagrees with the ambient one must never be served: doing so would file this
-        // principal's bytes under another principal's cache key.
+        // The cache entry is now scoped by the AMBIENT principal, so a mismatched carried principal
+        // can no longer poison another principal's entry. The check stays as an authorization guard:
+        // a caller asking on someone else's behalf is refused rather than quietly served.
         if (!string.Equals(request.UserId, currentUser.UserId, StringComparison.Ordinal) ||
             !string.Equals(request.TenantId, currentUser.TenantId, StringComparison.Ordinal))
         {

@@ -12,6 +12,9 @@ public class SystemLogsTimeLineChatDataQuery : ICacheableRequest<List<SystemLogT
     public DateTime LastDateTime { get; set; } = DateTime.Now.AddDays(-60);
     public string CacheKey => SystemLogsCacheKey.GetChartDataCacheKey(LastDateTime.ToString());
     public IEnumerable<string>? Tags => SystemLogsCacheKey.Tags;
+    
+    /// <summary>system-wide log chart data, not principal-filtered.</summary>
+    public CacheScope Scope => CacheScope.Global;
 }
 
 public class SystemLogsChatDataQueryHandler : IRequestHandler<SystemLogsTimeLineChatDataQuery, List<SystemLogTimeLineDto>>

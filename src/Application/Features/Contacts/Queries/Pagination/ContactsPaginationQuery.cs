@@ -26,10 +26,13 @@ public class ContactsWithPaginationQuery : ContactAdvancedFilter, ICacheableRequ
 {
     public override string ToString()
     {
-        return $"Listview:{ListView}:{CurrentUser?.UserId}, Search:{Keyword}, {OrderBy}, {SortDirection}, {PageNumber}, {PageSize}";
+        return $"Listview:{ListView}, Search:{Keyword}, {OrderBy}, {SortDirection}, {PageNumber}, {PageSize}";
     }
     public string CacheKey => ContactCacheKey.GetPaginationCacheKey($"{this}");
     public IEnumerable<string>? Tags => ContactCacheKey.Tags;
+    
+    /// <summary>the specification filters the date window by the caller's local time offset.</summary>
+    public CacheScope Scope => CacheScope.PerUser;
     public ContactAdvancedSpecification Specification => new ContactAdvancedSpecification(this);
 }
     

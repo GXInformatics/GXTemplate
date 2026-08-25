@@ -16,12 +16,30 @@ public class FusionAppCache : IAppCache
         string key,
         Func<CancellationToken, Task<T>> factory,
         IEnumerable<string>? tags = null,
+        CacheEntryOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         return _cache.GetOrSetAsync(
             key,
             _ => factory(cancellationToken),
+            options: ToEntryOptions(options),
             tags: tags).AsTask();
+    }
+
+    /// <summary>
+    /// Starts from the configured defaults and changes only what the caller asked for, so an entry
+    /// that opts out of fail-safe still inherits the global duration, timeouts and jitter.
+    /// </summary>
+    private FusionCacheEntryOptions? ToEntryOptions(CacheEntryOptions? options)
+    {
+        if (options is null || options.AllowStaleOnFailure)
+        {
+            return null;
+        }
+
+        var entryOptions = _cache.DefaultEntryOptions.Duplicate();
+        entryOptions.IsFailSafeEnabled = false;
+        return entryOptions;
     }
 
     public void Remove(string key)

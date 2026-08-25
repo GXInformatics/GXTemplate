@@ -14,11 +14,14 @@ public class AuditTrailsWithPaginationQuery : AuditTrailAdvancedFilter, ICacheab
     public AuditTrailAdvancedSpecification Specification => new(this);
     public string CacheKey => AuditTrailsCacheKey.GetPaginationCacheKey($"{this}");
     public IEnumerable<string>? Tags => AuditTrailsCacheKey.Tags;
+    
+    /// <summary>the specification filters the date window by the caller's local time offset.</summary>
+    public CacheScope Scope => CacheScope.PerUser;
 
     public override string ToString()
     {
         return
-            $"Listview:{ListView}-{CurrentUser?.UserId},AuditType:{AuditType},Search:{Keyword},Sort:{SortDirection},OrderBy:{OrderBy},{PageNumber},{PageSize}";
+            $"Listview:{ListView},AuditType:{AuditType},Search:{Keyword},Sort:{SortDirection},OrderBy:{OrderBy},{PageNumber},{PageSize}";
     }
 }
 

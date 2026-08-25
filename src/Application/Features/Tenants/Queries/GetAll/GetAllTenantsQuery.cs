@@ -13,6 +13,9 @@ public class GetAllTenantsQuery : ICacheableRequest<IEnumerable<TenantDto>>
 {
     public string CacheKey => TenantCacheKey.GetAllCacheKey;
     public IEnumerable<string>? Tags => TenantCacheKey.Tags;
+    
+    /// <summary>the full tenant list, identical for every caller.</summary>
+    public CacheScope Scope => CacheScope.Global;
 }
 
 public class GetAllTenantsQueryHandler :

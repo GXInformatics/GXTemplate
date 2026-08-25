@@ -1,4 +1,5 @@
 #nullable enable
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Caching;
 using CleanArchitecture.Blazor.Application.Common.Security;
 using CleanArchitecture.Blazor.Application.Features.SystemLogs.Queries.PaginationQuery;
 using CleanArchitecture.Blazor.Application.Features.SystemLogs.Specifications;
@@ -60,6 +61,15 @@ public class SystemLogsWithPaginationQueryCacheKeyTests
 
         query.CacheKey.Should().Contain(query.CurrentUser!.LocalTimeOffset.ToString(),
             "the key must be derived from the same value the specification builds its window from");
+    }
+
+    [Test]
+    public void TheQueryDeclaresGlobalScope_SoTheOffsetMustStayInTheKey()
+    {
+        // System logs are not principal-scoped, so no CacheScope separates these entries - and none
+        // could supply the offset anyway: UserContext carries UserId and TenantId, not a time zone.
+        // That is why this one query still folds its own principal-derived component into the key.
+        Query("Asia/Tokyo").Scope.Should().Be(CacheScope.Global);
     }
 
     [Test]

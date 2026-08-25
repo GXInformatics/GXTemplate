@@ -6,11 +6,13 @@ namespace CleanArchitecture.Blazor.Application.Features.Documents.Caching;
 public static class DocumentCacheKey
 {
     public const string GetAllCacheKey = "all-documents";
-    public static string GetStreamByIdKey(int id, string? userId, string? tenantId)
+    public static string GetStreamByIdKey(int id)
     {
-        // The principal is part of the key: document bytes are visibility-scoped, so two users must
-        // never share a cache entry for the same document id.
-        return $"GetStreamByIdKey:{id},UserId:{userId},TenantId:{tenantId}";
+        // The principal is no longer spelled into the key by hand: GetFileStreamQuery declares
+        // CacheScope.PerUserAndTenant and the caching behaviour folds the ambient user and tenant
+        // in. Two principals still cannot share an entry - it is now the pipeline that guarantees
+        // it rather than each query remembering to.
+        return $"GetStreamByIdKey:{id}";
     }
     public static string GetPaginationCacheKey(string parameters)
     {

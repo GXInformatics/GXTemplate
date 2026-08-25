@@ -13,6 +13,9 @@ public class TenantsWithPaginationQuery : PaginationFilter, ICacheableRequest<Pa
     public TenantsPaginationSpecification Specification => new(this);
     public string CacheKey => TenantCacheKey.GetPaginationCacheKey($"{this}");
     public IEnumerable<string>? Tags => TenantCacheKey.Tags;
+    
+    /// <summary>tenant administration listing, not principal-filtered.</summary>
+    public CacheScope Scope => CacheScope.Global;
 
     public override string ToString()
     {

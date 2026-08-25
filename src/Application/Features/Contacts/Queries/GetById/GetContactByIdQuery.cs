@@ -27,6 +27,9 @@ public class GetContactByIdQuery : ICacheableRequest<Result<ContactDto>>
    public required int Id { get; set; }
    public string CacheKey => ContactCacheKey.GetByIdCacheKey($"{Id}");
    public IEnumerable<string>? Tags => ContactCacheKey.Tags;
+   
+   /// <summary>a contact by id, identical for every caller.</summary>
+   public CacheScope Scope => CacheScope.Global;
 }
 
 public class GetContactByIdQueryHandler :

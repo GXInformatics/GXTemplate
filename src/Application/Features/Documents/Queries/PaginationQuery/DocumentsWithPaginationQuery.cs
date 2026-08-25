@@ -16,11 +16,14 @@ public class DocumentsWithPaginationQuery : AdvancedDocumentsFilter, ICacheableR
 
     public string CacheKey => DocumentCacheKey.GetPaginationCacheKey($"{this}");
     public IEnumerable<string>? Tags => DocumentCacheKey.Tags;
+    
+    /// <summary>the listing is filtered by owner and tenant visibility.</summary>
+    public CacheScope Scope => CacheScope.PerUserAndTenant;
 
     public override string ToString()
     {
         return
-            $"CurrentUserId:{CurrentUser?.UserId},ListView:{ListView},Search:{Keyword},OrderBy:{OrderBy} {SortDirection},{PageNumber},{PageSize}";
+            $"ListView:{ListView},Search:{Keyword},OrderBy:{OrderBy} {SortDirection},{PageNumber},{PageSize}";
     }
 }
 

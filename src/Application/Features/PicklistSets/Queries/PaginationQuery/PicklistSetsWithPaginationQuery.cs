@@ -14,10 +14,13 @@ public class PicklistSetsWithPaginationQuery : PicklistSetAdvancedFilter, ICache
     public PicklistSetAdvancedSpecification Specification => new(this);
     public string CacheKey => $"{nameof(PicklistSetsWithPaginationQuery)},{this}";
     public IEnumerable<string>? Tags => PicklistSetCacheKey.Tags;
+    
+    /// <summary>the specification filters the date window by the caller's local time offset.</summary>
+    public CacheScope Scope => CacheScope.PerUser;
 
     public override string ToString()
     {
-        return $"ListView:{ListView}-{Picklist}-{CurrentUser?.UserId},Search:{Keyword},OrderBy:{OrderBy} {SortDirection},{PageNumber},{PageSize}";
+        return $"ListView:{ListView}-{Picklist},Search:{Keyword},OrderBy:{OrderBy} {SortDirection},{PageNumber},{PageSize}";
     }
 }
 

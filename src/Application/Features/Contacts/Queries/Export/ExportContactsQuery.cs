@@ -27,9 +27,12 @@ public class ExportContactsQuery : ContactAdvancedFilter, ICacheableRequest<Resu
 {
       public ContactAdvancedSpecification Specification => new ContactAdvancedSpecification(this);
       public IEnumerable<string>? Tags => ContactCacheKey.Tags;
+      
+      /// <summary>the specification filters the date window by the caller's local time offset.</summary>
+      public CacheScope Scope => CacheScope.PerUser;
     public override string ToString()
     {
-        return $"Listview:{ListView}:{CurrentUser?.UserId}, Search:{Keyword}, {OrderBy}, {SortDirection}";
+        return $"Listview:{ListView}, Search:{Keyword}, {OrderBy}, {SortDirection}";
     }
     public string CacheKey => ContactCacheKey.GetExportCacheKey($"{this}");
 }

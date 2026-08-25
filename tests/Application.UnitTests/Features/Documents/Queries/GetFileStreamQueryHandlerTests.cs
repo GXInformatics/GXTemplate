@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Caching;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Application.Features.Documents.Queries.GetFileStream;
 using CleanArchitecture.Blazor.Domain.Entities;
@@ -186,16 +187,37 @@ public class GetFileStreamQueryHandlerTests
     }
 
     [Test]
-    public void CacheKey_IsDistinctPerPrincipal()
+    public void TheEffectiveCacheKeyIsDistinctPerPrincipal()
     {
-        var forA = new GetFileStreamQuery(_privateDocOfA, UserA, TenantId).CacheKey;
-        var forB = new GetFileStreamQuery(_privateDocOfA, UserB, TenantId).CacheKey;
-        var forAInOtherTenant = new GetFileStreamQuery(_privateDocOfA, UserA, "tenant-2").CacheKey;
+        // The guarantee is unchanged - two principals can never share an entry for the same document
+        // - but the pipeline now provides it. The query declares PerUserAndTenant and the caching
+        // behaviour folds the AMBIENT user and tenant in, so the separation no longer depends on the
+        // calling page having passed the right principal into the request.
+        var query = new GetFileStreamQuery(_privateDocOfA, UserA, TenantId);
+        query.Scope.Should().Be(CacheScope.PerUserAndTenant);
 
-        forA.Should().NotBe(forB);
-        forA.Should().NotBe(forAInOtherTenant);
-        forA.Should().Contain(UserA);
+        var forA = CacheScopeKey.Compose(query.CacheKey, query.Scope, Context(UserA, TenantId));
+        var forB = CacheScopeKey.Compose(query.CacheKey, query.Scope, Context(UserB, TenantId));
+        var forAInOtherTenant = CacheScopeKey.Compose(query.CacheKey, query.Scope, Context(UserA, "tenant-2"));
+
+        forA.Should().NotBe(forB, "a different user must not reach the same entry");
+        forA.Should().NotBe(forAInOtherTenant, "a different tenant must not reach the same entry");
+        forA.Should().Contain(UserA).And.Contain(TenantId);
     }
+
+    [Test]
+    public void TheDeclaredCacheKeyNoLongerCarriesThePrincipalByHand()
+    {
+        // Recorded deliberately: the principal moved OUT of the declared key and INTO the scope.
+        // Reintroducing it here would fold it in twice.
+        var query = new GetFileStreamQuery(_privateDocOfA, UserA, TenantId);
+
+        query.CacheKey.Should().NotContain(UserA).And.NotContain(TenantId);
+        query.CacheKey.Should().Contain(_privateDocOfA.ToString());
+    }
+
+    private static UserContext Context(string userId, string tenantId) =>
+        new(UserId: userId, UserName: userId, TenantId: tenantId);
 
     private static async Task<string> CaptureMessageAsync(GetFileStreamQueryHandler handler, GetFileStreamQuery query)
     {

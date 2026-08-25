@@ -13,6 +13,9 @@ public class GetAllPicklistSetsQuery : ICacheableRequest<IEnumerable<PicklistSet
 {
     public string CacheKey => PicklistSetCacheKey.GetAllCacheKey;
     public IEnumerable<string>? Tags => PicklistSetCacheKey.Tags;
+    
+    /// <summary>reference data, identical for every caller.</summary>
+    public CacheScope Scope => CacheScope.Global;
 }
 
 public class GetAllPicklistSetsQueryHandler : IRequestHandler<GetAllPicklistSetsQuery, IEnumerable<PicklistSetDto>>

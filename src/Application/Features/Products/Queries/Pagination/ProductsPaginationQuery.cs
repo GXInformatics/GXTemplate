@@ -16,12 +16,15 @@ public class ProductsWithPaginationQuery : ProductAdvancedFilter, ICacheableRequ
     public string CacheKey => ProductCacheKey.GetPaginationCacheKey($"{this}");
 
     public IEnumerable<string>? Tags => ProductCacheKey.Tags;
+    
+    /// <summary>the specification filters the date window by the caller's local time offset.</summary>
+    public CacheScope Scope => CacheScope.PerUser;
 
     // the currently logged in user
     public override string ToString()
     {
         return
-            $"CurrentUser:{CurrentUser?.UserId},ListView:{ListView},Search:{Keyword},Name:{Name},Brand:{Brand},Unit:{Unit},MinPrice:{MinPrice},MaxPrice:{MaxPrice},SortDirection:{SortDirection},OrderBy:{OrderBy},{PageNumber},{PageSize}";
+            $"ListView:{ListView},Search:{Keyword},Name:{Name},Brand:{Brand},Unit:{Unit},MinPrice:{MinPrice},MaxPrice:{MaxPrice},SortDirection:{SortDirection},OrderBy:{OrderBy},{PageNumber},{PageSize}";
     }
 }
 

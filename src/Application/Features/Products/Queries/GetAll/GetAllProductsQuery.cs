@@ -12,6 +12,9 @@ public class GetAllProductsQuery : ICacheableRequest<IEnumerable<ProductDto>>
 {
     public string CacheKey => ProductCacheKey.GetAllCacheKey;
     public IEnumerable<string>? Tags => ProductCacheKey.Tags;
+
+    /// <summary>The full product list, identical for every caller.</summary>
+    public CacheScope Scope => CacheScope.Global;
 }
 
 [RequestAuthorize(Policy = Permissions.Products.View)]
@@ -21,6 +24,9 @@ public class GetProductQuery : ICacheableRequest<ProductDto?>
 
     public string CacheKey => ProductCacheKey.GetProductByIdCacheKey(Id);
     public IEnumerable<string>? Tags => ProductCacheKey.Tags;
+
+    /// <summary>A product by id, identical for every caller.</summary>
+    public CacheScope Scope => CacheScope.Global;
 }
 
 public class GetAllProductsQueryHandler :

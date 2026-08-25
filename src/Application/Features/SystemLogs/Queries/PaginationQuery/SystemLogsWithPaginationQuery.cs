@@ -15,6 +15,9 @@ public class SystemLogsWithPaginationQuery : SystemLogAdvancedFilter, ICacheable
 
     public string CacheKey => SystemLogsCacheKey.GetPaginationCacheKey($"{this}");
     public IEnumerable<string>? Tags => SystemLogsCacheKey.Tags;
+    
+    /// <summary>system logs are not principal-scoped; the only principal-derived input is the local time offset, which stays in the key (UserContext carries no time zone, so no scope can supply it).</summary>
+    public CacheScope Scope => CacheScope.Global;
 
     public override string ToString()
     {

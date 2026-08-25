@@ -26,6 +26,9 @@ public class GetAllContactsQuery : ICacheableRequest<IEnumerable<ContactDto>>
 {
    public string CacheKey => ContactCacheKey.GetAllCacheKey;
    public IEnumerable<string>? Tags => ContactCacheKey.Tags;
+   
+   /// <summary>returns every contact with no per-principal filtering.</summary>
+   public CacheScope Scope => CacheScope.Global;
 }
 
 public class GetAllContactsQueryHandler :
