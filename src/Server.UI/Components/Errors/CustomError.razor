@@ -1,6 +1,9 @@
 ﻿@using System.Net
+@using Microsoft.AspNetCore.Hosting
+@using Microsoft.Extensions.Hosting
 @inject ILogger<CustomError> Logger
 @inject IStringLocalizer<CustomError> L
+@inject IWebHostEnvironment HostEnvironment
 
 <div style="display: flex; justify-content: center; align-items: center; min-height: 60vh; padding: 2rem;">
     <MudPaper Class="pa-8" Elevation="1" Style="max-width: 600px; text-align: center;">
@@ -25,32 +28,36 @@
             </MudText>
         </MudPaper>
 
-        <!-- Technical Details Section -->
-        <MudStack AlignItems="AlignItems.Center" Class="mb-4">
-            <MudButton 
-                Variant="Variant.Text" 
-                EndIcon="@(ShowStackTrace ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" 
-                OnClick="@(() => ShowStackTrace = !ShowStackTrace)">
-                @(ShowStackTrace ? L["Hide Technical Details"] : L["Show Technical Details"])
-            </MudButton>
-        </MudStack>
-
-        @if (ShowStackTrace)
+        @* Technical details (exception message and stack trace) are gated on the environment:
+           outside Development neither the toggle nor the details are rendered at all. *@
+        @if (ShowTechnicalDetails)
         {
-            <MudPaper Elevation="0" Class="mb-4 pa-4" Style="background-color: var(--mud-palette-background-grey); text-align: left;">
-                
-                <!-- Original Exception Message (For IT/Debug) -->
-                <MudText Typo="Typo.subtitle2" Class="mb-1" Color="Color.Error">@L["Error Message"]:</MudText>
-                <MudText Typo="Typo.body2" Class="mb-3" Style="font-weight: bold;">@OriginalMessage</MudText>
-                
-                <MudDivider Class="mb-3"/>
+            <MudStack AlignItems="AlignItems.Center" Class="mb-4">
+                <MudButton 
+                    Variant="Variant.Text" 
+                    EndIcon="@(ShowStackTrace ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" 
+                    OnClick="@(() => ShowStackTrace = !ShowStackTrace)">
+                    @(ShowStackTrace ? L["Hide Technical Details"] : L["Show Technical Details"])
+                </MudButton>
+            </MudStack>
 
-                <!-- Stack Trace -->
-                <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Stack Trace"]:</MudText>
-                <MudText Typo="Typo.body2" Style="white-space: pre-wrap; overflow-x: auto; max-height: 200px; font-family: monospace; font-size: 0.75rem;">
-                    @StackTrace
-                </MudText>
-            </MudPaper>
+            @if (ShowStackTrace)
+            {
+                <MudPaper Elevation="0" Class="mb-4 pa-4" Style="background-color: var(--mud-palette-background-grey); text-align: left;">
+                    
+                    <!-- Original Exception Message (For IT/Debug) -->
+                    <MudText Typo="Typo.subtitle2" Class="mb-1" Color="Color.Error">@L["Error Message"]:</MudText>
+                    <MudText Typo="Typo.body2" Class="mb-3" Style="font-weight: bold;">@OriginalMessage</MudText>
+                    
+                    <MudDivider Class="mb-3"/>
+
+                    <!-- Stack Trace -->
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Stack Trace"]:</MudText>
+                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap; overflow-x: auto; max-height: 200px; font-family: monospace; font-size: 0.75rem;">
+                        @StackTrace
+                    </MudText>
+                </MudPaper>
+            }
         }
         
         <MudStack Row Justify="Justify.Center" Spacing="2">
@@ -80,6 +87,10 @@
     // Actual exception message (Technical)
     private string? OriginalMessage { get; set; }     
     private bool ShowStackTrace { get; set; }
+
+    // Technical details are developer-facing. They are rendered only in the Development
+    // environment so that production users never see internal exception text or stack frames.
+    private bool ShowTechnicalDetails => HostEnvironment.IsDevelopment();
     private string? StackTrace { get; set; }
     private string? StatusCode { get; set; } = HttpStatusCode.InternalServerError.ToString();
 

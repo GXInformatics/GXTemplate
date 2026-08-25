@@ -396,7 +396,7 @@
 		try
 		{
 			_isDownloading = true;
-			var file = await Mediator.Send(new GetFileStreamQuery(dto.Id));
+			var file = await Mediator.Send(new GetFileStreamQuery(dto.Id, UserProfile.UserId, UserProfile.TenantId));
 			if (file.Item2 != null)
 			{
 				await _downloadFileService.DownloadFileAsync(file.Item1, file.Item2, "application/octet-stream");

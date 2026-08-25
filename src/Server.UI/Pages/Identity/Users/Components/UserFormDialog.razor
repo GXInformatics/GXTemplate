@@ -224,6 +224,17 @@
                         await _userManager.AddToRolesAsync(existingUser, Model.AssignedRoles);
                     }
                 }
+
+                // Role membership was rewritten above (all roles removed, then the selected ones
+                // re-added). If the effective set changed, bump the security stamp so any session the
+                // user already has fails its next revalidation instead of carrying stale role claims
+                // for the remaining cookie lifetime - see IdentityRevalidatingAuthenticationStateProvider.
+                var assignedRoles = Model.AssignedRoles ?? Array.Empty<string>();
+                if (!existingRoles.OrderBy(r => r, StringComparer.Ordinal)
+                        .SequenceEqual(assignedRoles.OrderBy(r => r, StringComparer.Ordinal), StringComparer.Ordinal))
+                {
+                    await _userManager.UpdateSecurityStampAsync(existingUser);
+                }
             }
             else
             {
