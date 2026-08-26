@@ -8,11 +8,11 @@ namespace CleanArchitecture.Blazor.Application.Features.Documents.Commands.Uploa
 [RequestAuthorize(Policy = Permissions.Documents.Create)]
 public class UploadDocumentCommand : ICacheInvalidatorRequest<Result<int>>
 {
-    public UploadDocumentCommand(List<UploadRequest> uploadRequests)
+    public UploadDocumentCommand(List<FileUploadRequest> uploadRequests)
     {
         UploadRequests = uploadRequests;
     }
-    public List<UploadRequest> UploadRequests { get; set; }
+    public List<FileUploadRequest> UploadRequests { get; set; }
     public IEnumerable<string>? Tags => DocumentCacheKey.Tags;
 }
 
@@ -20,15 +20,15 @@ public class UploadDocumentCommandHandler : IRequestHandler<UploadDocumentComman
 {
   
     private readonly IApplicationDbContextFactory _dbContextFactory;
-    private readonly IFileUploadService _uploadService;
+    private readonly IFileStorage _fileStorage;
 
     public UploadDocumentCommandHandler(
        IApplicationDbContextFactory dbContextFactory,
-        IFileUploadService uploadService
+        IFileStorage fileStorage
     )
     {
         _dbContextFactory = dbContextFactory;
-        _uploadService = uploadService;
+        _fileStorage = fileStorage;
     }
 
     public async ValueTask<Result<int>> Handle(UploadDocumentCommand request, CancellationToken cancellationToken)
@@ -37,15 +37,18 @@ public class UploadDocumentCommandHandler : IRequestHandler<UploadDocumentComman
         foreach (var uploadRequest in request.UploadRequests)
         {
             var fileName = uploadRequest.FileName;
-            var uploadResult = await _uploadService.UploadAsync(uploadRequest);
+            var uploadResult = await _fileStorage.SaveAsync(uploadRequest, cancellationToken);
             if (!uploadResult.Succeeded)
             {
                 return await Result<int>.FailureAsync(uploadResult.ErrorMessage ?? "Failed to upload document");
             }
+            // The RETURNED key, not the one the request implied: an overwrite-averse save may have
+            // derived a different one, and the derived key is where the bytes actually are.
             var document = new Document
             {
                 Title = fileName,
-                URL = uploadResult.Data!.Url,
+                StorageKey = uploadResult.Data!.StorageKey,
+                PublicUrl = uploadResult.Data.PublicUrl,
                 IsPublic = true,
                 DocumentType = DocumentType.Image
             };

@@ -36,7 +36,10 @@ public class SmtpClientOptions
     /// <summary>
     /// Default from email address
     /// </summary>
-    public string DefaultFromEmail { get; set; } = "noreply@blazorserver.com";
+    // example.com is IANA-reserved and can never route, so an SMTP host configured without setting
+    // this sends mail that is self-evidently unconfigured rather than mail claiming to be from a
+    // third party's real domain.
+    public string DefaultFromEmail { get; set; } = "noreply@example.com";
 
 
     /// <summary>

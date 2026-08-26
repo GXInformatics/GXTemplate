@@ -13,7 +13,17 @@ public class Document : BaseAuditableEntity, IMayHaveTenant, IAuditable
     public string? Title { get; set; }
     public string? Description { get; set; }
     public bool IsPublic { get; set; }
-    public string? URL { get; set; }
+    /// <summary>
+    /// Provider-opaque identity of the stored object, of the shape {UploadType}/{Folder?}/{FileName}.
+    /// Authoritative: this is what read and delete resolve against.
+    /// </summary>
+    public string? StorageKey { get; set; }
+
+    /// <summary>
+    /// Browser-resolvable address of the same object, for direct rendering. Nullable because a
+    /// stored object does not have to be directly renderable.
+    /// </summary>
+    public string? PublicUrl { get; set; }
     public DocumentType DocumentType { get; set; } = default!;
     public virtual Tenant? Tenant { get; set; }
     public string? TenantId { get; set; }

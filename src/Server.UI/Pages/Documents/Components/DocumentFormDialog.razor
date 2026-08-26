@@ -68,7 +68,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!string.IsNullOrEmpty(Model.URL)) await new OpenSeadragon(JS).Open(Model.URL);
+        if (!string.IsNullOrEmpty(Model.PublicUrl)) await new OpenSeadragon(JS).Open(Model.PublicUrl);
     }
 
     private async Task Submit()

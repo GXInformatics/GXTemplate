@@ -6,6 +6,11 @@ using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Caching;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Storage;
+using CleanArchitecture.Blazor.Application.Common.Models;
+using CleanArchitecture.Blazor.Domain.Common.Enums;
+using CleanArchitecture.Blazor.Infrastructure.Configurations;
+using CleanArchitecture.Blazor.Infrastructure.Services.Storage;
 using CleanArchitecture.Blazor.Application.Features.Documents.Queries.GetFileStream;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Domain.Identity;
@@ -33,6 +38,7 @@ public class GetFileStreamQueryHandlerTests
     private SqliteConnection _connection = null!;
     private ApplicationDbContext _db = null!;
     private string _fileRoot = null!;
+    private IFileStorage _fileStorage = null!;
 
     private int _privateDocOfA;
     private int _publicDocOfA;
@@ -49,9 +55,12 @@ public class GetFileStreamQueryHandlerTests
         _db = new ApplicationDbContext(options);
         await _db.Database.EnsureCreatedAsync();
 
-        // Files are resolved relative to the current directory by the handler.
-        _fileRoot = Path.Combine("test-documents", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(Directory.GetCurrentDirectory(), _fileRoot));
+        // The handler no longer touches the filesystem itself - it reads through IFileStorage. The
+        // real disk provider is used here, rooted at a throwaway directory, so these tests exercise
+        // the actual key -> bytes path rather than a stub of it.
+        _fileRoot = Path.Combine(Path.GetTempPath(), "gx-storage-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_fileRoot);
+        _fileStorage = new LocalDiskFileStorage(new StorageSettings { RootPath = _fileRoot });
 
         _db.Tenants.Add(new Tenant { Id = TenantId, Name = "Tenant One" });
         _db.Users.Add(new ApplicationUser { Id = UserA, UserName = "a", Email = "a@example.com", TenantId = TenantId });
@@ -68,17 +77,17 @@ public class GetFileStreamQueryHandlerTests
         await _db.DisposeAsync();
         await _connection.DisposeAsync();
 
-        var absoluteRoot = Path.Combine(Directory.GetCurrentDirectory(), _fileRoot);
-        if (Directory.Exists(absoluteRoot))
+        if (Directory.Exists(_fileRoot))
         {
-            Directory.Delete(absoluteRoot, recursive: true);
+            Directory.Delete(_fileRoot, recursive: true);
         }
     }
 
     private async Task<int> AddDocumentAsync(bool isPublic, string ownerId, string contents)
     {
-        var relativePath = Path.Combine(_fileRoot, $"{Guid.NewGuid():N}.txt");
-        await File.WriteAllTextAsync(Path.Combine(Directory.GetCurrentDirectory(), relativePath), contents);
+        var stored = await _fileStorage.SaveAsync(new FileUploadRequest(
+            $"{Guid.NewGuid():N}.txt", UploadType.Document, System.Text.Encoding.UTF8.GetBytes(contents)));
+        stored.Succeeded.Should().BeTrue();
 
         var document = new Document
         {
@@ -86,7 +95,8 @@ public class GetFileStreamQueryHandlerTests
             IsPublic = isPublic,
             TenantId = TenantId,
             CreatedById = ownerId,
-            URL = relativePath
+            StorageKey = stored.Data!.StorageKey,
+            PublicUrl = stored.Data.PublicUrl
         };
         _db.Documents.Add(document);
         await _db.SaveChangesAsync();
@@ -107,7 +117,7 @@ public class GetFileStreamQueryHandlerTests
         var accessor = new Mock<IUserContextAccessor>();
         accessor.SetupGet(x => x.Current).Returns(ambientUser);
 
-        return new GetFileStreamQueryHandler(factory.Object, accessor.Object);
+        return new GetFileStreamQueryHandler(factory.Object, accessor.Object, _fileStorage);
     }
 
     private static UserContext Context(string userId) =>
@@ -115,6 +125,64 @@ public class GetFileStreamQueryHandlerTests
 
     private static GetFileStreamQuery Query(int id, string userId) =>
         new(id, userId, TenantId);
+
+    [Test]
+    public async Task Handle_UploadedBytes_ComeBackByteIdentical()
+    {
+        // The A4 closure. Upload through the same abstraction the upload command uses, download
+        // through the query the download button uses, and compare bytes. On the pre-pass code the
+        // handler rebuilt a filesystem path from a field that could be an absolute https:// URL and
+        // returned (string.Empty, Array.Empty<byte>()) when that path did not exist - a completely
+        // broken download that looked exactly like an empty file.
+        var payload = new byte[512];
+        new Random(20260826).NextBytes(payload);
+
+        var stored = await _fileStorage.SaveAsync(new FileUploadRequest(
+            $"{Guid.NewGuid():N}.bin", UploadType.Document, payload));
+        stored.Succeeded.Should().BeTrue(stored.ErrorMessage);
+
+        var document = new Document
+        {
+            Title = "binary",
+            IsPublic = true,
+            TenantId = TenantId,
+            CreatedById = UserA,
+            StorageKey = stored.Data!.StorageKey,
+            PublicUrl = stored.Data.PublicUrl
+        };
+        _db.Documents.Add(document);
+        await _db.SaveChangesAsync();
+
+        var handler = CreateHandler(Context(UserA));
+        var (fileName, bytes) = await handler.Handle(Query(document.Id, UserA), CancellationToken.None);
+
+        bytes.Should().Equal(payload);
+        fileName.Should().Be(stored.Data.FileName);
+    }
+
+    [Test]
+    public async Task Handle_WhenTheStoredObjectIsMissing_IsReported_NotSilentlyEmpty()
+    {
+        // The other half of A4: a key that does not resolve must be an error the caller sees, never
+        // a successful read of zero bytes.
+        var document = new Document
+        {
+            Title = "dangling",
+            IsPublic = true,
+            TenantId = TenantId,
+            CreatedById = UserA,
+            StorageKey = "Documents/never-stored.bin"
+        };
+        _db.Documents.Add(document);
+        await _db.SaveChangesAsync();
+
+        var handler = CreateHandler(Context(UserA));
+
+        var act = async () => await handler.Handle(Query(document.Id, UserA), CancellationToken.None);
+
+        await act.Should().ThrowAsync<Exception>()
+            .WithMessage("*could not read the stored file*");
+    }
 
     [Test]
     public async Task Handle_OwnerOfPrivateDocument_ReturnsFileBytes()

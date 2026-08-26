@@ -1,4 +1,5 @@
-﻿@using Microsoft.AspNetCore.Antiforgery
+﻿@using System.Text.Json
+@using Microsoft.AspNetCore.Antiforgery
 @inject IHttpContextAccessor accessor
 @inject IAntiforgery Antiforgery
 @{
@@ -19,63 +20,28 @@
     <HeadOutlet @rendermode="RenderModeForPage"/>
     <ImportMap />
     <meta name="xsrf-token" content="@(tokens?.RequestToken)" />
-    <!-- Enhanced SEO Meta Tags -->
-    <meta name="description" content="Clean Architecture With Blazor Server: an enterprise-grade open source application template for rapid implementation using the Blazor stack (MudBlazor, EF Core, Identity, SignalR). Includes documented Best Practices for Blazor Clean Architecture (SOLID, DDD, CQRS, testability, performance optimization) enabling maintainable, scalable solutions with auditing, user & role management, multi-language support, and extensibility." />
-    <meta name="keywords" content="Clean Architecture With Blazor Server, Blazor Clean Architecture Best Practices, Blazor Server Template, Enterprise Application Template, Open Source GitHub, .NET, Rapid Development, CQRS, DDD, SOLID Principles, Separation of Concerns, Testability, Performance Optimization, Maintainability, Scalability, MudBlazor, EF Core, SignalR, Authentication, Authorization, Multi-Tenant" />
-    <meta name="author" content="Blazor Studio" />
+    <!-- Site metadata. Every value here is either a neutral technical fact or comes from
+         AppConfigurationSettings, so a generated project describes itself rather than the template
+         it came from. Tags that could not be made neutral without inventing a brand, a description
+         or an image URL were removed outright - see the pass report. -->
+    <meta name="author" content="@ApplicationSettings.Company" />
     <meta name="robots" content="index, follow" />
-    <meta name="application-name" content="Blazor Studio" />
+    <meta name="application-name" content="@ApplicationSettings.AppName" />
     <meta name="generator" content="Blazor Server" />
     <meta name="theme-color" content="#1976d2" />
-    
-    <!-- Open Graph Tags -->
-    <meta property="og:title" content="Clean Architecture With Blazor Server - Enterprise Application Template" />
-    <meta property="og:description" content="Open source enterprise Blazor Server template implementing Clean Architecture with documented best practices (SOLID, DDD, CQRS, testability, performance) for rapid, maintainable development: modular design, auditing, user & role management, multi-language, extensible GitHub-backed ecosystem." />
+
+    <!-- Open Graph Tags. og:image and its dimensions are gone: a preview image would have to be
+         invented, and a wrong one is worse than none. Twitter reads these when no twitter:* tags
+         are present, which is why that block is gone rather than rewritten. -->
+    <meta property="og:title" content="@ApplicationSettings.AppName" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://architecture.blazorserver.com" />
-    <meta property="og:site_name" content="Clean Architecture Blazor Server" />
+    <meta property="og:url" content="@ApplicationSettings.ApplicationUrl" />
+    <meta property="og:site_name" content="@ApplicationSettings.AppName" />
     <meta property="og:locale" content="en_US" />
-    <meta property="og:image" content="https://architecture.blazorserver.com/img/blazorstudio.png" />
-    <meta property="og:image:alt" content="Clean Architecture With Blazor Server Application Template" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="1078" />
-    
-    <!-- Twitter Card Tags -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Clean Architecture With Blazor Server - Enterprise Application Template" />
-    <meta name="twitter:description" content="Enterprise Blazor Server template with Clean Architecture best practices (SOLID, DDD, CQRS) for rapid, maintainable, performant development." />
-    <meta name="twitter:image" content="https://architecture.blazorserver.com/img/blazorstudio.png" />
-    <meta name="twitter:image:alt" content="Clean Architecture With Blazor Server Application Template" />
-    
+
     <!-- JSON-LD Structured Data -->
-    <script type="application/ld+json">
-    {
-        "@@context": "https://schema.org",
-        "@@type": "WebApplication",
-        "name": "Clean Architecture With Blazor Server",
-    "description": "Clean Architecture With Blazor Server: enterprise-grade open source Blazor Server application template with documented best practices (SOLID, DDD, CQRS, testability, performance) for rapid implementation and modular extension",
-        "url": "https://architecture.blazorserver.com",
-        "applicationCategory": "BusinessApplication",
-        "operatingSystem": "Web Browser",
-        "offers": {
-            "@@type": "Offer",
-            "price": "0",
-            "priceCurrency": "USD"
-        },
-        "featureList": [
-            "Rapid Enterprise Application Implementation",
-            "Clean Architecture & Modular Design",
-            "Documented Best Practices (SOLID, DDD, CQRS, Testability, Performance)",
-            "Full Blazor Server Technology Stack (MudBlazor, EF Core, Identity, SignalR)",
-            "Ready-made Authentication & Authorization",
-            "Auditing & Logging Infrastructure",
-            "Multi-language & Localization Support",
-            "Role-Based & Policy-Based Access Control",
-            "Open Source on GitHub for Community Extension"
-        ]
-    }
-    </script>
-    
+    <script type="application/ld+json">@((MarkupString)StructuredData)</script>
+
     <title>@ApplicationSettings.AppName</title>
 </head>
 
@@ -96,6 +62,22 @@
    // circuit invocations - enabling prerendering would run every page's first render over plain HTTP
    // and deny it.
    private IComponentRenderMode? RenderModeForPage =>  new InteractiveServerRenderMode(false);
+
+    /// <summary>
+    /// Minimal, neutral structured data. Upstream's block advertised a named product with a price
+    /// and a feature list; what survives is the shape - name, url, category - fed from configuration.
+    /// Serialized rather than interpolated: the serializer escapes angle brackets and ampersands, so
+    /// a configured name cannot close the script element it sits inside.
+    /// </summary>
+    private string StructuredData => JsonSerializer.Serialize(new Dictionary<string, string>
+    {
+        ["@context"] = "https://schema.org",
+        ["@type"] = "WebApplication",
+        ["name"] = ApplicationSettings.AppName,
+        ["url"] = ApplicationSettings.ApplicationUrl,
+        ["applicationCategory"] = "BusinessApplication",
+        ["operatingSystem"] = "Web Browser"
+    });
 
     protected override Task OnInitializedAsync()
     {

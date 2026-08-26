@@ -2,6 +2,7 @@
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.PublishStrategies;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
+using CleanArchitecture.Blazor.Server.UI.Endpoints;
 using CleanArchitecture.Blazor.Server.UI.Extensions;
 using CleanArchitecture.Blazor.Server.UI.Hubs;
 using CleanArchitecture.Blazor.Server.UI.Middlewares;
@@ -160,16 +161,12 @@ public static class DependencyInjection
         app.MapStaticAssets().AllowAnonymous();
         
 
-        if (!Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), @"Files")))
-            Directory.CreateDirectory(Path.Combine(Directory.GetCurrentDirectory(), @"Files"));
-
-
-
-        app.UseStaticFiles(new StaticFileOptions
-        {
-            FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), @"Files")),
-            RequestPath = new PathString("/Files")
-        });
+        // The /Files PhysicalFileProvider mount that stood here is GONE, and deliberately.
+        // UseStaticFiles runs before UseAuthorization, so it served every uploaded document and
+        // every avatar to any anonymous caller who could guess a path - the fallback policy never
+        // saw those requests. Stored files are now served by the authenticated /files endpoint
+        // (FileEndpoints below), and the storage root is created on demand by the disk provider,
+        // so the startup CreateDirectory call went with it.
 
         var localizationOptions = new RequestLocalizationOptions()
             .SetDefaultCulture(LocalizationConstants.DefaultLanguageCode)
@@ -209,6 +206,9 @@ public static class DependencyInjection
                 }
             });
         app.MapHub<ServerHub>(ISignalRHub.Url);
+
+        // Stored files: authenticated, and per-object authorized for document keys.
+        app.MapFileEndpoints();
 
         //QuestPDF License configuration
         Settings.License = LicenseType.Community;

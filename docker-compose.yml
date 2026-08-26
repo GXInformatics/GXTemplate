@@ -25,10 +25,9 @@
       - Authentication__Microsoft__ClientSecret=${MS_CLIENT_SECRET}
       - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}
       - Authentication__Google__ClientSecret=${GOOGLE_CLIENT_SECRET}
-      - Minio__Endpoint=${MINIO_ENDPOINT}
-      - Minio__AccessKey=${MINIO_ACCESS_KEY}
-      - Minio__SecretKey=${MINIO_SECRET_KEY}
-      - Minio__BucketName=${MINIO_BUCKET}
+      - Storage__Provider=${STORAGE_PROVIDER}
+      - Storage__ConnectionString=${STORAGE_CONNECTION_STRING}
+      - Storage__ContainerName=${STORAGE_CONTAINER}
       - MaxMind__AccountId=${MAXMIND_ACCOUNT_ID}
       - MaxMind__LicenseKey=${MAXMIND_LICENSE_KEY}
  

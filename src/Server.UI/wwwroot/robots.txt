@@ -1,5 +1,4 @@
-# Robots.txt for Clean Architecture Blazor Server
-# https://www.robotstxt.org/
+# robots.txt - see https://www.robotstxt.org/
 
 User-agent: *
 
@@ -41,8 +40,8 @@ Disallow: /pages/test/
 Disallow: /hangfire/
 Disallow: /swagger/
 
-# Sitemap location
-Sitemap: https://architecture.blazorserver.com/sitemap.xml
+# A Sitemap: line has to be an absolute URL, so this template cannot ship one without inventing a
+# domain. Add it here, pointing at your own host, if you publish a sitemap.
 
 # Crawl delay (optional - removes if not needed)
 Crawl-delay: 1

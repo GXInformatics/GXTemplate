@@ -2,7 +2,7 @@
 @using CleanArchitecture.Blazor.Domain.Common.Enums
 @using CleanArchitecture.Blazor.Server.UI.Services.JsInterop
 
-@inject IFileUploadService UploadService
+@inject IFileStorage FileStorage
 
 <MudStack Spacing="1" Class="mb-2">
     @if (!string.IsNullOrEmpty(Hint))
@@ -36,8 +36,8 @@
                     <tbody>
                         @foreach (var file in Files)
                         {
-                            <tr @onclick="() => OnPreviewFile(file.Url)" style="cursor:pointer">
-                                <td><Thumbnail FileName="@file.Name" FileUrl="@file.Url"></Thumbnail></td>
+                            <tr @onclick="() => OnPreviewFile(file.PublicUrl)" style="cursor:pointer">
+                                <td><Thumbnail FileName="@file.FileName" FileUrl="@file.PublicUrl"></Thumbnail></td>
                                 <td><FileSizeFormatter FileSizeInBytes="@file.Size"></FileSizeFormatter></td>
                                 <td style="width:50px"><MudIconButton Icon="@Icons.Material.Outlined.Delete" Color="Color.Error" title="@AppStrings.Delete" OnClick="@(() => DeleteFile(file))"></MudIconButton></td>
                             </tr>
@@ -54,13 +54,13 @@
     /// The list of uploaded files to display and manage.
     /// </summary>
     [Parameter]
-    public List<UploadedFileInfo>? Files { get; set; }
+    public List<StoredFile>? Files { get; set; }
 
     /// <summary>
     /// Callback when the Files list changes.
     /// </summary>
     [Parameter]
-    public EventCallback<List<UploadedFileInfo>?> FilesChanged { get; set; }
+    public EventCallback<List<StoredFile>?> FilesChanged { get; set; }
 
     /// <summary>
     /// The upload type used for categorizing uploaded files.
@@ -102,13 +102,13 @@
     /// Callback invoked after files have been uploaded successfully.
     /// </summary>
     [Parameter]
-    public EventCallback<List<UploadedFileInfo>> OnFilesUploaded { get; set; }
+    public EventCallback<List<StoredFile>> OnFilesUploaded { get; set; }
 
     /// <summary>
     /// Callback invoked after a file has been deleted.
     /// </summary>
     [Parameter]
-    public EventCallback<UploadedFileInfo> OnFileDeleted { get; set; }
+    public EventCallback<StoredFile> OnFileDeleted { get; set; }
 
     private IReadOnlyList<IBrowserFile>? UploadBrowserFiles { get; set; }
     private bool _uploading;
@@ -122,17 +122,27 @@
     private void ClearDragClass()
         => _dragClass = DefaultDragClass;
 
-    private async Task DeleteFile(UploadedFileInfo file)
+    private async Task DeleteFile(StoredFile file)
     {
         if (Files is null) return;
 
         await DialogServiceHelper.ShowConfirmationDialogAsync(
             AppStrings.Delete,
-            string.Format(AppStrings.DeleteConfirmation,file.Name),
+            string.Format(AppStrings.DeleteConfirmation,file.FileName),
             async () =>
             {
+                // Delete first, and only drop the row once the object is actually gone. The previous
+                // version removed the row, then called a method that returned bare Task and THREW on
+                // failure - out of a dialog callback, with nothing to catch it, leaving the list
+                // saying the file was deleted when it was not.
+                var result = await FileStorage.DeleteAsync(file.StorageKey);
+                if (!result.Succeeded)
+                {
+                    Snackbar.Add(result.ErrorMessage, Severity.Error);
+                    return;
+                }
+
                 Files.Remove(file);
-                await UploadService.RemoveAsync(file.Url);
                 await FilesChanged.InvokeAsync(Files);
                 await OnFileDeleted.InvokeAsync(file);
             });
@@ -144,7 +154,7 @@
         {
             ClearDragClass();
             _uploading = true;
-            var list = new List<UploadedFileInfo>();
+            var list = new List<StoredFile>();
             foreach (var file in e.GetMultipleFiles())
             {
                 try
@@ -157,7 +167,7 @@
                     var ext = Path.GetExtension(filename);
                     if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                     {
-                        var uploadResult = await UploadService.UploadAsync(new UploadRequest(filename, UploadType, attachStream.ToArray()));
+                        var uploadResult = await FileStorage.SaveAsync(new FileUploadRequest(filename, UploadType, attachStream.ToArray()));
                         if (uploadResult.Succeeded && uploadResult.Data is not null)
                         {
                             list.Add(uploadResult.Data);
@@ -172,7 +182,7 @@
                         if (ImageMaxWidth > 0 && ImageMaxHeight > 0)
                         {
                             using var resizedStream = await ImageProcessor.ResizeAndCompressToJpegAsync(attachStream, ImageMaxWidth, ImageMaxHeight);
-                            var uploadResult = await UploadService.UploadAsync(new UploadRequest(filename, UploadType, resizedStream.ToArray(), overwrite: false, null));
+                            var uploadResult = await FileStorage.SaveAsync(new FileUploadRequest(filename, UploadType, resizedStream.ToArray(), overwrite: false, null));
                             if (uploadResult.Succeeded && uploadResult.Data is not null)
                             {
                                 list.Add(uploadResult.Data);
@@ -184,7 +194,7 @@
                         }
                         else
                         {
-                            var uploadResult = await UploadService.UploadAsync(new UploadRequest(filename, UploadType, attachStream.ToArray()));
+                            var uploadResult = await FileStorage.SaveAsync(new FileUploadRequest(filename, UploadType, attachStream.ToArray()));
                             if (uploadResult.Succeeded && uploadResult.Data is not null)
                             {
                                 list.Add(uploadResult.Data);

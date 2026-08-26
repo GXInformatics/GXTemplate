@@ -75,8 +75,15 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddSingleton(s => s.GetRequiredService<IOptions<DatabaseSettings>>().Value);
 
-        services.Configure<MinioOptions>(configuration.GetSection(MinioOptions.Key))
-            .AddSingleton(s => s.GetRequiredService<IOptions<MinioOptions>>().Value);
+        // StorageSettings follows the DatabaseSettings idiom exactly: IValidatableObject +
+        // ValidateDataAnnotations().ValidateOnStart(), so an unsupported provider - or an azureblob
+        // provider with no connection string - is a startup failure naming the offending value,
+        // not a surprise on the first upload.
+        services.AddOptions<StorageSettings>()
+            .Bind(configuration.GetSection(StorageSettings.Key))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton(s => s.GetRequiredService<IOptions<StorageSettings>>().Value);
 
         return services;
     }
@@ -178,11 +185,34 @@ public static class DependencyInjection
         return services
             .AddScoped<IValidationService, ValidationService>()
             .AddScoped<IExcelService, ExcelService>()
-            .AddScoped<IFileUploadService, MinioFileUploadService>()
+            .AddFileStorage()
             .AddScoped<IPDFService, PDFService>()
             .AddScoped<IPermissionQueryService, PermissionQueryService>()
             .AddScoped<AdministratorProtectionService>()
             .AddScoped<PermissionAssignmentService>();
+    }
+
+    /// <summary>
+    /// Builds the one IFileStorage this application will use, chosen by Storage:Provider.
+    /// </summary>
+    /// <remarks>
+    /// The switch is the consumer of StorageSettings.SupportedProviders; both read
+    /// <see cref="StorageProviderKeys"/>, so a provider cannot be accepted by validation and then
+    /// fall through here. The default arm therefore only fires if the two ever drift.
+    /// </remarks>
+    private static IServiceCollection AddFileStorage(this IServiceCollection services)
+    {
+        return services.AddScoped<IFileStorage>(sp =>
+        {
+            var settings = sp.GetRequiredService<StorageSettings>();
+            return settings.Provider.Trim().ToLowerInvariant() switch
+            {
+                StorageProviderKeys.Disk => new LocalDiskFileStorage(settings),
+                StorageProviderKeys.AzureBlob => new AzureBlobFileStorage(settings),
+                _ => throw new NotSupportedException(
+                    $"{StorageSettings.Key}:{nameof(StorageSettings.Provider)} '{settings.Provider}' has no implementation.")
+            };
+        });
     }
     #endregion
 

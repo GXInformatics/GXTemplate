@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Storage;
 using CleanArchitecture.Blazor.Application.Common.Models;
 using CleanArchitecture.Blazor.Application.Common.PublishStrategies;
 using CleanArchitecture.Blazor.Application.Features.PicklistSets.DTOs;
@@ -24,11 +25,13 @@ public class RemainingNotificationMediatorSmokeTests
     [Test]
     public async Task Publish_ShouldReach_DocumentDeletedEventHandler()
     {
-        var notification = new DocumentDeletedEvent(new Document { Id = 9, URL = string.Empty });
+        var notification = new DocumentDeletedEvent(new Document { Id = 9, StorageKey = string.Empty });
         var message = await PublishAndCaptureAsync(
             "CleanArchitecture.Blazor.Application.Features.Documents.EventHandlers.DocumentDeletedEventHandler",
             "skipping file deletion",
-            notification);
+            notification,
+            // The handler now takes IFileStorage; with no key it must not be touched at all.
+            services => services.AddSingleton(new Mock<IFileStorage>(MockBehavior.Strict).Object));
 
         Assert.That(message, Does.Contain("skipping file deletion"));
     }
@@ -90,17 +93,22 @@ public class RemainingNotificationMediatorSmokeTests
     private static async Task<string> PublishAndCaptureAsync<TNotification>(
         string categoryName,
         string eventName,
-        TNotification notification)
+        TNotification notification,
+        Action<IServiceCollection>? configureServices = null)
         where TNotification : INotification
     {
         using var logProvider = new TestLogProvider(categoryName, eventName);
         await PublishAndAwaitAsync(
             notification,
-            services => services.AddLogging(builder =>
+            services =>
             {
-                builder.ClearProviders();
-                builder.AddProvider(logProvider);
-            }));
+                configureServices?.Invoke(services);
+                services.AddLogging(builder =>
+                {
+                    builder.ClearProviders();
+                    builder.AddProvider(logProvider);
+                });
+            });
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         return await logProvider.WaitForMatchAsync(timeout.Token);

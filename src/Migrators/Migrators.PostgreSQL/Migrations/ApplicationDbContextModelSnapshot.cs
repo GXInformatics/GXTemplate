@@ -114,6 +114,16 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnType("character varying(450)")
                         .HasColumnName("last_modified_by_id");
 
+                    b.Property<string>("PublicUrl")
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)")
+                        .HasColumnName("public_url");
+
+                    b.Property<string>("StorageKey")
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)")
+                        .HasColumnName("storage_key");
+
                     b.Property<string>("TenantId")
                         .HasMaxLength(450)
                         .HasColumnType("character varying(450)")
@@ -124,11 +134,6 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnType("character varying(450)")
                         .HasColumnName("title");
 
-                    b.Property<string>("URL")
-                        .HasMaxLength(450)
-                        .HasColumnType("character varying(450)")
-                        .HasColumnName("url");
-
                     b.HasKey("Id")
                         .HasName("pk_documents");
 
@@ -137,6 +142,9 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
 
                     b.HasIndex("LastModifiedById")
                         .HasDatabaseName("ix_documents_last_modified_by_id");
+
+                    b.HasIndex("StorageKey")
+                        .HasDatabaseName("ix_documents_storage_key");
 
                     b.HasIndex("TenantId")
                         .HasDatabaseName("ix_documents_tenant_id");

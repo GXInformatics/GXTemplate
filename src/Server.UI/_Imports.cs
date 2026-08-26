@@ -1,5 +1,6 @@
 global using System.Data;
 global using CleanArchitecture.Blazor.Application.Common.Interfaces;
+global using CleanArchitecture.Blazor.Application.Common.Interfaces.Storage;
 global using CleanArchitecture.Blazor.Application.Common.Models;
 global using CleanArchitecture.Blazor.Application.Common.Extensions;
 global using CleanArchitecture.Blazor.Server.UI.Extensions;

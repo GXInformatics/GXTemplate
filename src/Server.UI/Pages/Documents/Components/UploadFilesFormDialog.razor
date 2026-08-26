@@ -7,7 +7,6 @@
 @using System.Buffers
 @using CleanArchitecture.Blazor.Server.UI.Services.JsInterop
 
-@inject IFileUploadService UploadService
 @inject IStringLocalizer<Documents> L
 
 <MudDialog>
@@ -143,7 +142,7 @@
             _processing = true;
             if (_uploadedFiles.Any())
             {
-                var list = new List<UploadRequest>();
+                var list = new List<FileUploadRequest>();
                 foreach (var uploaded in _uploadedFiles)
                 {
                     try
@@ -174,7 +173,7 @@
                             image.Save(outStream, PngFormat.Instance);
                         }
 
-                        var request = new UploadRequest(uploaded.FileName, UploadType.Document, outStream.ToArray());
+                        var request = new FileUploadRequest(uploaded.FileName, UploadType.Document, outStream.ToArray());
                         list.Add(request);
                     }
                     catch (Exception e)

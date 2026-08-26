@@ -4,6 +4,7 @@
 using Ardalis.Specification.EntityFrameworkCore;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Application.Features.Documents.Caching;
+using CleanArchitecture.Blazor.Application.Features.Documents.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.Documents.Queries.GetFileStream;
 
@@ -39,15 +40,18 @@ public class GetFileStreamQueryHandler : IRequestHandler<GetFileStreamQuery, (st
 {
     private readonly IApplicationDbContextFactory _dbContextFactory;
     private readonly IUserContextAccessor _userContextAccessor;
+    private readonly IFileStorage _fileStorage;
 
 
     public GetFileStreamQueryHandler(
         IApplicationDbContextFactory dbContextFactory,
-        IUserContextAccessor userContextAccessor
+        IUserContextAccessor userContextAccessor,
+        IFileStorage fileStorage
     )
     {
         _dbContextFactory = dbContextFactory;
         _userContextAccessor = userContextAccessor;
+        _fileStorage = fileStorage;
     }
 
     public async ValueTask<(string, byte[])> Handle(GetFileStreamQuery request, CancellationToken cancellationToken)
@@ -67,36 +71,33 @@ public class GetFileStreamQueryHandler : IRequestHandler<GetFileStreamQuery, (st
 
         await using var db = await _dbContextFactory.CreateAsync(cancellationToken);
 
-        // Apply the same visibility rule as the rest of the feature (see DocumentsQuery below): the
-        // document must be public or created by the requester, and inside the requester's tenant.
+        // Apply the same visibility rule as the rest of the feature: the document must be public or
+        // created by the requester, and inside the requester's tenant. That rule now lives in
+        // VisibleDocumentSpecification, shared with the /files streaming endpoint so there is one
+        // definition of it rather than two.
         var item = await db.Documents
             .Where(x => x.Id == request.Id)
-            .WithSpecification(new DocumentsQuery(currentUser.UserId, currentUser.TenantId ?? string.Empty, string.Empty))
+            .WithSpecification(new VisibleDocumentSpecification(currentUser.UserId, currentUser.TenantId ?? string.Empty))
             .FirstOrDefaultAsync(cancellationToken);
 
         // A document that exists but is not visible to this user is reported exactly like a missing
         // one, so document ids cannot be enumerated by comparing the two responses.
         if (item is null) throw NotFound(request.Id);
-        if (string.IsNullOrEmpty(item.URL)) return (string.Empty, Array.Empty<byte>());
+        if (string.IsNullOrEmpty(item.StorageKey)) throw NotFound(request.Id);
 
-        var filepath = Path.Combine(Directory.GetCurrentDirectory(), item.URL);
-        if (!File.Exists(filepath)) return (string.Empty, Array.Empty<byte>());
+        // Read through the storage abstraction rather than reconstructing a filesystem path, so the
+        // download works under whichever provider is configured. A key that does not resolve is a
+        // FAILED result and is reported as such: returning (string.Empty, Array.Empty<byte>()) here
+        // was indistinguishable from an empty file, which is how a broken download stayed silent.
+        var content = await _fileStorage.ReadAsync(item.StorageKey, cancellationToken);
+        if (!content.Succeeded || content.Data is null)
+        {
+            throw new Exception(
+                $"could not read the stored file for document Id:{request.Id}: {content.ErrorMessage}");
+        }
 
-        var fileName = new FileInfo(filepath).Name;
-        var buffer = await File.ReadAllBytesAsync(filepath, cancellationToken);
-        return (fileName, buffer);
+        return (content.Data.FileName, content.Data.Content);
     }
 
     private static Exception NotFound(int id) => new Exception($"not found document entry by Id:{id}.");
-
-    internal class DocumentsQuery : Specification<Document>
-    {
-        public DocumentsQuery(string userId, string tenantId, string keyword)
-        {
-            Query.Where(p => (p.CreatedById == userId && p.IsPublic == false) || p.IsPublic == true)
-                .Where(x => x.TenantId == tenantId, !string.IsNullOrEmpty(tenantId))
-                .Where(x => x.Title!.Contains(keyword) || x.Description!.Contains(keyword),
-                    !string.IsNullOrEmpty(keyword));
-        }
-    }
 }

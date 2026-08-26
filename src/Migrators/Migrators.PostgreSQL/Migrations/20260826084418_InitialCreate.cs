@@ -310,7 +310,8 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                     title = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     description = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     is_public = table.Column<bool>(type: "boolean", nullable: false),
-                    url = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
+                    storage_key = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
+                    public_url = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     document_type = table.Column<string>(type: "text", nullable: false),
                     tenant_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     created_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
@@ -431,6 +432,11 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                 name: "ix_documents_last_modified_by_id",
                 table: "documents",
                 column: "last_modified_by_id");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_documents_storage_key",
+                table: "documents",
+                column: "storage_key");
 
             migrationBuilder.CreateIndex(
                 name: "ix_documents_tenant_id",

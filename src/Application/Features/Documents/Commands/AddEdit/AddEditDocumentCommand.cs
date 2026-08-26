@@ -14,11 +14,12 @@ public class AddEditDocumentCommand : ICacheInvalidatorRequest<Result<int>>
     [Display(Name ="Title")] public string? Title { get; set; }
     [Display(Name = "Description")] public string? Description { get; set; }
     [Display(Name = "Is Public")] public bool IsPublic { get; set; }
-    [Display(Name = "URL")] public string? URL { get; set; }
+    [Display(Name = "Storage Key")] public string? StorageKey { get; set; }
+    [Display(Name = "URL")] public string? PublicUrl { get; set; }
     [Display(Name = "Document Type")] public DocumentType DocumentType { get; set; } = DocumentType.Document;
     [Display(Name = "Tenant Id")] public string? TenantId { get; set; }
     [Display(Name = "Tenant Name")] public string? TenantName { get; set; }
-    public UploadRequest? UploadRequest { get; set; }
+    public FileUploadRequest? UploadRequest { get; set; }
     public IEnumerable<string>? Tags => DocumentCacheKey.Tags;}
 
 public class AddEditDocumentCommandHandler : IRequestHandler<AddEditDocumentCommand, Result<int>>

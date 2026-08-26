@@ -17,7 +17,7 @@
         <PackageReference Include="ZiggyCreatures.FusionCache" Version="2.7.1" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.11" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.MicrosoftAccount" Version="10.0.11" />
-        <PackageReference Include="Minio" Version="7.0.0" />
+        <PackageReference Include="Azure.Storage.Blobs" Version="12.26.0" />
         <PackageReference Include="QuestPDF" Version="2026.7.3" />
         <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
         <PackageReference Include="Serilog.Sinks.MSSqlServer" Version="10.0.0" />

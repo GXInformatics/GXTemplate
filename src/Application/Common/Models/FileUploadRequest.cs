@@ -3,9 +3,9 @@
 
 namespace CleanArchitecture.Blazor.Application.Common.Models;
 
-public class UploadRequest
+public class FileUploadRequest
 {
-    public UploadRequest(string fileName, UploadType uploadType, byte[] data, bool overwrite = false,string? folder=null)
+    public FileUploadRequest(string fileName, UploadType uploadType, byte[] data, bool overwrite = false,string? folder=null)
     {
         FileName = fileName;
         UploadType = uploadType;

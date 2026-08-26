@@ -11,6 +11,10 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
     public void Configure(EntityTypeBuilder<Document> builder)
     {
         builder.Property(t => t.DocumentType).HasConversion<string>();
+        // The /files endpoint resolves a document by its storage key on every request for a document
+        // object, so that lookup gets an index. Not unique: derive-and-retry keeps live keys distinct
+        // without the database having to refuse an insert to prove it.
+        builder.HasIndex(t => t.StorageKey);
         builder.Ignore(e => e.DomainEvents);
         builder.HasOne(x => x.CreatedBy)
             .WithMany()

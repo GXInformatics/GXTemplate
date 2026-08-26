@@ -8,7 +8,7 @@
 @using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity
 @inherits OwningComponentBase
 @inject IStringLocalizer<CleanArchitecture.Blazor.Server.UI.Pages.Identity.Users.Profile> L
-@inject IFileUploadService UploadService
+@inject IFileStorage FileStorage
 
 @inject IUserProfileState UserProfileState
 @implements IDisposable
@@ -176,17 +176,17 @@
         byte[] fileData = memoryStream.ToArray();
 
         var resizedStream = await ImageProcessor.ResizeAndCompressToJpegAsync(memoryStream, 128, 128, 80);
-        var uploadRequest = new UploadRequest(file.Name, UploadType.ProfilePicture, resizedStream.ToArray(), overwrite: true, _profileModel.UserId);
+        var uploadRequest = new FileUploadRequest(file.Name, UploadType.ProfilePicture, resizedStream.ToArray(), overwrite: true, _profileModel.UserId);
 
-        var result = await UploadService.UploadAsync(uploadRequest);
+        var result = await FileStorage.SaveAsync(uploadRequest);
         if (result.Succeeded && result.Data is not null)
         {
-            _profileModel.ProfilePictureDataUrl = result.Data.Url;
+            _profileModel.ProfilePictureDataUrl = result.Data.PublicUrl;
 
             // Update database and state with new profile picture
             await UserProfileState.UpdateAsync(profile => profile with
             {
-                ProfilePictureDataUrl = result.Data.Url
+                ProfilePictureDataUrl = result.Data.PublicUrl
             });
 
             Snackbar.Add(L["The avatar has been updated"], Severity.Info);

@@ -1,4 +1,4 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 namespace CleanArchitecture.Blazor.Application.Features.Documents.EventHandlers;
@@ -6,41 +6,35 @@ namespace CleanArchitecture.Blazor.Application.Features.Documents.EventHandlers;
 public class DocumentDeletedEventHandler : INotificationHandler<DocumentDeletedEvent>
 {
     private readonly ILogger<DocumentDeletedEventHandler> _logger;
+    private readonly IFileStorage _fileStorage;
 
-    public DocumentDeletedEventHandler(ILogger<DocumentDeletedEventHandler> logger)
+    public DocumentDeletedEventHandler(ILogger<DocumentDeletedEventHandler> logger, IFileStorage fileStorage)
     {
         _logger = logger;
+        _fileStorage = fileStorage;
     }
 
-    public ValueTask Handle(DocumentDeletedEvent notification, CancellationToken cancellationToken)
+    public async ValueTask Handle(DocumentDeletedEvent notification, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(notification.Item.URL))
+        if (string.IsNullOrEmpty(notification.Item.StorageKey))
         {
-            _logger.LogWarning("The document URL is null or empty, skipping file deletion.");
-            return ValueTask.CompletedTask;
+            _logger.LogWarning("The document storage key is null or empty, skipping file deletion.");
+            return;
         }
 
-        var folder = UploadType.Document.GetDisplayName();
-        var folderName = Path.Combine("Files", folder);
-        var deleteFilePath = Path.Combine(Directory.GetCurrentDirectory(), folderName, notification.Item.URL);
-
-        if (File.Exists(deleteFilePath))
+        // Delete by the STORED key. The previous implementation rebuilt a path from the upload type
+        // and appended the stored value to it, which already contained that same prefix - so it
+        // looked for Files\Documents\Files\Documents\x.png, never found it, and logged a warning
+        // instead of deleting anything. Every deleted document left its bytes behind.
+        var result = await _fileStorage.DeleteAsync(notification.Item.StorageKey, cancellationToken);
+        if (result.Succeeded)
         {
-            try
-            {
-                File.Delete(deleteFilePath);
-                _logger.LogInformation("File deleted successfully: {FilePath}", deleteFilePath);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to delete file: {FilePath}", deleteFilePath);
-            }
+            _logger.LogInformation("File deleted successfully: {StorageKey}", notification.Item.StorageKey);
         }
         else
         {
-            _logger.LogWarning("File not found for deletion: {FilePath}", deleteFilePath);
+            _logger.LogError("Failed to delete file {StorageKey}: {Error}",
+                notification.Item.StorageKey, result.ErrorMessage);
         }
-
-        return ValueTask.CompletedTask;
     }
 }

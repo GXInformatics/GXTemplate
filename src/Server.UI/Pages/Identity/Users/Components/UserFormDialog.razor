@@ -7,7 +7,7 @@
 @using CleanArchitecture.Blazor.Infrastructure.Services.Identity
 
 @inject IStringLocalizer<Identity.Users.Users> L
-@inject IFileUploadService UploadService
+@inject IFileStorage FileStorage
 @inherits OwningComponentBase
 
 <MudDialog>
@@ -165,11 +165,11 @@
         using var originalImageStream = new MemoryStream();
         await browserStream.CopyToAsync(originalImageStream);
         var resizedStream = await ImageProcessor.ResizeAndCompressToJpegAsync(originalImageStream, 128, 128, 80);
-        var uploadRequest = new UploadRequest(file.Name, UploadType.ProfilePicture, resizedStream.ToArray(), overwrite: true, Model.Id);
-        var uploadResult = await UploadService.UploadAsync(uploadRequest);
+        var uploadRequest = new FileUploadRequest(file.Name, UploadType.ProfilePicture, resizedStream.ToArray(), overwrite: true, Model.Id);
+        var uploadResult = await FileStorage.SaveAsync(uploadRequest);
         if (uploadResult.Succeeded && uploadResult.Data is not null)
         {
-            Model.ProfilePictureDataUrl = uploadResult.Data.Url;
+            Model.ProfilePictureDataUrl = uploadResult.Data.PublicUrl;
             Snackbar.Add(AppStrings.UploadSuccess, Severity.Info);
         }
         else
