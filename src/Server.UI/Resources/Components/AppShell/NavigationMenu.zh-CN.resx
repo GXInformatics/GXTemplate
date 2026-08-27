@@ -120,9 +120,6 @@
   <data name="Blazor" xml:space="preserve">
     <value>Blazor</value>
   </data>
-  <data name="Blazor Dashboard" xml:space="preserve">
-    <value>Blazor 仪表板</value>
-  </data>
   <data name="Company" xml:space="preserve">
     <value>公司</value>
   </data>
@@ -152,9 +149,6 @@
   </data>
   <data name="Content" xml:space="preserve">
     <value>内容</value>
-  </data>
-  <data name="Products" xml:space="preserve">
-    <value>产品</value>
   </data>
   <data name="Documents" xml:space="preserve">
     <value>文档</value>
@@ -203,9 +197,6 @@
   </data>
   <data name="Jobs" xml:space="preserve">
     <value>工作</value>
-  </data>
-  <data name="Contacts" xml:space="preserve">
-    <value>联系人</value>
   </data>
   <data name="Login History" xml:space="preserve">
     <value>登录历史</value>

@@ -165,9 +165,6 @@
   <data name="KeyValue" xml:space="preserve">
     <value>Schlüsselwert</value>
   </data>
-  <data name="Product" xml:space="preserve">
-    <value>Produkt</value>
-  </data>
   <data name="Tenant" xml:space="preserve">
     <value>Mieter</value>
   </data>

@@ -1,47 +1,58 @@
 # robots.txt - see https://www.robotstxt.org/
+#
+# DEFAULT: nothing is crawled.
+#
+# Applications built from this template are line-of-business systems by default, and an internal
+# system appearing in a public search index is a disclosure, not a feature. "Do not crawl" is the
+# safe direction to be wrong in, so it is what a generated project ships with.
+#
+# Note that robots.txt governs CRAWLING, not INDEXING - a URL discovered elsewhere can still be
+# indexed without being fetched. The matching indexing directive is the robots meta tag in
+# App.razor, which ships as "noindex, nofollow". Change both, or neither.
+#
+# FOR A PUBLIC-FACING DEPLOYMENT: delete the two lines below the "DEFAULT" group, uncomment the
+# "PUBLIC-FACING" group, and set the App.razor meta tag to "index, follow".
 
+# --- DEFAULT group: crawl nothing -------------------------------------------------------------
 User-agent: *
+Disallow: /
 
-# Allow crawling of main content
-Allow: /
-Allow: /pages/
-Allow: /img/
-Allow: /css/
-Allow: /js/
-
-# Disallow crawling of sensitive areas
-Disallow: /api/
-Disallow: /identity/
-Disallow: /pages/identity/
-Disallow: /admin/
-Disallow: /files/
-Disallow: /health
-Disallow: /_framework/
-Disallow: /_content/
-Disallow: /hub/
-Disallow: /signalr/
-
-# Allow demo login page for showcasing
-Allow: /account/login
-
-# Disallow other authentication pages
-Disallow: /register
-Disallow: /logout
-Disallow: /account/register
-Disallow: /account/logout
-Disallow: /account/manage
-Disallow: /manage/
-
-# Disallow crawling of test pages
-Disallow: /test/
-Disallow: /pages/test/
-
-# Disallow crawling of management interfaces
-Disallow: /hangfire/
-Disallow: /swagger/
+# --- PUBLIC-FACING group: crawl the public surface only ---------------------------------------
+# Uncomment this group (and remove the DEFAULT group above) for a public-facing deployment.
+#
+# User-agent: *
+#
+# # Public content
+# Allow: /
+# Allow: /pages/
+# Allow: /img/
+# Allow: /css/
+# Allow: /js/
+# Allow: /account/login
+#
+# # Stored files are served by an authenticated endpoint; there is nothing here for a crawler.
+# Disallow: /files/
+#
+# # Identity, administration and framework surfaces
+# Disallow: /api/
+# Disallow: /identity/
+# Disallow: /pages/identity/
+# Disallow: /admin/
+# Disallow: /health
+# Disallow: /_framework/
+# Disallow: /_content/
+# Disallow: /hub/
+# Disallow: /signalr/
+# Disallow: /register
+# Disallow: /logout
+# Disallow: /account/register
+# Disallow: /account/logout
+# Disallow: /account/manage
+# Disallow: /manage/
+# Disallow: /jobs/
+# Disallow: /swagger/
+#
+# Crawl-delay: 1
 
 # A Sitemap: line has to be an absolute URL, so this template cannot ship one without inventing a
 # domain. Add it here, pointing at your own host, if you publish a sitemap.
-
-# Crawl delay (optional - removes if not needed)
-Crawl-delay: 1

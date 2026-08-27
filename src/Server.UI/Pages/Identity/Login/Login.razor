@@ -23,7 +23,11 @@
 		<MudStack Spacing="2">
 			<MudText Typo="Typo.h4" GutterBottom="true">@L["Sign In"]</MudText>
 			<MudText>
-				@L["Do not have an account?"] <MudLink Href="@Register.PageUrl" Target="_self">@L["Sign Up"]</MudLink>
+				@if (ApplicationSettings.AllowSelfRegistration)
+				{
+					@L["Do not have an account?"]
+					<MudLink Href="@Register.PageUrl" Target="_self">@L["Sign Up"]</MudLink>
+				}
 			</MudText>
 			<!--user name-->
 			<MudTextField @bind-Value="_formModel.UserName" Label="@L["User name"]" Variant="Variant.Outlined"

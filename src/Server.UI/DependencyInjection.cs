@@ -154,6 +154,9 @@ public static class DependencyInjection
         // endpoints, so a flagged user cannot reach one. Only the HTTP half - in-circuit navigation
         // is guarded by ForcePasswordChangeGuard inside AppLayout.
         app.UseMiddleware<ForcePasswordChangeMiddleware>();
+        // Before the endpoints, so a disabled registration surface is unreachable by direct URL as
+        // well as by the (hidden) link on the login page.
+        app.UseMiddleware<SelfRegistrationMiddleware>();
         app.UseAntiforgery();
         app.UseHttpsRedirection();
         // Framework and static assets must load for the anonymous login page - without this the

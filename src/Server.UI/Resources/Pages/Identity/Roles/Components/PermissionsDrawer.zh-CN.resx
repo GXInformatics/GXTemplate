@@ -123,12 +123,6 @@
   <data name="Assign / Unassign all permission set" xml:space="preserve">
     <value>分配/取消分配所有权限集</value>
   </data>
-  <data name="Contact Permissions" xml:space="preserve">
-    <value>联系人权限</value>
-  </data>
-  <data name="Product Permissions" xml:space="preserve">
-    <value>产品权限</value>
-  </data>
   <data name="Allows viewing product details" xml:space="preserve">
     <value>允许查看产品详情</value>
   </data>

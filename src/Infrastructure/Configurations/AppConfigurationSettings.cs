@@ -1,12 +1,14 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.ComponentModel.DataAnnotations;
+
 namespace CleanArchitecture.Blazor.Infrastructure.Configurations;
 
 /// <summary>
 ///     Configuration wrapper for the app configuration section
 /// </summary>
-public class AppConfigurationSettings : IApplicationSettings
+public class AppConfigurationSettings : IApplicationSettings, IValidatableObject
 {
     /// <summary>
     ///     App configuration key constraint
@@ -41,5 +43,36 @@ public class AppConfigurationSettings : IApplicationSettings
     /// <summary>
     ///     The application name / title
     /// </summary>
-    public string AppName { get; set; } = "Blazor Dashboard";
+    public string AppName { get; set; } = "GX Application";
+
+    /// <inheritdoc />
+    public string DefaultTimeZone { get; set; } = "UTC";
+
+    /// <inheritdoc />
+    public bool AllowSelfRegistration { get; set; } = true;
+
+    /// <summary>
+    ///     Validates the entered configuration
+    /// </summary>
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (string.IsNullOrWhiteSpace(DefaultTimeZone))
+        {
+            yield return new ValidationResult(
+                $"{Key}.{nameof(DefaultTimeZone)} is not configured; use a time zone id such as 'UTC' or 'Africa/Lagos'",
+                new[] { nameof(DefaultTimeZone) });
+            yield break;
+        }
+
+        // Resolved here, once, at startup. Every provisioning path hands this id to
+        // TimeZoneInfo.FindSystemTimeZoneById eventually, and that throws - so a typo would
+        // otherwise surface as an exception on somebody's first registration.
+        if (!TimeZoneInfo.TryFindSystemTimeZoneById(DefaultTimeZone, out _))
+        {
+            yield return new ValidationResult(
+                $"{Key}.{nameof(DefaultTimeZone)} '{DefaultTimeZone}' is not a time zone this system recognises; " +
+                "use an IANA id such as 'UTC', 'Africa/Lagos' or 'Europe/London'",
+                new[] { nameof(DefaultTimeZone) });
+        }
+    }
 }

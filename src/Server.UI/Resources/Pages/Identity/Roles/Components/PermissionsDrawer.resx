@@ -123,12 +123,6 @@
   <data name="Assign / Unassign all permission set" xml:space="preserve">
     <value>Assign / Unassign all permission set</value>
   </data>
-  <data name="Contact Permissions" xml:space="preserve">
-    <value>Contact Permissions</value>
-  </data>
-  <data name="Product Permissions" xml:space="preserve">
-    <value>Product Permissions</value>
-  </data>
   <data name="Allows viewing product details" xml:space="preserve">
     <value>Allows viewing product details</value>
   </data>

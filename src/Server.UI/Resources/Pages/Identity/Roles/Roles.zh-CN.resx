@@ -183,12 +183,6 @@
   <data name="Permission Description" xml:space="preserve">
     <value>权限说明</value>
   </data>
-  <data name="Products" xml:space="preserve">
-    <value>产品</value>
-  </data>
-  <data name="Products Permissions" xml:space="preserve">
-    <value>产品权限</value>
-  </data>
   <data name="Categories" xml:space="preserve">
     <value>类别</value>
   </data>

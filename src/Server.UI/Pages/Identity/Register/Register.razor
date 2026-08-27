@@ -122,6 +122,9 @@
 	{
 		_pageTitle = $"{ApplicationSettings.AppName} - {L["Sign Up"]}";
 
+		// The configured default, not the server's zone - see IApplicationSettings.DefaultTimeZone.
+		_formModel.TimeZoneId = ApplicationSettings.DefaultTimeZone;
+
 		_userManager = ScopedServices.GetRequiredService<UserManager<ApplicationUser>>();
 		_roleManager = ScopedServices.GetRequiredService<RoleManager<ApplicationRole>>();
 		_applicationDbContextFactory = ScopedServices.GetRequiredService<IApplicationDbContextFactory>();
@@ -269,8 +272,9 @@
 		public string? TenantId => Tenant?.Id;
 
 		[Display(Name = "Time Zone")]
-		// UTC, not TimeZoneInfo.Local: the server's zone says nothing about where the person
-		// registering is, and would otherwise vary with the deployment host.
+		// Seeded from AppConfigurationSettings.DefaultTimeZone in OnInitializedAsync. The literal
+		// here is only the value before that runs; never TimeZoneInfo.Local, whose value would vary
+		// with the deployment host and says nothing about where the person registering is.
 		public string? TimeZoneId { get; set; } = TimeZoneInfo.Utc.Id;
 
 		[Display(Name = "Language")]

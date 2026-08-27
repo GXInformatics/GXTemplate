@@ -183,12 +183,6 @@
   <data name="Permission Description" xml:space="preserve">
     <value>Permission Description</value>
   </data>
-  <data name="Products" xml:space="preserve">
-    <value>Products</value>
-  </data>
-  <data name="Products Permissions" xml:space="preserve">
-    <value>Products Permissions</value>
-  </data>
   <data name="Categories" xml:space="preserve">
     <value>Categories</value>
   </data>

@@ -25,7 +25,9 @@
          it came from. Tags that could not be made neutral without inventing a brand, a description
          or an image URL were removed outright - see the pass report. -->
     <meta name="author" content="@ApplicationSettings.Company" />
-    <meta name="robots" content="index, follow" />
+    <!-- noindex by default: see wwwroot/robots.txt for the reasoning and for what to change for a
+         public-facing deployment. robots.txt governs crawling; this tag governs indexing. -->
+    <meta name="robots" content="noindex, nofollow" />
     <meta name="application-name" content="@ApplicationSettings.AppName" />
     <meta name="generator" content="Blazor Server" />
     <meta name="theme-color" content="#1976d2" />

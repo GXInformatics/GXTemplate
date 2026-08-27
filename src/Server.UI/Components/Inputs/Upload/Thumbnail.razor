@@ -19,11 +19,7 @@
     [Parameter]
     public string? FileUrl { get; set; }
 
-    private string Url()
-    {
-        var url = FileUrl?.Replace("\\", "/")??string.Empty;
-        return url;
-    }
+    private string Url() => FileUrl ?? string.Empty;
 
     private string GetFileExtension()
     {

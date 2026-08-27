@@ -1,6 +1,6 @@
 ﻿services:
   dashboard:
-    image: ${DOCKER_REGISTRY-}blazorserver
+    image: ${DOCKER_REGISTRY-}app
     build:
       context: .
       dockerfile: Dockerfile

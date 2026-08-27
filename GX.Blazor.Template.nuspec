@@ -29,6 +29,7 @@
         <copyright>Copyright (c) 2019 Jason Taylor and contributors; portions copyright (c) GX Informatics Limited</copyright>
         <tags>blazor blazor-server clean-architecture multi-tenant dotnet10 template csharp</tags>
         <icon>icon.png</icon>
+        <readme>README.md</readme>
 
         <packageTypes>
             <packageType name="Template"/>
@@ -36,9 +37,23 @@
     </metadata>
 
     <files>
-        <file src=".template.config\icon.png"/>
+        <!-- The package icon and readme, at the package root, which is where the <icon> and
+             <readme> elements above look. -->
+        <file src=".template.config\icon.png" target="icon.png"/>
+        <file src="README.md" target="README.md"/>
+
+        <!--
+            Everything the template instantiates, under content/.
+
+            .template.config MUST be included: template.json and ide.host.json are what make this a
+            template package rather than an ordinary one, and excluding them produces a package that
+            installs without error and offers no templates.
+
+            LICENSE and README.md are included too - a generated project should carry its licence and
+            its documentation.
+        -->
         <file src=".\**" target="content"
-              exclude=".template.config\**;*.exe;**\bin\**;**\obj\**;**\.vs\**;**\wwwroot\dist\**;**\.git\**;**\.github\**;**\LICENSE;**\README.md;docs\**;doc\**;"/>
+              exclude="**\*.exe;*.nuspec;*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;docs\**;doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;src\Server.UI\Files\**;src\Server.UI\log\**;GXTemplate-passes\**"/>
     </files>
 
 </package>

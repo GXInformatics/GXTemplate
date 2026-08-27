@@ -6,6 +6,8 @@ using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Security;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Domain.Identity;
+using CleanArchitecture.Blazor.Application.Common.Interfaces;
+using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
@@ -54,6 +56,9 @@ public class ProvisioningTests
             })
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>();
+        // The initializer takes the configured default time zone for the administrator it creates;
+        // the defaults of AppConfigurationSettings are what a project with no configuration gets.
+        services.AddSingleton<IApplicationSettings>(new AppConfigurationSettings());
         services.AddScoped<ApplicationDbContextInitializer>();
 
         _provider = services.BuildServiceProvider();

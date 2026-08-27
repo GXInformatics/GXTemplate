@@ -29,18 +29,21 @@ public class ApplicationDbContextInitializer
     private readonly RoleManager<ApplicationRole> _roleManager;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IdentityOptions _identityOptions;
+    private readonly IApplicationSettings _applicationSettings;
 
     public ApplicationDbContextInitializer(ILogger<ApplicationDbContextInitializer> logger,
         IDbContextFactory<ApplicationDbContext> dbContextFactory,
         UserManager<ApplicationUser> userManager,
         RoleManager<ApplicationRole> roleManager,
-        IOptions<IdentityOptions> identityOptions)
+        IOptions<IdentityOptions> identityOptions,
+        IApplicationSettings applicationSettings)
     {
         _logger = logger;
         _context = dbContextFactory.CreateDbContext();
         _userManager = userManager;
         _roleManager = roleManager;
         _identityOptions = identityOptions.Value;
+        _applicationSettings = applicationSettings;
     }
 
     public async Task InitialiseAsync()
@@ -190,7 +193,7 @@ public class ApplicationDbContextInitializer
             Email = "administrator@localhost",
             EmailConfirmed = true,
             LanguageCode = "en-US",
-            TimeZoneId = TimeZoneInfo.Utc.Id,
+            TimeZoneId = _applicationSettings.DefaultTimeZone,
             TwoFactorEnabled = false,
             MustChangePassword = true,
             CreatedAt = DateTime.UtcNow,

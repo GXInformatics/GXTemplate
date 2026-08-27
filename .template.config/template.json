@@ -1,25 +1,127 @@
 {
-    "$schema": "http://json.schemastore.org/template",
-    "author": "GX Informatics Limited",
-    "classifications": ["Web","Blazor","Clean Architecture"],
-    "name": "GX Blazor Server Solution (Clean Architecture)",
-    "defaultName": "CleanArchitecture.Blazor",
-    "identity": "GX.Blazor.Template.CSharp",
-    "groupIdentity": "GX.Blazor.Template",
-    "shortName": "gxblazor",
-    "tags": {
-      "language": "C#",
-      "type": "project"
+  "$schema": "http://json.schemastore.org/template",
+  "author": "GX Informatics Limited",
+  "classifications": [ "Web", "Blazor", "Clean Architecture" ],
+  "name": "GX Blazor Server Solution (Clean Architecture)",
+  "defaultName": "CleanArchitecture.Blazor",
+  "identity": "GX.Blazor.Template.CSharp",
+  "groupIdentity": "GX.Blazor.Template",
+  "shortName": "gxblazor",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "CleanArchitecture.Blazor",
+  "preferNameDirectory": true,
+  "description": "A Blazor Server solution template for .NET 10 in Clean Architecture layers, with multi-tenant identity, deny-by-default authorization and transactional auditing.",
+
+  "symbols": {
+    "Database": {
+      "type": "parameter",
+      "datatype": "choice",
+      "defaultValue": "postgresql",
+      "displayName": "Database provider",
+      "description": "The database the generated project is configured to use. All three providers and all three migration projects ship regardless of this choice; it selects the DatabaseSettings values written into appsettings.json.",
+      "choices": [
+        {
+          "choice": "postgresql",
+          "displayName": "PostgreSQL",
+          "description": "Npgsql. The GX default."
+        },
+        {
+          "choice": "mssql",
+          "displayName": "SQL Server",
+          "description": "Microsoft SQL Server or LocalDB."
+        },
+        {
+          "choice": "sqlite",
+          "displayName": "SQLite",
+          "description": "A single file. Useful for evaluation and for the HTTP integration harness."
+        }
+      ]
     },
-    "sourceName": "CleanArchitecture.Blazor",
-    "preferNameDirectory": true,
-    "description": "This is a solution templates for creating a Blazor Server application following the principles of Clean Architecture",
-    "sources": [
+
+    "DefaultTimeZone": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "UTC",
+      "displayName": "Default time zone",
+      "description": "Time zone id given to a newly provisioned account when nobody has chosen one, for example UTC or Africa/Lagos. Validated when the generated application starts."
+    },
+
+    "AllowSelfRegistration": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "true",
+      "displayName": "Allow self-registration",
+      "description": "Whether anonymous visitors may create their own accounts. When false the registration pages and the external-login account-provisioning callback both return 404. This is a runtime configuration flag, so a generated project can change it later without regenerating."
+    },
+
+    "DbProviderSetting": {
+      "type": "generated",
+      "generator": "switch",
+      "replaces": "\"DBProvider\": \"postgresql\"",
+      "parameters": {
+        "evaluator": "C++",
+        "datatype": "string",
+        "cases": [
+          { "condition": "(Database == 'mssql')", "value": "\"DBProvider\": \"mssql\"" },
+          { "condition": "(Database == 'sqlite')", "value": "\"DBProvider\": \"sqlite\"" },
+          { "condition": "(true)", "value": "\"DBProvider\": \"postgresql\"" }
+        ]
+      }
+    },
+
+    "DbConnectionStringSetting": {
+      "type": "generated",
+      "generator": "switch",
+      "replaces": "Host=localhost;Port=5432;Database=GXApplication;Username=postgres;Password=postgres;",
+      "parameters": {
+        "evaluator": "C++",
+        "datatype": "string",
+        "cases": [
+          { "condition": "(Database == 'mssql')", "value": "Server=(localdb)\\\\mssqllocaldb;Database=GXApplication;Trusted_Connection=True;MultipleActiveResultSets=true;" },
+          { "condition": "(Database == 'sqlite')", "value": "Data Source=GXApplication.db" },
+          { "condition": "(true)", "value": "Host=localhost;Port=5432;Database=GXApplication;Username=postgres;Password=postgres;" }
+        ]
+      }
+    },
+
+    "DefaultTimeZoneSetting": {
+      "type": "generated",
+      "generator": "join",
+      "replaces": "\"DefaultTimeZone\": \"UTC\"",
+      "parameters": {
+        "symbols": [
+          { "type": "const", "value": "\"DefaultTimeZone\": \"" },
+          { "type": "ref", "value": "DefaultTimeZone" },
+          { "type": "const", "value": "\"" }
+        ],
+        "separator": "",
+        "removeEmptyValues": false
+      }
+    },
+
+    "AllowSelfRegistrationSetting": {
+      "type": "generated",
+      "generator": "switch",
+      "replaces": "\"AllowSelfRegistration\": true",
+      "parameters": {
+        "evaluator": "C++",
+        "datatype": "string",
+        "cases": [
+          { "condition": "(!AllowSelfRegistration)", "value": "\"AllowSelfRegistration\": false" },
+          { "condition": "(true)", "value": "\"AllowSelfRegistration\": true" }
+        ]
+      }
+    }
+  },
+
+  "sources": [
     {
       "source": "./",
       "target": "./",
       "exclude": [
-        "README.md",
         "**/[Bb]in/**",
         "**/[Oo]bj/**",
         ".template.config/**/*",
@@ -32,11 +134,15 @@
         "**/.github/**",
         "*.nuspec",
         "*.nupkg",
-        "launchSettings.json",
-        "*.exe",
+        "**/launchSettings.json",
+        "**/*.exe",
+        "**/*.db",
+        "**/*.db-shm",
+        "**/*.db-wal",
         "src/Server.UI/Files/**",
+        "src/Server.UI/[Ll]og/**",
         "docs/**/*"
       ]
     }
   ]
-  }
+}

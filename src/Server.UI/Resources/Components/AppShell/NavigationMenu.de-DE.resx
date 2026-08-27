@@ -120,9 +120,6 @@
   <data name="Blazor" xml:space="preserve">
     <value>Blazor</value>
   </data>
-  <data name="Blazor Dashboard" xml:space="preserve">
-    <value>Blazor-Dashboard</value>
-  </data>
   <data name="Company" xml:space="preserve">
     <value>Unternehmen</value>
   </data>
@@ -152,9 +149,6 @@
   </data>
   <data name="Content" xml:space="preserve">
     <value>Inhalte</value>
-  </data>
-  <data name="Products" xml:space="preserve">
-    <value>Produkte</value>
   </data>
   <data name="Documents" xml:space="preserve">
     <value>Dokumente</value>
@@ -203,9 +197,6 @@
   </data>
   <data name="Jobs" xml:space="preserve">
     <value>Jobs</value>
-  </data>
-  <data name="Contacts" xml:space="preserve">
-    <value>Kontakte</value>
   </data>
   <data name="Login History" xml:space="preserve">
     <value>Anmeldeverlauf</value>

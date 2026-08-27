@@ -400,9 +400,9 @@
                     Email = "",
                     UserName = "",
                     AssignedRoles = Array.Empty<string>(),
-                    // UTC, not TimeZoneInfo.Local: the server's zone says nothing about where the
-                    // new user is, and would otherwise vary with the deployment host.
-                    TimeZoneId = TimeZoneInfo.Utc.Id,
+                    // The configured default, not the server's zone - see
+                    // IApplicationSettings.DefaultTimeZone.
+                    TimeZoneId = ApplicationSettings.DefaultTimeZone,
                     LanguageCode = CultureInfo.CurrentCulture.Name
 
                 });

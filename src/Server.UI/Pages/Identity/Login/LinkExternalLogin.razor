@@ -91,6 +91,9 @@
 
 		}
 		_formModel.Email = Email ?? "";
+
+		// The configured default, not the server's zone - see IApplicationSettings.DefaultTimeZone.
+		_formModel.TimeZoneId = ApplicationSettings.DefaultTimeZone;
 	}
 
 
@@ -133,8 +136,8 @@
 			ErrorMessageResourceType = typeof(ValidationMessages),
 			ErrorMessageResourceName = nameof(ValidationMessages.TimeZoneRequired))]
 		[Display(Name = "Time Zone")]
-		// UTC, not TimeZoneInfo.Local: the server's zone says nothing about where the person
-		// linking the account is, and would otherwise vary with the deployment host.
+		// Seeded from AppConfigurationSettings.DefaultTimeZone in OnInitialized; never
+		// TimeZoneInfo.Local, whose value would vary with the deployment host.
 		public string TimeZoneId { get; set; } = TimeZoneInfo.Utc.Id;
 
 		[Required(

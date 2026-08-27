@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json.schemastore.org/vs-2017.3.host",
+  "icon": "icon.png",
+  "order": 0,
+  "symbolInfo": [
+    {
+      "id": "Database",
+      "name": {
+        "text": "Database provider"
+      },
+      "isVisible": true,
+      "invertBoolean": false,
+      "persistenceScope": "templateGroup"
+    },
+    {
+      "id": "DefaultTimeZone",
+      "name": {
+        "text": "Default time zone"
+      },
+      "isVisible": true,
+      "persistenceScope": "templateGroup"
+    },
+    {
+      "id": "AllowSelfRegistration",
+      "name": {
+        "text": "Allow self-registration"
+      },
+      "isVisible": true,
+      "invertBoolean": false,
+      "persistenceScope": "templateGroup"
+    },
+    {
+      "id": "DbProviderSetting",
+      "isVisible": false
+    },
+    {
+      "id": "DbConnectionStringSetting",
+      "isVisible": false
+    },
+    {
+      "id": "DefaultTimeZoneSetting",
+      "isVisible": false
+    },
+    {
+      "id": "AllowSelfRegistrationSetting",
+      "isVisible": false
+    }
+  ]
+}

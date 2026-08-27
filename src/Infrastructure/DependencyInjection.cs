@@ -60,8 +60,14 @@ public static class DependencyInjection
             .AddSingleton(s => s.GetRequiredService<IOptions<IdentitySettings>>().Value)
             .AddSingleton<IIdentitySettings>(s => s.GetRequiredService<IOptions<IdentitySettings>>().Value);
 
-        services.Configure<AppConfigurationSettings>(configuration.GetSection(APP_CONFIGURATION_SETTINGS_KEY))
-            .AddSingleton(s => s.GetRequiredService<IOptions<AppConfigurationSettings>>().Value)
+        // Same idiom as DatabaseSettings and StorageSettings: the settings class owns its rules and
+        // ValidateOnStart turns a bad DefaultTimeZone into a startup failure naming the value,
+        // rather than an exception on somebody's first registration.
+        services.AddOptions<AppConfigurationSettings>()
+            .Bind(configuration.GetSection(APP_CONFIGURATION_SETTINGS_KEY))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton(s => s.GetRequiredService<IOptions<AppConfigurationSettings>>().Value)
             .AddSingleton<IApplicationSettings>(s => s.GetRequiredService<IOptions<AppConfigurationSettings>>().Value);
 
         // DatabaseSettings implements IValidatableObject; ValidateDataAnnotations runs that
