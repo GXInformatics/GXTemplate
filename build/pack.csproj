@@ -1,0 +1,32 @@
+<!--
+    Packs GX.Blazor.Template.nuspec into a .nupkg.
+
+        dotnet pack build/pack.csproj -o .
+
+    This project compiles nothing and ships in no package. It exists only to carry the three
+    properties below, because `dotnet pack` cannot be given them any other way.
+
+    `dotnet pack GX.Blazor.Template.nuspec` does run, and looks like it worked. It is wrong.
+    NuGet excludes every file whose name begins with a dot unless it is passed
+    -NoDefaultExcludes, and the .nuspec path of `dotnet pack` accepts no such option: it is not
+    MSBuild-driven, so -p:NoDefaultExcludes=true is ignored, and a bare -NoDefaultExcludes is
+    read as a second .nuspec to pack. The resulting package is missing .editorconfig,
+    .gitignore, .gitattributes and .dockerignore, so every generated project loses its formatting
+    rules and its ignore list, and nothing fails to tell you so.
+
+    Packing through a project makes NoDefaultExcludes an ordinary MSBuild property, which is the
+    only way to set it short of the full nuget.exe.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <EnableDefaultItems>false</EnableDefaultItems>
+
+    <NuspecFile>$(MSBuildThisFileDirectory)..\GX.Blazor.Template.nuspec</NuspecFile>
+    <NuspecBasePath>$(MSBuildThisFileDirectory)..</NuspecBasePath>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+  </PropertyGroup>
+
+</Project>

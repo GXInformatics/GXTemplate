@@ -43,7 +43,7 @@ dotnet new install .
 Or from a package:
 
 ```
-dotnet new install GX.Blazor.Template.0.1.0-preview.1.nupkg
+dotnet new install GX.Blazor.Template.1.0.0.nupkg
 ```
 
 ### 2. Generate a project
@@ -292,8 +292,14 @@ Stated plainly, because finding these out later is worse than reading them now.
   failure behaviour, and throttling responses are untested.
 - **The PostgreSQL migration is reviewed, not applied, in the template's own verification.** It is
   generated and its SQL is read; there is no PostgreSQL server in the build environment.
-- **The `docker-compose.dcproj` references `.github/copilot-instructions.md`**, which is excluded
-  from generation. Harmless — it is a `<None Include>` — but Visual Studio may show it as missing.
+- **`tests/Application.IntegrationTests` is pinned to SQL Server LocalDB, whatever `--Database` you
+  chose.** Its own `appsettings.json` sets `mssql` and a `(localdb)\mssqllocaldb` connection string,
+  and the wizard does not rewrite it. On a machine without LocalDB those 9 tests **fail** — they do
+  not skip — while the rest of the suite passes. This is deliberate: they assert handler behaviour
+  against a real SQL Server, and repointing them at whatever the wizard chose would quietly change
+  what they prove. It is also why the newer HTTP harness, `tests/Server.UI.IntegrationTests`,
+  defaults to SQLite: that one needs a database, not a particular one. To run these, install
+  LocalDB, or point that file at any SQL Server you can reach.
 
 ---
 
@@ -337,3 +343,49 @@ emulator and are **skipped** — not failed — when it is not running. To inclu
 ```
 npx azurite --silent --location <a temp dir>
 ```
+
+Nine tests in `tests/Application.IntegrationTests` need SQL Server LocalDB and **fail** rather than
+skip without it, whatever `--Database` you generated with. See Known limitations for why.
+
+---
+
+## Packaging the template
+
+This section is for whoever maintains the template, not for a generated project.
+
+The distributable is built from `GX.Blazor.Template.nuspec` by a project that compiles nothing and
+exists only to carry three MSBuild properties:
+
+```
+dotnet pack build/pack.csproj -o .
+```
+
+That writes `GX.Blazor.Template.1.0.0.nupkg` to the repository root — around 745 entries and 1.1 MB.
+No `nuget.exe` is needed and none is committed; `.gitignore` refuses one at the root.
+
+Two things about that command are load-bearing.
+
+**`dotnet pack GX.Blazor.Template.nuspec` also runs, and is wrong.** NuGet drops every file whose
+name begins with a dot unless it is given `-NoDefaultExcludes`, and the `.nuspec` form of
+`dotnet pack` has no way to accept that option: it is not MSBuild-driven, so
+`-p:NoDefaultExcludes=true` is ignored, and a bare `-NoDefaultExcludes` is read as a second
+`.nuspec` to pack. The package it produces is missing `.editorconfig`, `.gitignore`,
+`.gitattributes` and `.dockerignore`, so every project generated from it loses its formatting rules
+and its ignore list. Nothing fails, and nothing warns you at install time. `build/pack.csproj` sets
+`NoDefaultExcludes` as an ordinary property, which is the only way to set it short of the full
+`nuget.exe`.
+
+**Every exclude pattern in the nuspec must begin with `**\`.** NuGet matches them against each
+file's resolved *absolute* path, so a root-anchored pattern such as `docs\**` is compared against
+`C:\...\GXTemplate\docs\...` and never matches. Such a pattern excludes nothing and reports nothing.
+
+To install the built package locally and generate from it:
+
+```
+dotnet new install ./GX.Blazor.Template.1.0.0.nupkg
+dotnet new gxblazor -n IMS -o IMS
+dotnet new uninstall GX.Blazor.Template
+```
+
+**NuGet caches by id and version.** Re-packing after a change without bumping `<version>` and then
+reinstalling gives you the *old* package back. Uninstall first, or bump the version.

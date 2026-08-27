@@ -8,7 +8,4 @@
     <DockerServiceUrl>{Scheme}://localhost:{ServicePort}</DockerServiceUrl>
     <DockerServiceName>dashboard</DockerServiceName>
   </PropertyGroup>
-  <ItemGroup>
-    <None Include=".github\copilot-instructions.md" />
-  </ItemGroup>
 </Project>

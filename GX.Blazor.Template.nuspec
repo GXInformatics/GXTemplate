@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
     <metadata>
         <id>GX.Blazor.Template</id>
-        <version>0.1.0-preview.1</version>
+        <version>1.0.0</version>
         <title>GX Blazor Server Solution Template</title>
         <authors>GX Informatics Limited</authors>
         <description>
@@ -16,7 +16,7 @@
             multi-tenant identity, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
-            0.1.0-preview.1
+            1.0.0
             - First GX release, derived from CleanArchitectureWithBlazorServer.
             - Deny-by-default request authorization with a startup assertion.
             - Audit rows written in the same transaction as the change they describe.
@@ -51,9 +51,15 @@
 
             LICENSE and README.md are included too - a generated project should carry its licence and
             its documentation.
+
+            EVERY exclude pattern below must begin with **\. NuGet matches these against the
+            resolved absolute path of each file, so a root-anchored pattern such as docs\** is
+            compared against C:\...\GXTemplate\docs\... and never matches - it excludes nothing,
+            silently. That is not hypothetical: docs\** and doc\** matched nothing and shipped
+            6.5 MB of screenshots and design notes inside the package until Pass 9.
         -->
         <file src=".\**" target="content"
-              exclude="**\*.exe;*.nuspec;*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;docs\**;doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;src\Server.UI\Files\**;src\Server.UI\log\**;GXTemplate-passes\**"/>
+              exclude="**\*.exe;**\*.nuspec;**\*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;**\docs\**;**\doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;**\src\Server.UI\Files\**;**\src\Server.UI\log\**;**\GXTemplate-passes\**;**\build\**"/>
     </files>
 
 </package>

@@ -364,3 +364,10 @@ src/Server.UI/appsettings.Development.json
 # Graphify generated output when run from subdirectories
 src/**/graphify-out/
 /graphify-out/cache
+
+# Tooling binaries at the repository root. nuget.exe used to live here, 7.3 MB of it, until
+# Pass 9 replaced it with `dotnet pack build/pack.csproj` - see the packaging section of the
+# README. Nothing executable belongs in this repository; if you download nuget.exe to pack by
+# hand, it stays untracked.
+/nuget.exe
+/*.exe

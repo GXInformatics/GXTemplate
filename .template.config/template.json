@@ -141,7 +141,8 @@
         "**/*.db-wal",
         "src/Server.UI/Files/**",
         "src/Server.UI/[Ll]og/**",
-        "docs/**/*"
+        "docs/**/*",
+        "build/**/*"
       ]
     }
   ]
