@@ -18,6 +18,13 @@
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
         <PackageReference Include="FluentAssertions" Version="8.10.0" />
+        <!-- Pass 10: component-level tests. Every test before this pass observed HTTP only, and
+             with the app rendered at InteractiveServer(prerender: false) an HTTP response carries
+             none of the component tree - so a layout that redirected an authenticated user away
+             from the change-password page was invisible to all of them. bUnit renders the real
+             components in-process, which is the only way to see that decision. -->
+        <PackageReference Include="bunit" Version="2.9.0" />
+        <PackageReference Include="Moq" Version="4.20.72" />
     </ItemGroup>
 
     <ItemGroup>

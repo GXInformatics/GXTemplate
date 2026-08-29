@@ -1,4 +1,6 @@
 ﻿@using CleanArchitecture.Blazor.Server.UI.Themes
+@using CleanArchitecture.Blazor.Server.UI.Pages.Identity.Login
+@using CleanArchitecture.Blazor.Server.UI.Pages.Identity.Register
 @using Microsoft.AspNetCore.Components.Authorization
 @layout MainLayout
 @inherits LayoutComponentBase
@@ -7,31 +9,85 @@
 @inject NavigationManager NavigationManager
 
 <MudLayout>
-    <AuthorizeView>
-        <NotAuthorized>
-            <MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center" Style="height: 100vh;">
-                <div class="d-flex flex-column mud-width-full">
-                    <MudPaper Class="pa-8" Width="100%" MaxWidth="500px">
-                        <Logo  Style="width:100px; height:100px;" />
-                        @Body
-                    </MudPaper>
-                </div>
-            </MudContainer>
-        </NotAuthorized>
-        <Authorized>
-            <MudText Typo="Typo.body2">@L["Welcome back! You are already logged in. Redirecting to the home page"]</MudText>
-        </Authorized>
-    </AuthorizeView>
+    @if (_ejecting == false)
+    {
+        <MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center" Style="height: 100vh;">
+            <div class="d-flex flex-column mud-width-full">
+                <MudPaper Class="pa-8" Width="100%" MaxWidth="500px">
+                    <Logo  Style="width:100px; height:100px;" />
+                    @Body
+                </MudPaper>
+            </div>
+        </MudContainer>
+    }
+    else if (_ejecting == true)
+    {
+        <MudText Typo="Typo.body2">@L["Welcome back! You are already logged in. Redirecting to the home page"]</MudText>
+    }
 </MudLayout>
 
 
 @code
 {
+    /// <summary>
+    /// Routes under this layout that an authenticated user must NOT be ejected from, because being
+    /// signed in is a precondition of the page rather than a reason to leave it.
+    /// </summary>
+    /// <remarks>
+    /// The list is the whole risk of this guard, in both directions. Too narrow - which is what it
+    /// was until Pass 10 - and the change-password page ejects the very user it exists for: the
+    /// forced-change middleware sends a flagged user here, this layout sends them home, the
+    /// middleware sends them back, and the browser flickers between the two until Blazor gives up,
+    /// leaving the user on the change-password URL with the "already logged in" notice and no form.
+    /// Too wide and a signed-in visitor is left sitting on the sign-in page.
+    /// <para>
+    /// It mirrors the exemption lists in <c>ForcePasswordChangeMiddleware</c> and
+    /// <c>ForcePasswordChangeGuard</c>, which face the same problem from the other side.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] AuthenticationIsThePrecondition =
+    [
+        // [Authorize]. There is no anonymous way to reach it and no reason to leave it.
+        ChangePassword.PageUrl,
+
+        // Confirmation follows a link from an inbox, and the person clicking it may well already be
+        // signed in - on this or another account. Ejecting them means the token in the link is never
+        // acted on and the address silently stays unconfirmed.
+        ConfirmEmail.PageUrl
+    ];
+
+    /// <summary>
+    /// Whether this layout sends an authenticated user home from <paramref name="path" />.
+    /// </summary>
+    /// <remarks>
+    /// Public and static so the classification can be asserted route by route without rendering.
+    /// </remarks>
+    public static bool RedirectsAuthenticatedUsersAwayFrom(string path)
+    {
+        var pathOnly = "/" + path.TrimStart('/').Split('?', '#')[0].TrimEnd('/');
+
+        foreach (var exempt in AuthenticationIsThePrecondition)
+        {
+            if (string.Equals(pathOnly, exempt, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+
+        return true;
+    }
+
+    // null until the decision has been made. Rendering nothing for that moment is deliberate:
+    // flashing a sign-in form at someone who is already signed in is the smaller version of the
+    // same defect.
+    private bool? _ejecting;
+
     protected override async Task OnInitializedAsync()
     {
-        // Check if the user is already authenticated
         var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
-        if (user.Identity?.IsAuthenticated ?? false)
+        var authenticated = user.Identity?.IsAuthenticated ?? false;
+        var path = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+
+        _ejecting = authenticated && RedirectsAuthenticatedUsersAwayFrom(path);
+
+        if (_ejecting == true)
         {
             NavigationManager.NavigateTo("/");
         }
