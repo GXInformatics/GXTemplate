@@ -14,6 +14,7 @@
       - AppConfigurationSettings__AppName=${APP_NAME}
       - DatabaseSettings__DBProvider=${DB_PROVIDER}
       - DatabaseSettings__ConnectionString=${DB_CONNECTION_STRING}
+      - DatabaseSettings__LogConnectionString=${DB_LOG_CONNECTION_STRING}
       - AISettings__GeminiApiKey=${GEMINI_API_KEY}
       - AISettings__OpenAIApiKey=${OPENAI_API_KEY}
       - SmtpClientOptions__UserName=${SMTP_USERNAME}

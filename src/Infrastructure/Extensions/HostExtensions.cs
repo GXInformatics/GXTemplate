@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Extensions;
 public static class HostExtensions
@@ -21,6 +22,11 @@ public static class HostExtensions
                 await initializer.SeedSampleDataAsync().ConfigureAwait(false);
             }
         }
+
+        // Last, and outside the scope above, because it is not part of preparing the business
+        // database and must not be able to prevent it. The business database is fail-fast; the log
+        // database is best-effort-but-loud, and this is where the second half of that is said.
+        await host.CheckLogDatabaseAsync().ConfigureAwait(false);
     }
 
    

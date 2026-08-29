@@ -3,8 +3,12 @@
 @using ApexCharts
 @implements IDisposable
 
+@using CleanArchitecture.Blazor.Application.Common.ExceptionHandlers
+@using CleanArchitecture.Blazor.Server.UI.Pages.SystemManagement
+
 @inject LayoutService LayoutService
 @inject IStringLocalizer<SystemLogs> L
+@inject ILogger<LogsLineCharts> Logger
 
 <div class="d-flex flex-grow-1 mb-5">
     <MudPaper Class="pa-5 flex-grow-1" Elevation="1">
@@ -21,9 +25,20 @@
                                  SeriesType="SeriesType.Bar" />
             </ApexChart>
         }
-        else
+        else if (LogDatabaseState == LogDatabaseState.Available)
         {
             <MudSkeleton SkeletonType="SkeletonType.Rectangle" Width="100%" Height="160px" />
+        }
+        else
+        {
+            @* A skeleton means "loading". When the log database is absent or unreachable nothing is
+               coming, and an animation that never resolves reads as a hung page. The grid below
+               names the actual state; this only stops contradicting it. *@
+            <MudText id="log-chart-unavailable" Typo="Typo.body2" Class="mud-text-secondary">
+                @(LogDatabaseState == LogDatabaseState.NotConfigured
+                    ? L["No log database is configured"]
+                    : L["The log database is unavailable"])
+            </MudText>
         }
     </MudPaper>
 </div>
@@ -31,6 +46,9 @@
 @code
 {
     public List<SystemLogTimeLineDto> Data { get; set; } = new();
+
+    /// <summary>What this component last learned about the log database. Public for assertion.</summary>
+    public LogDatabaseState LogDatabaseState { get; private set; } = LogDatabaseState.Available;
     private ApexChart<SystemLogTimeLineDto> Chart { get; set; } = null!;
     private ApexChartOptions<SystemLogTimeLineDto> Options { get; set; } = new();
 
@@ -101,7 +119,25 @@
 
         LayoutService.MajorUpdateOccurred += LayoutServiceOnMajorUpdateOccurred;
 
-        Data = await Mediator.Send(new SystemLogsTimeLineChatDataQuery());
+        try
+        {
+            Data = await Mediator.Send(new SystemLogsTimeLineChatDataQuery());
+            LogDatabaseState = LogDatabaseState.Available;
+        }
+        catch (LogDatabaseNotConfiguredException)
+        {
+            LogDatabaseState = LogDatabaseState.NotConfigured;
+            Data = new();
+        }
+        catch (Exception ex)
+        {
+            // This component sits ABOVE the grid on the page. Before this, an unreachable log
+            // database threw here and took the whole page down with it, so the grid never got as far
+            // as rendering its own explanation of what was wrong.
+            Logger.LogError(ex, "The log chart could not read the log database.");
+            LogDatabaseState = LogDatabaseState.Unavailable;
+            Data = new();
+        }
     }
 
     private async Task LayoutServiceOnMajorUpdateOccurred()

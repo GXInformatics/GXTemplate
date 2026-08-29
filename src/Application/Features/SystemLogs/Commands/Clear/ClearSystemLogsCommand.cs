@@ -16,10 +16,10 @@ public class ClearSystemLogsCommand : ICacheInvalidatorRequest<Result>
 public class ClearSystemLogsCommandHandler : IRequestHandler<ClearSystemLogsCommand, Result>
 
 {
-    private readonly IApplicationDbContextFactory _dbContextFactory;
+    private readonly ILogDbContextFactory _dbContextFactory;
 
     public ClearSystemLogsCommandHandler(
-        IApplicationDbContextFactory dbContextFactory
+        ILogDbContextFactory dbContextFactory
     )
     {
         _dbContextFactory = dbContextFactory;
@@ -28,7 +28,11 @@ public class ClearSystemLogsCommandHandler : IRequestHandler<ClearSystemLogsComm
     public async ValueTask<Result> Handle(ClearSystemLogsCommand request, CancellationToken cancellationToken)
     {
         await using var db = await _dbContextFactory.CreateAsync(cancellationToken);
-        await db.SystemLogs.ExecuteDeleteAsync(cancellationToken);
+
+        // PurgeAsync rather than ExecuteDeleteAsync on a DbSet: ILogDbContext exposes an IQueryable,
+        // so erasing the log is a capability the interface grants by name rather than a side effect
+        // of having handed out something writable.
+        await db.PurgeAsync(cancellationToken);
         return await Result.SuccessAsync();
     }
 }

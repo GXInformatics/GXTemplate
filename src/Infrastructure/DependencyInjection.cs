@@ -9,6 +9,7 @@ using CleanArchitecture.Blazor.Application.Pipeline;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
+using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Services.MultiTenant;
 using MaxMind.GeoIP2;
@@ -122,7 +123,47 @@ public static class DependencyInjection
 
         services.AddScoped<IApplicationDbContextFactory, ApplicationDbContextFactory>();
         services.AddScoped<ApplicationDbContextInitializer>();
+
+        AddLogDatabaseServices(services);
         return services;
+    }
+
+    /// <summary>
+    /// The log database's reading side: a second context type over a second connection string, on
+    /// the same provider as the business database.
+    /// </summary>
+    /// <remarks>
+    /// Two differences from the registration above are deliberate and load-bearing.
+    /// <para>
+    /// <b>No interceptors.</b> The <c>m.AddInterceptors(p.GetServices&lt;ISaveChangesInterceptor&gt;())</c>
+    /// line is absent, not overlooked. <c>AuditableEntityInterceptor</c> opens a transaction in
+    /// SavingChanges and holds it across the save so audit rows commit atomically with the business
+    /// change (Pass 5); attaching it to a context that never saves, in a database that has no
+    /// AuditTrails table, could only ever do harm. <c>LogDbContextHasNoSaveChangesInterceptorsTests</c>
+    /// asserts the absence so it cannot be reinstated by someone copying the block above.
+    /// </para>
+    /// <para>
+    /// <b>Registered even when unconfigured.</b> The options builder below runs lazily, per context
+    /// creation, so registering it against a blank connection string is harmless -
+    /// <see cref="LogDbContextFactory"/> refuses before EF is ever asked to build one. Registering
+    /// conditionally would instead make the "no log database" case a missing-service crash at the
+    /// first page load, which is precisely the fatal behaviour this design rejects.
+    /// </para>
+    /// </remarks>
+    private static void AddLogDatabaseServices(IServiceCollection services)
+    {
+        services.AddDbContextFactory<LogDbContext>((p, m) =>
+        {
+            var databaseSettings = p.GetRequiredService<IOptions<DatabaseSettings>>().Value;
+
+            // No UseExceptionProcessor either, and for the same reason as the interceptors: it
+            // registers its own ISaveChangesInterceptor to translate save failures into typed
+            // exceptions, and this context has no saves to fail. The purge goes through
+            // ExecuteDeleteAsync, which does not run save-changes interceptors at all.
+            m.UseDatabase(databaseSettings.DBProvider, databaseSettings.LogConnectionString);
+        }, ServiceLifetime.Scoped);
+
+        services.AddScoped<ILogDbContextFactory, LogDbContextFactory>();
     }
 
     private static DbContextOptionsBuilder UseDatabase(this DbContextOptionsBuilder builder, string dbProvider,

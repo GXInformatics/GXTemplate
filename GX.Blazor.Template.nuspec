@@ -8,8 +8,8 @@
         <description>
             A Blazor Server solution template for .NET 10, laid out in Clean Architecture layers.
             Ships multi-tenant ASP.NET Core Identity with permission claims, deny-by-default
-            authorization on every request, transactional audit trails, structured logging into the
-            application database, and Documents and PicklistSets as worked examples.
+            authorization on every request, transactional audit trails, structured logging into a separate
+            log database, and Documents and PicklistSets as worked examples.
         </description>
         <summary>
             Blazor Server solution template for .NET 10 in Clean Architecture layers, with

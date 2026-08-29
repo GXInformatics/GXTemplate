@@ -53,6 +53,22 @@ public sealed class GxWebApplicationFactory : WebApplicationFactory<Program>
     /// <summary>The throwaway storage root this instance's disk provider is writing into.</summary>
     public string StorageRoot => Path.Combine(_root, "files");
 
+    /// <summary>
+    /// The two databases this fixture runs against, exposed so a test can inspect each one's schema
+    /// directly. Proving that the business database has no SystemLogs table is the central claim of
+    /// Pass 11, and it can only be made by looking at the business database itself.
+    /// </summary>
+    public string BusinessConnectionString =>
+        Environment.GetEnvironmentVariable("GX_TEST_CONNECTIONSTRING") is { Length: > 0 } explicitly
+            ? explicitly
+            : $"Data Source={Path.Combine(_root, "gx.db")}";
+
+    /// <inheritdoc cref="BusinessConnectionString" />
+    public string LogConnectionString =>
+        Environment.GetEnvironmentVariable("GX_TEST_LOGCONNECTIONSTRING") is { Length: > 0 } explicitly
+            ? explicitly
+            : $"Data Source={Path.Combine(_root, "gx-logs.db")}";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(_environment);
@@ -60,20 +76,25 @@ public sealed class GxWebApplicationFactory : WebApplicationFactory<Program>
         builder.ConfigureAppConfiguration((_, configuration) =>
         {
             // SQLite in a temp directory by default: no server to install, and every fixture gets a
-            // database nobody else can see. GX_TEST_DBPROVIDER / GX_TEST_CONNECTIONSTRING point the
-            // same harness at a real server instead, which is how the acceptance run exercises
-            // cookie login and the authorization matrices against the provider actually chosen.
+            // pair of databases nobody else can see. GX_TEST_DBPROVIDER / GX_TEST_CONNECTIONSTRING /
+            // GX_TEST_LOGCONNECTIONSTRING point the same harness at a real server instead, which is
+            // how the acceptance run exercises cookie login and the authorization matrices against
+            // the provider actually chosen.
             var provider = Environment.GetEnvironmentVariable("GX_TEST_DBPROVIDER");
-            var connectionString = Environment.GetEnvironmentVariable("GX_TEST_CONNECTIONSTRING");
 
             var settings = new Dictionary<string, string?>
             {
                 ["DatabaseSettings:DBProvider"] = string.IsNullOrWhiteSpace(provider)
                     ? DbProviderKeys.SqLite
                     : provider,
-                ["DatabaseSettings:ConnectionString"] = string.IsNullOrWhiteSpace(connectionString)
-                    ? $"Data Source={Path.Combine(_root, "gx.db")}"
-                    : connectionString,
+                ["DatabaseSettings:ConnectionString"] = BusinessConnectionString,
+
+                // A SECOND throwaway database, under the same root this fixture deletes. Setting it
+                // is not optional housekeeping: an absent log connection string is a supported,
+                // non-fatal state, so leaving it out would let every test here pass while proving
+                // nothing about the log database - the tests would be exercising the
+                // "not configured" path without saying so.
+                ["DatabaseSettings:LogConnectionString"] = LogConnectionString,
 
                 // The disk storage provider, rooted where this fixture can delete it afterwards.
                 ["Storage:Provider"] = StorageProviderKeys.Disk,

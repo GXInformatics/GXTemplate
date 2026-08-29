@@ -4,6 +4,7 @@
 using System.Reflection;
 using CleanArchitecture.Blazor.Domain.Common.Entities;
 using CleanArchitecture.Blazor.Domain.Identity;
+using CleanArchitecture.Blazor.Infrastructure.Persistence.Configurations;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence;
@@ -21,18 +22,34 @@ public class ApplicationDbContext : IdentityDbContext<
 
     public DbSet<Tenant> Tenants { get; set; }
     public DbSet<TenantUser> TenantUsers { get; set; }
-    public DbSet<SystemLog> SystemLogs { get; set; }
     public DbSet<AuditTrail> AuditTrails { get; set; }
     public DbSet<Document> Documents { get; set; }
 
     public DbSet<PicklistSet> PicklistSets { get; set; }
     public DbSet<DataProtectionKey> DataProtectionKeys { get; set; }
 
+    /// <summary>
+    /// The business model's entity configurations. Anything outside this namespace - today, the
+    /// log model under <c>Persistence.Logging.Configurations</c> - is deliberately not part of this
+    /// context.
+    /// </summary>
+    public static readonly string ConfigurationsNamespace = typeof(AuditTrailConfiguration).Namespace!;
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
-        
+
         base.OnModelCreating(builder);
-        builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+
+        // The predicate is load-bearing. ApplyConfigurationsFromAssembly calls builder.Entity<T>()
+        // for every IEntityTypeConfiguration<T> it finds, which ADDS T to the model - so an
+        // unfiltered scan of this assembly would re-add SystemLog here however thoroughly its DbSet
+        // is removed, and the migration would go on creating a SystemLogs table in the business
+        // database. Equality, not StartsWith: the log configurations live in a namespace nested
+        // under this one's parent, and a prefix match would let them back in.
+        builder.ApplyConfigurationsFromAssembly(
+            Assembly.GetExecutingAssembly(),
+            t => t.Namespace == ConfigurationsNamespace);
+
         builder.ApplyGlobalFilters<ISoftDelete>(s => s.DeletedAt == null);
     }
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)

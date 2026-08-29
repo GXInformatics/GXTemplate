@@ -20,10 +20,10 @@ public class SystemLogsTimeLineChatDataQuery : ICacheableRequest<List<SystemLogT
 public class SystemLogsChatDataQueryHandler : IRequestHandler<SystemLogsTimeLineChatDataQuery, List<SystemLogTimeLineDto>>
 
 {
-    private readonly IApplicationDbContextFactory _dbContextFactory;
+    private readonly ILogDbContextFactory _dbContextFactory;
 
     public SystemLogsChatDataQueryHandler(
-        IApplicationDbContextFactory dbContextFactory
+        ILogDbContextFactory dbContextFactory
     )
     {
         _dbContextFactory = dbContextFactory;

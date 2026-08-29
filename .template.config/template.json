@@ -87,6 +87,21 @@
       }
     },
 
+    "LogDbConnectionStringSetting": {
+      "type": "generated",
+      "generator": "switch",
+      "replaces": "Host=localhost;Port=5432;Database=GXApplication_Logs;Username=postgres;Password=postgres;",
+      "parameters": {
+        "evaluator": "C++",
+        "datatype": "string",
+        "cases": [
+          { "condition": "(Database == 'mssql')", "value": "Server=(localdb)\\\\mssqllocaldb;Database=GXApplication_Logs;Trusted_Connection=True;MultipleActiveResultSets=true;" },
+          { "condition": "(Database == 'sqlite')", "value": "Data Source=GXApplication_Logs.db" },
+          { "condition": "(true)", "value": "Host=localhost;Port=5432;Database=GXApplication_Logs;Username=postgres;Password=postgres;" }
+        ]
+      }
+    },
+
     "DefaultTimeZoneSetting": {
       "type": "generated",
       "generator": "join",

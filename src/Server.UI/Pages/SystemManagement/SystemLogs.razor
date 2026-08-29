@@ -8,8 +8,11 @@
 @using CleanArchitecture.Blazor.Server.UI.Pages.SystemManagement.Components
 @using CleanArchitecture.Blazor.Application.Features.SystemLogs.Commands.Clear
 
+@using CleanArchitecture.Blazor.Application.Common.ExceptionHandlers
+
 @attribute [Authorize(Policy = Permissions.Logs.View)]
 @inject IStringLocalizer<SystemLogs> L
+@inject ILogger<SystemLogs> Logger
 <PageTitle>@Title</PageTitle>
 
 <LogsLineCharts></LogsLineCharts>
@@ -196,9 +199,39 @@
         </MudCard>
     </ChildRowContent>
     <NoRecordsContent>
-        <MudDataGridStatus Icon="@Icons.Material.TwoTone.Article"
-                           Text="@L["No System Logs Found"]"
-                           SubText="@L["Try adjusting your search or filter to find what you're looking for."]" />
+        @*
+            An empty grid used to have one meaning. Now that logs live in their own database, it has
+            three, and saying "no logs found" to someone whose log database was never configured is
+            the failure this page most needs to avoid.
+        *@
+        @switch (_logDatabaseState)
+        {
+            case LogDatabaseState.NotConfigured:
+                <MudDataGridStatus Icon="@Icons.Material.TwoTone.SettingsEthernet"
+                                   Text="@L["No log database is configured"]"
+                                   SubText="@L["Set DatabaseSettings:LogConnectionString to record logs to a database. The application is otherwise running normally, and logs are still written to the console and to the log files."]" />
+                break;
+
+            case LogDatabaseState.Unavailable:
+                <MudStack AlignItems="AlignItems.Center" Spacing="2" Class="pa-4">
+                    <MudDataGridStatus Icon="@Icons.Material.TwoTone.CloudOff"
+                                       Text="@L["The log database is unavailable"]"
+                                       SubText="@L["The log database is configured but did not respond. The application is otherwise running normally."]" />
+                    <MudButton id="log-database-retry"
+                               Variant="Variant.Filled"
+                               StartIcon="@Icons.Material.Outlined.Refresh"
+                               OnClick="@(() => OnRefresh())">
+                        @AppStrings.Refresh
+                    </MudButton>
+                </MudStack>
+                break;
+
+            default:
+                <MudDataGridStatus Icon="@Icons.Material.TwoTone.Article"
+                                   Text="@L["No System Logs Found"]"
+                                   SubText="@L["Try adjusting your search or filter to find what you're looking for."]" />
+                break;
+        }
     </NoRecordsContent>
     <LoadingContent>
         <MudDataGridStatus IsLoading="true"
@@ -222,6 +255,14 @@
     private bool _loading;
     private bool _clearing;
     private LogsAccessRights _accessRights = new();
+
+    /// <summary>
+    /// What the last query learned about the log database. Public so a rendered-component test can
+    /// state which of the three cases it is asserting, rather than inferring it from wording.
+    /// </summary>
+    public LogDatabaseState LogDatabaseState => _logDatabaseState;
+
+    private LogDatabaseState _logDatabaseState = LogDatabaseState.Available;
 
     private SystemLogsWithPaginationQuery _systemLogsQuery { get; } = new();
 
@@ -248,7 +289,26 @@
             _systemLogsQuery.CurrentUser = UserProfile;
             var result = await Mediator.Send(_systemLogsQuery).ConfigureAwait(false);
 
+            _logDatabaseState = LogDatabaseState.Available;
             return new GridData<SystemLogDto> { TotalItems = result.TotalItems, Items = result.Items };
+        }
+        catch (LogDatabaseNotConfiguredException)
+        {
+            // A stated configuration, not a fault: there is no log database to read. Saying so is
+            // the entire point - an empty grid here would report "no logs" to someone whose logs
+            // were never being recorded.
+            _logDatabaseState = LogDatabaseState.NotConfigured;
+            return new GridData<SystemLogDto> { TotalItems = 0, Items = [] };
+        }
+        catch (Exception ex)
+        {
+            // Broad on purpose. A refused connection, a timeout, a missing table and a bad
+            // credential all arrive as different types, and from this page they are one fact: the
+            // log database did not answer. It is logged rather than swallowed, because a defect in
+            // the query would otherwise hide here looking like an outage.
+            Logger.LogError(ex, "The SystemLogs page could not read the log database.");
+            _logDatabaseState = LogDatabaseState.Unavailable;
+            return new GridData<SystemLogDto> { TotalItems = 0, Items = [] };
         }
         finally
         {
@@ -293,7 +353,20 @@
                 var command = new ClearSystemLogsCommand();
                 var result = await Mediator.Send(command);
                 await _table.ReloadServerData();
-                Snackbar.Add(L["Logs have been erased"], Severity.Info);
+
+                // The result was previously discarded, which reported a successful purge whatever
+                // happened. That mattered little while the log table lived in the business database
+                // and a failure there meant the whole application was down; now the log database can
+                // be unreachable on its own, and claiming to have erased logs that are still there
+                // is a lie the operator would act on.
+                if (result.Succeeded)
+                {
+                    Snackbar.Add(L["Logs have been erased"], Severity.Info);
+                }
+                else
+                {
+                    Snackbar.Add(L["The logs could not be erased"], Severity.Error);
+                }
             }
             finally
             {

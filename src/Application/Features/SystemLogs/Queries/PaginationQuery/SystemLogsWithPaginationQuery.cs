@@ -32,11 +32,11 @@ public class SystemLogsWithPaginationQuery : SystemLogAdvancedFilter, ICacheable
 
 public class LogsQueryHandler : IRequestHandler<SystemLogsWithPaginationQuery, PaginatedData<SystemLogDto>>
 {
-    private readonly IApplicationDbContextFactory _dbContextFactory;
+    private readonly ILogDbContextFactory _dbContextFactory;
     private readonly TypeAdapterConfig _typeAdapterConfig;
 
     public LogsQueryHandler(
-        IApplicationDbContextFactory dbContextFactory,
+        ILogDbContextFactory dbContextFactory,
         TypeAdapterConfig typeAdapterConfig
     )
     {

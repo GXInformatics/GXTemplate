@@ -7,7 +7,8 @@ namespace CleanArchitecture.Blazor.Application.Common.Interfaces;
 
 public interface IApplicationDbContext: IAsyncDisposable
 {
-    DbSet<SystemLog> SystemLogs { get; set; }
+    // SystemLog is deliberately absent: logs live in their own database behind ILogDbContext, so
+    // that no query written against the business context can join across the two.
     DbSet<AuditTrail> AuditTrails { get; set; }
     DbSet<Document> Documents { get; set; }
     DbSet<PicklistSet> PicklistSets { get; set; }
