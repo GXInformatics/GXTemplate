@@ -46,7 +46,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnName("changes");
 
                     b.Property<DateTime>("DateTime")
-                        .HasColumnType("timestamp without time zone")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("date_time");
 
                     b.Property<string>("PrimaryKey")
@@ -83,7 +83,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime?>("CreatedAt")
-                        .HasColumnType("timestamp without time zone")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
                     b.Property<string>("CreatedById")
@@ -106,7 +106,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnName("is_public");
 
                     b.Property<DateTime?>("LastModifiedAt")
-                        .HasColumnType("timestamp without time zone")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_modified_at");
 
                     b.Property<string>("LastModifiedById")
@@ -162,7 +162,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime?>("CreatedAt")
-                        .HasColumnType("timestamp without time zone")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
                     b.Property<string>("CreatedById")
@@ -176,7 +176,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnName("description");
 
                     b.Property<DateTime?>("LastModifiedAt")
-                        .HasColumnType("timestamp without time zone")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_modified_at");
 
                     b.Property<string>("LastModifiedById")
@@ -280,7 +280,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnName("concurrency_stamp");
 
                     b.Property<DateTime?>("CreatedAt")
-                        .HasColumnType("timestamp without time zone")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
                     b.Property<string>("Description")
@@ -289,7 +289,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnName("description");
 
                     b.Property<DateTime?>("LastModifiedAt")
-                        .HasColumnType("timestamp without time zone")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_modified_at");
 
                     b.Property<string>("Name")
@@ -374,7 +374,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnName("concurrency_stamp");
 
                     b.Property<DateTime?>("CreatedAt")
-                        .HasColumnType("timestamp without time zone")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
                     b.Property<string>("DisplayName")
@@ -405,7 +405,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnName("language_code");
 
                     b.Property<DateTime?>("LastModifiedAt")
-                        .HasColumnType("timestamp without time zone")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_modified_at");
 
                     b.Property<bool>("LockoutEnabled")
@@ -453,15 +453,6 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasMaxLength(450)
                         .HasColumnType("character varying(450)")
                         .HasColumnName("provider");
-
-                    b.Property<string>("RefreshToken")
-                        .HasMaxLength(450)
-                        .HasColumnType("character varying(450)")
-                        .HasColumnName("refresh_token");
-
-                    b.Property<DateTime>("RefreshTokenExpiryTime")
-                        .HasColumnType("timestamp without time zone")
-                        .HasColumnName("refresh_token_expiry_time");
 
                     b.Property<string>("SecurityStamp")
                         .HasMaxLength(450)

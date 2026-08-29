@@ -295,7 +295,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
         var currentUser = _userContextAccessor.Current;
         var userId = currentUser?.UserId;
         var tenantId = currentUser?.TenantId;
-        var now = _dateTime.Now;
+        var now = _dateTime.UtcNow;
 
         foreach (var entry in context.ChangeTracker.Entries<IAuditableEntity>())
         {
@@ -348,7 +348,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
     {
         var currentUser = _userContextAccessor.Current;
         var userId = currentUser?.UserId;
-        var now = _dateTime.Now;
+        var now = _dateTime.UtcNow;
         var auditTrails = new List<AuditTrail>();
 
         foreach (var entry in context.ChangeTracker.Entries<IAuditable>())

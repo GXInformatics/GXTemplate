@@ -2,6 +2,7 @@ using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
+using NpgsqlTypes;
 using Microsoft.Data.Sqlite;
 using Serilog;
 using Serilog.Core;
@@ -76,6 +77,11 @@ public class SinkTimestampTests : IDisposable
         var single = Assert.IsType<SinglePropertyColumnWriter>(writer);
         Assert.Equal("TimeStamp", single.Name);
         Assert.Equal(PropertyWriteMethod.Raw, single.WriteMethod);
+
+        // TimestampTz, not Timestamp. This is the half of Pass 14B that lives on the driver side:
+        // LogTableDdl declares time_stamp as timestamptz and the enricher publishes Kind=Utc, and
+        // Npgsql binds by the DECLARED type, so a writer still saying Timestamp rejects the value.
+        Assert.Equal(NpgsqlDbType.TimestampTz, single.DbType);
     }
 
     [Fact]
@@ -94,10 +100,13 @@ public class SinkTimestampTests : IDisposable
         new UtcTimestampEnricher().Enrich(logEvent, new PropertyFactory());
 
         var value = Assert.IsType<ScalarValue>(logEvent.Properties["TimeStamp"]);
-        // The UTC instant, with Kind=Unspecified so Npgsql will bind it to a "timestamp without
-        // time zone" column without depending on a global legacy switch.
-        Assert.Equal(new DateTime(2026, 8, 29, 10, 30, 0, DateTimeKind.Unspecified), value.Value);
-        Assert.Equal(DateTimeKind.Unspecified, ((DateTime)value.Value!).Kind);
+        // The UTC instant, with Kind=Utc. Pass 14B flipped this from Unspecified, and the flip is
+        // the assertion: timestamptz ACCEPTS Kind=Utc and REJECTS Kind=Unspecified, which is the
+        // exact inverse of the "timestamp without time zone" column Pass 11D was writing into. If
+        // the enricher reverts to Unspecified while LogTableDdl still says timestamptz, every
+        // PostgreSQL log write fails at bind time - and this test fails first.
+        Assert.Equal(new DateTime(2026, 8, 29, 10, 30, 0, DateTimeKind.Utc), value.Value);
+        Assert.Equal(DateTimeKind.Utc, ((DateTime)value.Value!).Kind);
     }
 
     /// <summary>The smallest thing that satisfies the enricher's signature.</summary>

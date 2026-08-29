@@ -23,8 +23,6 @@ public class ApplicationUser : IdentityUser
 
     public bool IsActive { get; set; }
     public bool IsLive { get; set; }
-    public string? RefreshToken { get; set; }
-    public DateTime RefreshTokenExpiryTime { get; set; }
     public virtual ICollection<ApplicationUserClaim> UserClaims { get; set; }
     public virtual ICollection<ApplicationUserRole> UserRoles { get; set; }
     public virtual ICollection<ApplicationUserLogin> Logins { get; set; }

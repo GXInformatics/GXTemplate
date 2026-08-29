@@ -100,6 +100,36 @@ public class LogTableDdlTests
         Assert.Contains("CREATE TABLE IF NOT EXISTS", LogTableDdl.Statements(provider)[0]);
     }
 
+    // ------------------------------------------------------------- column types that must agree
+
+    [Fact]
+    public void ThePostgresTimestampColumnIsTimestamptz_BecauseTheWriterAndTheEnricherSayItIs()
+    {
+        // Pass 14B moved three things at once: this DDL to timestamptz, the sink's writer to
+        // NpgsqlDbType.TimestampTz, and UtcTimestampEnricher back to Kind=Utc. There was no
+        // expectation on the column TYPE here before - only on the column NAME - so any one of the
+        // three could have been reverted and only a live PostgreSQL run would have noticed.
+        //
+        // A timestamptz column ACCEPTS Kind=Utc and REJECTS Kind=Unspecified; "timestamp without
+        // time zone" does the exact opposite. The two are not interchangeable and there is no value
+        // that satisfies both, so this is a genuine either/or rather than a stylistic preference.
+        var create = LogTableDdl.Statements(DbProviderKeys.Npgsql)[0];
+
+        Assert.Contains("timestamp with time zone", create, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("timestamp without time zone", create, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TheOtherTwoProvidersTimestampColumnsAreUnchangedByTheTimestamptzWork()
+    {
+        // The legacy switch was Npgsql-only and set only in the Npgsql branch, so MSSQL and SQLite
+        // were already in the target state and nothing about them moved in Pass 14B. Stated as an
+        // assertion rather than assumed, because "unchanged" is exactly the kind of claim that goes
+        // stale silently.
+        Assert.Contains("datetime2", LogTableDdl.Statements(DbProviderKeys.SqlServer)[0]);
+        Assert.Contains("TEXT NOT NULL", LogTableDdl.Statements(DbProviderKeys.SqLite)[0]);
+    }
+
     // ------------------------------------------------------------- indexes
 
     [Theory]

@@ -120,7 +120,7 @@ public class SaveChangesInterceptorRegressionTests
             .Returns(new UserContext("user-123", "regression-user"));
 
         var dateTime = new Mock<IDateTime>();
-        dateTime.SetupGet(x => x.Now).Returns(new DateTime(2026, 3, 29, 9, 0, 0, DateTimeKind.Utc));
+        dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 3, 29, 9, 0, 0, DateTimeKind.Utc));
 
         await using var context = await CreateContextAsync(
             new AuditableEntityInterceptor(userContextAccessor.Object, dateTime.Object));

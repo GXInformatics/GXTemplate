@@ -9,7 +9,18 @@ namespace CleanArchitecture.Blazor.Application.Features.SystemLogs.Queries.ChatD
 [RequestAuthorize(Policy = Permissions.Logs.View)]
 public class SystemLogsTimeLineChatDataQuery : ICacheableRequest<List<SystemLogTimeLineDto>>
 {
-    public DateTime LastDateTime { get; set; } = DateTime.Now.AddDays(-60);
+    /// <summary>
+    /// The start of the chart's window. UTC, not local: this value becomes a query PARAMETER
+    /// (see the handler's Where clause), and under timestamptz Npgsql refuses to bind a
+    /// Kind=Local or Kind=Unspecified DateTime to a "timestamp with time zone" column. Pass 14
+    /// measured it: DateTime.Now here made the SystemLogs chart the second of two writes that
+    /// broke the moment the legacy switch was removed.
+    /// <para>
+    /// It also feeds <see cref="CacheKey"/> through ToString(), so the key text changed with it.
+    /// That is harmless - the key only has to be stable within a run and distinct per window.
+    /// </para>
+    /// </summary>
+    public DateTime LastDateTime { get; set; } = DateTime.UtcNow.AddDays(-60);
     public string CacheKey => SystemLogsCacheKey.GetChartDataCacheKey(LastDateTime.ToString());
     public IEnumerable<string>? Tags => SystemLogsCacheKey.Tags;
     
@@ -40,7 +51,11 @@ public class SystemLogsChatDataQueryHandler : IRequestHandler<SystemLogsTimeLine
             .ToListAsync(cancellationToken);
 
         List<SystemLogTimeLineDto> result = new();
-        DateTime end = new(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, 0, 0, 0);
+        // UTC, to match the window's start and the rows themselves. This value never reaches the
+        // database - it only bounds the in-memory loop that fills empty days - but with
+        // LastDateTime now UTC, a local-time bound would run the loop over a differently-anchored
+        // day grid than the data, adding or dropping a bin by the host's offset.
+        DateTime end = DateTime.UtcNow.Date;
         var start = request.LastDateTime.Date;
 
         while (start <= end)

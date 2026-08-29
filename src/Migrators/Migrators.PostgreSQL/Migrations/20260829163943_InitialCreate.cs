@@ -19,8 +19,8 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                 {
                     id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: false),
                     description = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
-                    created_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    last_modified_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    last_modified_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     name = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
                     normalized_name = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
                     concurrency_stamp = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true)
@@ -54,9 +54,9 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                     value = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
                     text = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
                     description = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
-                    created_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     created_by_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
-                    last_modified_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    last_modified_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     last_modified_by_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true)
                 },
                 constraints: table =>
@@ -111,11 +111,9 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                     profile_picture_data_url = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     is_active = table.Column<bool>(type: "boolean", nullable: false),
                     is_live = table.Column<bool>(type: "boolean", nullable: false),
-                    refresh_token = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
-                    refresh_token_expiry_time = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     superior_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
-                    created_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    last_modified_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    last_modified_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     time_zone_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     language_code = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     must_change_password = table.Column<bool>(type: "boolean", nullable: false),
@@ -263,7 +261,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                     user_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     audit_type = table.Column<string>(type: "text", nullable: false),
                     table_name = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
-                    date_time = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    date_time = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     changes = table.Column<string>(type: "text", nullable: true),
                     affected_columns = table.Column<List<string>>(type: "text[]", nullable: true),
                     primary_key = table.Column<string>(type: "text", nullable: false)
@@ -292,9 +290,9 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                     public_url = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
                     document_type = table.Column<string>(type: "text", nullable: false),
                     tenant_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
-                    created_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     created_by_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true),
-                    last_modified_at = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    last_modified_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     last_modified_by_id = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: true)
                 },
                 constraints: table =>

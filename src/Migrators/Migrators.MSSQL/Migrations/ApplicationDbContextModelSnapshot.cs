@@ -370,13 +370,6 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
                         .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<string>("RefreshToken")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("RefreshTokenExpiryTime")
-                        .HasColumnType("datetime2");
-
                     b.Property<string>("SecurityStamp")
                         .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");

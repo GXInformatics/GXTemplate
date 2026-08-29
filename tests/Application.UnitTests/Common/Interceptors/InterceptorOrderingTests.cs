@@ -78,7 +78,7 @@ public class InterceptorOrderingTests
         var userContext = new Mock<IUserContextAccessor>();
         userContext.SetupGet(x => x.Current).Returns(new UserContext("ordering-user", "orderer"));
         var dateTime = new Mock<IDateTime>();
-        dateTime.SetupGet(x => x.Now).Returns(new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
+        dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
         var mediator = new Mock<IMediator>();
         mediator.Setup(x => x.Publish(It.IsAny<DomainEvent>(), It.IsAny<CancellationToken>()))
             .Returns(ValueTask.CompletedTask);

@@ -354,13 +354,6 @@ namespace CleanArchitecture.Blazor.Migrators.SqLite.Migrations
                         .HasMaxLength(450)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("RefreshToken")
-                        .HasMaxLength(450)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("RefreshTokenExpiryTime")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("SecurityStamp")
                         .HasMaxLength(450)
                         .HasColumnType("TEXT");

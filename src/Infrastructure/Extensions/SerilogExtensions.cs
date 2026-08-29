@@ -287,9 +287,13 @@ public static class SerilogExtensions
             // The enricher already publishes exactly the value needed, so this reads that property
             // instead of re-deriving it. Raw, not ToString, so Npgsql binds the DateTime rather than
             // a rendered string. Pinned for all three providers by SinkTimestampTests.
+            //
+            // TimestampTz, not Timestamp, since Pass 14B. The column is timestamptz in LogTableDdl
+            // and the enricher now publishes Kind=Utc; declaring Timestamp here would have Npgsql
+            // reject the bind outright. All three move together or none of them works.
             {
                 "time_stamp",
-                new SinglePropertyColumnWriter("TimeStamp", PropertyWriteMethod.Raw, NpgsqlDbType.Timestamp)
+                new SinglePropertyColumnWriter("TimeStamp", PropertyWriteMethod.Raw, NpgsqlDbType.TimestampTz)
             },
             { "exception", new ExceptionColumnWriter(NpgsqlDbType.Text) },
 
@@ -393,22 +397,24 @@ public class UtcTimestampEnricher : ILogEventEnricher
 {
     public void Enrich(LogEvent logEvent, ILogEventPropertyFactory pf)
     {
-        // The UTC instant, published with Kind=Unspecified rather than Kind=Utc.
+        // The UTC instant, published with Kind=Utc - which is what it actually is.
         //
-        // The value is identical either way; only the marker differs, and the marker decides whether
-        // PostgreSQL will accept it. The log table's time_stamp column is
-        // "timestamp without time zone" - which is what EF maps a DateTime to for this provider and
-        // what the sink writes - and Npgsql refuses outright to bind a Kind=Utc DateTime to that
-        // type: "Cannot write DateTime with Kind=UTC to PostgreSQL type 'timestamp without time
-        // zone'". Unspecified is in fact the honest Kind for a column of that type holding UTC
-        // instants.
+        // This REVERTS Pass 11D, which published it as Kind=Unspecified. That was a workaround, and
+        // it is worth saying plainly what it was working around rather than leaving the next reader
+        // to reconstruct it. The log table's time_stamp column was "timestamp without time zone",
+        // because Infrastructure's UseDatabase set Npgsql.EnableLegacyTimestampBehavior and that
+        // switch makes "timestamp without time zone" the default mapping for DateTime. Npgsql
+        // refuses to bind a Kind=Utc DateTime to that type, so the enricher had to lie about the
+        // Kind - and Unspecified was at least the honest Kind for a column of that type. It also
+        // meant the sink no longer depended on WHEN some other component happened to set a global
+        // AppContext switch, which was the deeper problem.
         //
-        // Npgsql does relax this when Npgsql.EnableLegacyTimestampBehavior is set, and UseDatabase
-        // sets that switch - but only when it builds an EF context, which happens after Serilog is
-        // configured. Relying on it would make every log write depend on an AppContext switch that
-        // some other component happened to set first. Specifying the Kind here removes that
-        // dependency instead of hoping the ordering holds.
-        var utc = DateTime.SpecifyKind(logEvent.Timestamp.UtcDateTime, DateTimeKind.Unspecified);
+        // Pass 14B removed the switch. The column is timestamptz now (LogTableDdl), the writer
+        // declares NpgsqlDbType.TimestampTz (BuildNpgsqlColumnWriters), and timestamptz accepts
+        // Kind=Utc and REJECTS Kind=Unspecified - the exact inverse of the constraint the workaround
+        // existed for. So the workaround is not merely unnecessary now, it would break the write.
+        // The three change together: DDL, writer, enricher.
+        var utc = DateTime.SpecifyKind(logEvent.Timestamp.UtcDateTime, DateTimeKind.Utc);
         logEvent.AddOrUpdateProperty(pf.CreateProperty("TimeStamp", utc));
     }
 }

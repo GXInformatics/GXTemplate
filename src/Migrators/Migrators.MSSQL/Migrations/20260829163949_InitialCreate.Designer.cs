@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260829083213_InitialCreate")]
+    [Migration("20260829163949_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -372,13 +372,6 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
                     b.Property<string>("Provider")
                         .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("RefreshToken")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("RefreshTokenExpiryTime")
-                        .HasColumnType("datetime2");
 
                     b.Property<string>("SecurityStamp")
                         .HasMaxLength(450)

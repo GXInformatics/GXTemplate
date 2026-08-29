@@ -97,10 +97,14 @@ public static class LogTableDdl
     /// <remarks>
     /// snake_case, because <c>UseDatabase</c> applies <c>UseSnakeCaseNamingConvention()</c> for this
     /// provider and the sink writes these exact names. <c>time_stamp</c> is
-    /// <c>timestamp without time zone</c>, not <c>timestamptz</c>: the sink writes it as
-    /// <c>NpgsqlDbType.Timestamp</c>, and EF maps it that way too because <c>UseDatabase</c> sets
-    /// <c>Npgsql.EnableLegacyTimestampBehavior</c>. The sink's own auto-create rendered
-    /// <c>timestamp with time zone</c> here, which is one more way it disagreed with both sides.
+    /// <c>timestamp with time zone</c> - <c>timestamptz</c> - since Pass 14B, and all three sides
+    /// had to move at once: EF maps <c>DateTime</c> to <c>timestamptz</c> now that
+    /// <c>Npgsql.EnableLegacyTimestampBehavior</c> is gone, <c>BuildNpgsqlColumnWriters</c> declares
+    /// <c>NpgsqlDbType.TimestampTz</c>, and <c>UtcTimestampEnricher</c> publishes <c>Kind=Utc</c>.
+    /// A timestamptz column ACCEPTS Kind=Utc and REJECTS Kind=Unspecified, which is the exact
+    /// inverse of what this column used to be; leaving any one of the three behind is a runtime
+    /// bind failure on every log write. <c>SinkTimestampAcceptanceTests</c> writes through the real
+    /// sink into this DDL, which is the only check that covers all three together.
     /// </remarks>
     private static readonly (string Name, string Definition)[] NpgsqlColumns =
     [
@@ -108,7 +112,7 @@ public static class LogTableDdl
         ("message",          "text NULL"),
         ("message_template", "text NULL"),
         ("level",            "character varying(450) NOT NULL"),
-        ("time_stamp",       "timestamp without time zone NOT NULL"),
+        ("time_stamp",       "timestamp with time zone NOT NULL"),
         ("exception",        "text NULL"),
 
         // text rather than EF's character varying(450), for the same reason as SQL Server above:

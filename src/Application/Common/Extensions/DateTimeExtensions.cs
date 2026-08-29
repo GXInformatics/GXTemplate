@@ -16,7 +16,40 @@ public static class DateTimeExtensions
     /// var thisMonthRange = today.GetDateRange("THIS_MONTH", TimeSpan.FromHours(8));
     /// Console.WriteLine($"Start: {thisMonthRange.Start}, End: {thisMonthRange.End}");
     /// </example>
+    /// <remarks>
+    /// <b>Both returned values carry the input's <see cref="DateTime.Kind"/>.</b> That is not
+    /// decoration: every call site feeds the result straight into a specification's Where clause as
+    /// a query parameter, and under PostgreSQL's timestamptz Npgsql REFUSES to bind a
+    /// Kind=Unspecified or Kind=Local DateTime to a "timestamp with time zone" column. A branch
+    /// that returned Unspecified would therefore throw at runtime, on PostgreSQL only, the first
+    /// time anyone filtered a list view by it.
+    /// <para>
+    /// It is enforced HERE, at the single exit, rather than branch by branch. The day and week
+    /// branches derive from <c>dateTime</c> (<c>.Date</c>, <c>.AddDays</c>, <c>.Subtract</c> all
+    /// preserve Kind) and were always correct; the month and year branches call
+    /// <c>new DateTime(y, m, d)</c>, which is ALWAYS Unspecified, and eight of the sixteen branches
+    /// were wrong because of it (measured in Pass 14). Re-specifying at the exit fixes all eight at
+    /// once and, more usefully, cannot drift: a seventeenth branch added below inherits the
+    /// guarantee whether or not its author knew about it. Per-branch fixes would not.
+    /// </para>
+    /// <para>
+    /// <c>SpecifyKind</c> RELABELS, it does not convert - which is exactly right here, because every
+    /// value below is wall-clock arithmetic on <c>dateTime</c> and is already expressed in the
+    /// input's frame of reference. <c>GetDateRangeKindTests</c> enumerates every keyword and fails
+    /// if any branch returns something other than the input's Kind.
+    /// </para>
+    /// </remarks>
     public static (DateTime Start, DateTime End) GetDateRange(this DateTime dateTime, string keyword, TimeSpan timeZoneOffset = default)
+    {
+        var (start, end) = GetDateRangeCore(dateTime, keyword, timeZoneOffset);
+        return (DateTime.SpecifyKind(start, dateTime.Kind), DateTime.SpecifyKind(end, dateTime.Kind));
+    }
+
+    /// <summary>
+    /// The branch table. Private, and reached only through <see cref="GetDateRange"/>, so nothing
+    /// can consume a range that has not passed through the Kind guarantee described there.
+    /// </summary>
+    private static (DateTime Start, DateTime End) GetDateRangeCore(DateTime dateTime, string keyword, TimeSpan timeZoneOffset)
     {
         DateTime today = dateTime.Date;
 
@@ -126,7 +159,10 @@ public static class DateTimeExtensions
     /// <returns>The end date of the month, adjusted for the provided time zone offset if needed.</returns>
     public static DateTime EndOfMonth(this DateTime dt, TimeSpan timeZoneOffset = default)
     {
-        DateTime endOfMonth = new DateTime(dt.Year, dt.Month, DateTime.DaysInMonth(dt.Year, dt.Month));
+        // dt.Kind, not the default. new DateTime(y, m, d) is ALWAYS Unspecified, and these two are
+        // public: GetDateRange re-specifies at its own exit, but a direct caller gets no such
+        // guarantee, and an Unspecified DateTime is rejected outright by a timestamptz parameter.
+        DateTime endOfMonth = new DateTime(dt.Year, dt.Month, DateTime.DaysInMonth(dt.Year, dt.Month), 0, 0, 0, dt.Kind);
         if (timeZoneOffset != default && dt.Kind == DateTimeKind.Utc)
         {
             endOfMonth = endOfMonth.Subtract(timeZoneOffset);
@@ -141,7 +177,8 @@ public static class DateTimeExtensions
     /// <returns>The start date of the month.</returns>
     public static DateTime StartOfMonth(this DateTime dt, TimeSpan timeZoneOffset = default)
     {
-        DateTime startOfMonth = new DateTime(dt.Year, dt.Month, 1);
+        // dt.Kind, for the same reason as EndOfMonth above.
+        DateTime startOfMonth = new DateTime(dt.Year, dt.Month, 1, 0, 0, 0, dt.Kind);
         if (timeZoneOffset != default && dt.Kind == DateTimeKind.Utc)
         {
             startOfMonth = startOfMonth.Subtract(timeZoneOffset);

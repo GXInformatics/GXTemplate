@@ -20,8 +20,6 @@ using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.FileProviders;
 using MudBlazor.Services;
-using QuestPDF;
-using QuestPDF.Infrastructure;
 
 
 
@@ -212,9 +210,6 @@ public static class DependencyInjection
 
         // Stored files: authenticated, and per-object authorized for document keys.
         app.MapFileEndpoints();
-
-        //QuestPDF License configuration
-        Settings.License = LicenseType.Community;
 
         // Add additional endpoints required by the Identity /Account Razor components.
         app.MapAdditionalIdentityEndpoints();

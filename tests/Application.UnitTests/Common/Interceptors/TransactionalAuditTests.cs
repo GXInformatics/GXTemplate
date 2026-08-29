@@ -66,7 +66,7 @@ public class TransactionalAuditTests
         var userContext = new Mock<IUserContextAccessor>();
         userContext.SetupGet(x => x.Current).Returns(new UserContext(ActingUserId, "auditor"));
         var dateTime = new Mock<IDateTime>();
-        dateTime.SetupGet(x => x.Now).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
+        dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
 
         var interceptors = new List<IInterceptor>
         {
@@ -202,7 +202,7 @@ public class TransactionalAuditTests
         var userContext = new Mock<IUserContextAccessor>();
         userContext.SetupGet(x => x.Current).Returns(new UserContext("no-such-user", "ghost"));
         var dateTime = new Mock<IDateTime>();
-        dateTime.SetupGet(x => x.Now).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
+        dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlite(_connectionString)
@@ -244,7 +244,7 @@ public class TransactionalAuditTests
         var userContext = new Mock<IUserContextAccessor>();
         userContext.SetupGet(x => x.Current).Returns(new UserContext(ActingUserId, "auditor"));
         var dateTime = new Mock<IDateTime>();
-        dateTime.SetupGet(x => x.Now).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
+        dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
         var shared = new AuditableEntityInterceptor(userContext.Object, dateTime.Object);
 
         ApplicationDbContext Make() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -284,7 +284,7 @@ public class TransactionalAuditTests
         var userContext = new Mock<IUserContextAccessor>();
         userContext.SetupGet(x => x.Current).Returns(new UserContext("no-such-user", "ghost"));
         var dateTime = new Mock<IDateTime>();
-        dateTime.SetupGet(x => x.Now).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
+        dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
 
         using var ctx = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlite(_connectionString)
@@ -353,7 +353,7 @@ public class TransactionalAuditTests
         var userContext = new Mock<IUserContextAccessor>();
         userContext.SetupGet(x => x.Current).Returns(new UserContext("no-such-user", "ghost"));
         var dateTime = new Mock<IDateTime>();
-        dateTime.SetupGet(x => x.Now).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
+        dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
 
         await using var ctx = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlite(_connectionString)

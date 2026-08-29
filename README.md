@@ -151,7 +151,12 @@ Two things worth knowing about `--Database`:
     --context ApplicationDbContext
   ```
   `--context` is required: the application registers two contexts, and `LogDbContext` deliberately
-  has no migrations of its own.
+  has no migrations of its own. `DatabaseSettings__DBProvider` alone is enough only when the
+  configured connection strings already suit that provider; regenerating for a provider other than
+  the configured one needs `DatabaseSettings__ConnectionString` and
+  `DatabaseSettings__LogConnectionString` overridden to match, because the design-time host builds
+  the real service provider and a PostgreSQL connection string fails to parse as a SQLite one.
+  Regenerate all three providers together so the chains stay in step.
 
 `--DefaultTimeZone` and `--AllowSelfRegistration` are written as **configuration**, not compiled in.
 A generated project can change its mind about either without regenerating from the template.
@@ -172,6 +177,32 @@ runtime error.
 | `DBProvider` | `postgresql`, `mssql` or `sqlite`. Anything else fails startup, naming the supported set. |
 | `ConnectionString` | Required. The business database. |
 | `LogConnectionString` | The **separate** database Serilog writes to and the SystemLogs page reads from — same server, same provider. Absent is supported: the application runs, logs to console and file only, and says so loudly at startup. It never falls back to `ConnectionString`. |
+
+#### Every persisted `DateTime` is UTC
+
+This is a rule, not a convention, and on PostgreSQL it is enforced by the database.
+
+- **On PostgreSQL every date column is `timestamptz`** (`timestamp with time zone`). That is Npgsql's
+  default mapping for `DateTime`, and this template does not override it: it neither sets
+  `Npgsql.EnableLegacyTimestampBehavior` nor declares column types by hand. A `timestamptz` parameter
+  **accepts `DateTimeKind.Utc` and rejects `Unspecified` and `Local`** — so a local-time value is not
+  a subtly wrong row, it is a failed write with a clear message. On SQL Server (`datetime2`) and
+  SQLite (`TEXT`) the types are unchanged and the same UTC rule applies by discipline rather than by
+  rejection.
+- **Get the clock from `IDateTime.UtcNow`**, injected, rather than from `DateTime.Now` or
+  `DateTime.UtcNow` directly. That is how handlers and interceptors should obtain the current time:
+  it keeps the Kind correct by construction and lets tests pin an exact instant. `DateTime.Now`
+  anywhere near a persisted value is a bug on PostgreSQL.
+- **Date ranges keep the caller's Kind.** `DateTimeExtensions.GetDateRange` re-specifies both ends to
+  the input's Kind at its single exit, so every keyword — including ones nothing calls yet — returns
+  a value a `timestamptz` parameter will accept.
+- Two tests keep this from drifting: `TimestamptzModelInvariantTests` asserts every `DateTime` in the
+  Npgsql model maps to `timestamp with time zone` and that no source file outside `Program.cs` sets an
+  `AppContext` switch; `ProcessWideStateTests` asserts the legacy switch is unset after a real boot.
+  A startup line at `Information` names the effective state, to console and file.
+- Process-wide decisions belong in `ConfigureProcessWideState()` at the top of `src/Server.UI/Program.cs`,
+  which runs before `WebApplication.CreateBuilder`. It is where the QuestPDF licence is set, and where
+  anything else global to the process should go.
 
 ### `Storage` — validated at startup
 

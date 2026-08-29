@@ -31,7 +31,6 @@ public static class DependencyInjection
     private const string APP_CONFIGURATION_SETTINGS_KEY = "AppConfigurationSettings";
     private const string DATABASE_SETTINGS_KEY = "DatabaseSettings";
     // Removed UseInMemoryDatabase and in-memory database name constants (feature deprecated)
-    private const string NPGSQL_ENABLE_LEGACY_TIMESTAMP_BEHAVIOR = "Npgsql.EnableLegacyTimestampBehavior";
     private const string POSTGRESQL_MIGRATIONS_ASSEMBLY = "CleanArchitecture.Blazor.Migrators.PostgreSQL";
     private const string MSSQL_MIGRATIONS_ASSEMBLY = "CleanArchitecture.Blazor.Migrators.MSSQL";
     private const string SQLITE_MIGRATIONS_ASSEMBLY = "CleanArchitecture.Blazor.Migrators.SqLite";
@@ -173,7 +172,23 @@ public static class DependencyInjection
         switch (dbProvider.ToLowerInvariant())
         {
             case DbProviderKeys.Npgsql:
-                AppContext.SetSwitch(NPGSQL_ENABLE_LEGACY_TIMESTAMP_BEHAVIOR, true);
+                // No AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior") here, and none
+                // anywhere else - Pass 14B deleted it rather than moving it, because under
+                // timestamptz there is nothing to set. Npgsql's DEFAULT mapping for DateTime is
+                // "timestamp with time zone"; the legacy switch is what used to override that into
+                // "timestamp without time zone", and it exists so that schemas predating Npgsql 6
+                // keep working. This template creates its schema fresh, so it has nothing to
+                // preserve - and every persisted DateTime here is already UTC.
+                //
+                // Reintroducing it would be worse than merely wrong. This options lambda runs
+                // LAZILY, at first DbContext creation, while Npgsql caches its type handlers the
+                // first time anything writes - which on this application can be the Serilog
+                // PostgreSQL sink, before any DbContext exists. Setting the switch after that point
+                // changes EF's column mapping and NOT the converters, so EF and the driver disagree
+                // and writes fail at runtime only. Pass 14 measured that split brain end to end.
+                //
+                // TimestamptzModelInvariantTests fails if the switch returns by any route, and
+                // ProcessWideStateTests asserts it is unset after a real boot.
                 return builder.UseNpgsql(connectionString,
                         e => e.MigrationsAssembly(POSTGRESQL_MIGRATIONS_ASSEMBLY))
                     .UseSnakeCaseNamingConvention();
