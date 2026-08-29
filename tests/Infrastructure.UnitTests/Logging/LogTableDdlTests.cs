@@ -13,6 +13,7 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
 /// idempotent, and - on SQLite, where a whole database is a file - that it actually runs and
 /// produces the shape EF expects.
 /// </summary>
+[Collection(SqliteFileCollection.Name)]
 public class LogTableDdlTests
 {
     public static TheoryData<string> Providers =>
