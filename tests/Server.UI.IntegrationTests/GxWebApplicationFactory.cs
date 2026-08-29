@@ -67,6 +67,20 @@ public sealed class GxWebApplicationFactory : WebApplicationFactory<Program>
             ? explicitly
             : $"Data Source={Path.Combine(_root, "gx.db")}";
 
+    /// <summary>
+    /// The provider these two connection strings are for, as one of <see cref="DbProviderKeys"/>.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so that a test needing to speak to the databases directly - rather than through EF -
+    /// can pick the right driver and the right catalogue query from the SAME value the host is
+    /// configured with. Re-reading <c>GX_TEST_DBPROVIDER</c> in the test would be a second source of
+    /// truth for the same decision, and the two would eventually disagree.
+    /// </remarks>
+    public string DbProvider =>
+        Environment.GetEnvironmentVariable("GX_TEST_DBPROVIDER") is { Length: > 0 } explicitly
+            ? explicitly
+            : DbProviderKeys.SqLite;
+
     /// <inheritdoc cref="BusinessConnectionString" />
     public string LogConnectionString =>
         Environment.GetEnvironmentVariable("GX_TEST_LOGCONNECTIONSTRING") is { Length: > 0 } explicitly
@@ -84,13 +98,9 @@ public sealed class GxWebApplicationFactory : WebApplicationFactory<Program>
             // GX_TEST_LOGCONNECTIONSTRING point the same harness at a real server instead, which is
             // how the acceptance run exercises cookie login and the authorization matrices against
             // the provider actually chosen.
-            var provider = Environment.GetEnvironmentVariable("GX_TEST_DBPROVIDER");
-
             var settings = new Dictionary<string, string?>
             {
-                ["DatabaseSettings:DBProvider"] = string.IsNullOrWhiteSpace(provider)
-                    ? DbProviderKeys.SqLite
-                    : provider,
+                ["DatabaseSettings:DBProvider"] = DbProvider,
                 ["DatabaseSettings:ConnectionString"] = BusinessConnectionString,
 
                 // A SECOND throwaway database, under the same root this fixture deletes. Setting it

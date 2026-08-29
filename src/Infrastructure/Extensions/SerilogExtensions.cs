@@ -165,6 +165,22 @@ public static class SerilogExtensions
 
    
 
+    /// <summary>
+    /// How long the SQL Server sink may hold a log event before writing it.
+    /// </summary>
+    /// <remarks>
+    /// A named constant rather than a literal because a TEST has to wait for it. Any test that logs
+    /// a message and then reads it back must poll for longer than the sink's own flush period, and
+    /// a test that hard-codes its own guess at that number is a test that starts failing - or worse,
+    /// passing for the wrong reason - the moment somebody tunes this. It is by far the longest of
+    /// the three sinks' periods, so it sets the floor for all of them.
+    /// <para>
+    /// Public for the same reason as <see cref="BuildSqlServerColumnOptions"/> and
+    /// <see cref="NpgsqlTableName"/>: what the test waits on is what the sink was configured with.
+    /// </para>
+    /// </remarks>
+    public static readonly TimeSpan SqlServerBatchPeriod = TimeSpan.FromSeconds(20);
+
     private static void WriteToSqlServer(LoggerConfiguration serilogConfig, string? connectionString)
     {
         if (string.IsNullOrEmpty(connectionString)) return;
@@ -174,12 +190,24 @@ public static class SerilogExtensions
             TableName = "SystemLogs",
             SchemaName = "dbo",
 
-            // Deliberately still false. The sink CAN create the database, but enabling it would
-            // require the application's SQL login to hold CREATE DATABASE rights in production - a
-            // privilege it otherwise never needs - and it would make the operational story
-            // provider-dependent for no gain, since the PostgreSQL sink cannot do the same. Creating
-            // the log database is a one-time setup step, documented in the README, that PostgreSQL
-            // deployments must perform regardless.
+            // Deliberately still false, and Pass 15 re-verified why rather than inheriting it.
+            //
+            // The option is real and it works: against a reachable server with the database absent,
+            // CreateLogger() creates it. But it creates it FROM THE SINK'S CONSTRUCTOR, which
+            // Serilog runs inside WebApplicationBuilder.Build() - so against an unreachable server
+            // CreateLogger() throws SqlException 53 out of Build() and the application does not
+            // start at all. Measured, including the obvious escape: wrapping in WriteTo.Async does
+            // NOT help, because the inner sink is still constructed eagerly. That is the identical
+            // objection Pass 11B raised against AutoCreateSqlTable, and it applies here unchanged.
+            //
+            // Enabling it would therefore trade a best-effort logging failure for a total outage
+            // whenever the log server happens to be unreachable at boot. It is also
+            // provider-asymmetric - the PostgreSQL sink has no equivalent - so half of all
+            // deployments would still need the hand-rolled path.
+            //
+            // LogDatabaseStartupCheck creates the database instead, after the host is built, where a
+            // failure can be reported and survived. Pass 15B's resolution, and the same shape as
+            // Pass 11C's resolution for the table.
             AutoCreateSqlDatabase = false,
 
             // Also false, and this one must stay false. The shape was never the problem here: with
@@ -196,7 +224,7 @@ public static class SerilogExtensions
             AutoCreateSqlTable = false,
 
             BatchPostingLimit = 100,
-            BatchPeriod = new TimeSpan(0, 0, 20),
+            BatchPeriod = SqlServerBatchPeriod,
 
         };
 

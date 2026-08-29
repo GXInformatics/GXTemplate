@@ -62,9 +62,31 @@ and names it after your project, but it cannot know your host or credentials.
 
 There are **two** connection strings. `LogConnectionString` names a second database, on the same
 server, that Serilog writes to and the SystemLogs page reads from — so log volume stays out of the
-business database's backups and can be retained under its own policy. Create that database before
-first run (SQLite makes its own file); the application creates the table in it. Leave the setting
-empty and the application still runs, logging to console and file only, and says so at startup.
+business database's backups and can be retained under its own policy. Leave the setting empty and
+the application still runs, logging to console and file only, and says so at startup.
+
+**You do not have to create the log database first.** The application creates it on startup when it
+is absent and the login is allowed to, exactly as EF's `Migrate()` has always created the business
+database. On SQLite both are files and nothing is needed at all.
+
+If the login may not create databases, that is not a failure: the application logs one error naming
+the database, the login and the grant it would need, then runs and audits normally with the
+SystemLogs page reporting the log database unavailable.
+
+**For production, prefer creating the log database in advance.** `CREATEDB` / `dbcreator` is
+**unnecessary**, not merely harmless — with the database already there the application finds it,
+issues nothing, and never touches the create path on any start:
+
+```sql
+-- PostgreSQL, once, as an administrator
+CREATE DATABASE "IMS_Logs";
+CREATE ROLE ims_log LOGIN PASSWORD '…' NOCREATEDB;
+GRANT CONNECT ON DATABASE "IMS_Logs" TO ims_log;
+-- then either create the table yourself, or let the application do it on one start with CREATE TABLE
+```
+
+The catalogue checks the application uses — `pg_database` and `DB_ID()` — need no privilege beyond
+connecting, which is what lets a least-privileged login start it silently every time.
 
 For anything beyond local development, keep secrets out of the file — every setting can be supplied
 as an environment variable using the standard double-underscore form:
@@ -176,7 +198,7 @@ runtime error.
 |---|---|
 | `DBProvider` | `postgresql`, `mssql` or `sqlite`. Anything else fails startup, naming the supported set. |
 | `ConnectionString` | Required. The business database. |
-| `LogConnectionString` | The **separate** database Serilog writes to and the SystemLogs page reads from — same server, same provider. Absent is supported: the application runs, logs to console and file only, and says so loudly at startup. It never falls back to `ConnectionString`. |
+| `LogConnectionString` | The **separate** database Serilog writes to and the SystemLogs page reads from — same server, same provider. **The application creates it when it is absent and the login may**; if not, it logs one error naming the database, the login and the required grant (`CREATEDB` / `dbcreator`) and carries on. Creating it in advance makes that grant unnecessary — see [Set the connection string](#3-set-the-connection-string). Absent is supported: the application runs, logs to console and file only, and says so loudly at startup. It never falls back to `ConnectionString`. |
 
 #### Every persisted `DateTime` is UTC
 
