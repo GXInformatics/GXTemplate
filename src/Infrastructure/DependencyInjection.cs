@@ -10,6 +10,7 @@ using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
+using CleanArchitecture.Blazor.Infrastructure.Services.Mail;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Services.MultiTenant;
 using MaxMind.GeoIP2;
@@ -19,6 +20,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using ZiggyCreatures.Caching.Fusion;
 
 namespace CleanArchitecture.Blazor.Infrastructure;
@@ -28,7 +30,6 @@ public static class DependencyInjection
     private const string IDENTITY_SETTINGS_KEY = "IdentitySettings";
     private const string APP_CONFIGURATION_SETTINGS_KEY = "AppConfigurationSettings";
     private const string DATABASE_SETTINGS_KEY = "DatabaseSettings";
-    private const string SMTP_CLIENT_OPTIONS_KEY = "SmtpClientOptions";
     // Removed UseInMemoryDatabase and in-memory database name constants (feature deprecated)
     private const string NPGSQL_ENABLE_LEGACY_TIMESTAMP_BEHAVIOR = "Npgsql.EnableLegacyTimestampBehavior";
     private const string POSTGRESQL_MIGRATIONS_ASSEMBLY = "CleanArchitecture.Blazor.Migrators.PostgreSQL";
@@ -291,15 +292,59 @@ public static class DependencyInjection
     }
 
     #region Notification Services
+    /// <summary>
+    /// Mail: one settings class, two transports, and a choice made at registration.
+    /// </summary>
+    /// <remarks>
+    /// The settings follow the DatabaseSettings / StorageSettings idiom - IValidatableObject bound
+    /// with ValidateDataAnnotations().ValidateOnStart() - but MailSettings.Validate deliberately
+    /// accepts absent configuration. Mail is not fail-fast: the application must serve without it.
+    /// Only things an operator cannot have meant - an unknown region, a from-address that is not an
+    /// address - fail startup. MailStartupCheck reports the rest, loudly, in Pass 11C's shape.
+    /// </remarks>
     private static IServiceCollection AddNotificationServices(this IServiceCollection services,
         IConfiguration configuration)
     {
-        var smtpClientOptions = new SmtpClientOptions();
-        configuration.GetSection(SMTP_CLIENT_OPTIONS_KEY).Bind(smtpClientOptions);
-        services.Configure<SmtpClientOptions>(configuration.GetSection(SMTP_CLIENT_OPTIONS_KEY));
+        services.AddOptions<MailSettings>()
+            .Bind(configuration.GetSection(MailSettings.Key))
+            // Unspecified means nobody chose, and the safe default depends on where this is running:
+            // a developer machine must not be able to email a real customer by accident, while a
+            // deployed environment that silently swallowed its mail would be worse than one that
+            // complained. There is no appsettings.Development.json to carry the default - it is
+            // gitignored - so the decision is made here, where IHostEnvironment is available.
+            // Resolving it into the settings object, rather than at the point of use, means
+            // MailStartupCheck and everything else read the decision that was actually made.
+            .PostConfigure<IHostEnvironment>((settings, environment) =>
+            {
+                settings.DeliveryMode = settings.ParseDelivery()
+                    ?? (environment.IsDevelopment() ? MailDelivery.Sink : MailDelivery.Mailgun);
+            })
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton(s => s.GetRequiredService<IOptions<MailSettings>>().Value);
 
-        services.AddSingleton(smtpClientOptions);
-        services.AddScoped<IMailService, MailService>();
+        services.AddScoped<MailTemplateRenderer>();
+        services.AddScoped<SinkMailService>();
+        services.AddScoped<MailgunMailService>();
+
+        services.AddHttpClient(MailgunMailService.HttpClientName, (provider, client) =>
+        {
+            var settings = provider.GetRequiredService<MailSettings>();
+            client.DefaultRequestHeaders.Authorization = MailgunMailService.BasicAuth(settings.ApiKey);
+
+            // Explicitly short. HttpClient's 100-second default is a minute and a half of spinner
+            // for an administrator who pressed "resend verification", and by then the difference
+            // between a slow send and a hung application is invisible to them.
+            client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
+        });
+
+        // The transport is chosen from the resolved setting rather than at registration time,
+        // because the resolution above needs IHostEnvironment and AddInfrastructure has only
+        // IConfiguration - and changing that signature would reach three callers, two of them tests.
+        services.AddScoped<IMailService>(provider =>
+            provider.GetRequiredService<MailSettings>().DeliveryMode == MailDelivery.Sink
+                ? provider.GetRequiredService<SinkMailService>()
+                : provider.GetRequiredService<MailgunMailService>());
 
         return services;
     }

@@ -11,8 +11,6 @@
     
         <PackageReference Include="MaxMind.GeoIP2" Version="6.1.0" />
         <PackageReference Include="ClosedXML" Version="0.105.1" />
-        <PackageReference Include="MailKit" Version="4.17.0" />
-        <PackageReference Include="MimeKit" Version="4.17.0" />
         <PackageReference Include="Scriban" Version="7.2.6" />
         <PackageReference Include="ZiggyCreatures.FusionCache" Version="2.7.1" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.11" />
@@ -28,5 +26,33 @@
     </ItemGroup>
     <ItemGroup>
         <ProjectReference Include="..\Application\Application.csproj" />
+    </ItemGroup>
+
+    <!--
+        Mail templates.
+
+        They live HERE, beside MailTemplateRenderer that reads them, rather than in Server.UI where
+        they used to sit. Consequences of the old placement: Infrastructure read files a different
+        project shipped, and no test of the renderer or the startup guard could run without dragging
+        in the whole web application - Infrastructure.UnitTests does not reference Server.UI, so the
+        templates simply were not in its output.
+
+        A wildcard, not the four hardcoded items this replaced: adding a template used to require
+        editing a csproj, and forgetting to would ship a template the code names and cannot find.
+
+        <Content Remove> is load-bearing wherever these are consumed by the Web SDK, which globs
+        Content broadly and can turn a Content item into a static web asset - publishing every email
+        template at a URL for anyone to read. Keeping them as None rather than Content means there is
+        nothing for that machinery to pick up, here or in any project referencing this one.
+
+        PreserveNewest rather than Always: these change rarely, and Always re-copies on every build.
+
+        They are no longer EmbeddedResource either. That shape embedded each file in the assembly AND
+        copied it to disk, while the renderer only ever read from disk - so every template shipped
+        twice, for nothing.
+    -->
+    <ItemGroup>
+        <Content Remove="Resources\EmailTemplates\**\*.sbn" />
+        <None Include="Resources\EmailTemplates\**\*.sbn" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 </Project>

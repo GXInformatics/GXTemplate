@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
+using CleanArchitecture.Blazor.Infrastructure.Services.Mail;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Extensions;
 public static class HostExtensions
@@ -34,6 +35,12 @@ public static class HostExtensions
                 await initializer.SeedSampleDataAsync().ConfigureAwait(false);
             }
         }
+
+        // Mail last, and outside the scope above, because it is not part of preparing the database.
+        // It reports configuration in the same best-effort-but-loud shape as the log database, and
+        // it is the ONLY thing here that can refuse to start the application: a missing or corrupt
+        // mail template is a broken deployment rather than a configuration choice.
+        host.CheckMail();
     }
 
    

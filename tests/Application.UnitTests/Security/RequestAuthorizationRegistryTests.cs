@@ -21,7 +21,12 @@ public class RequestAuthorizationRegistryTests
     // 22 until Pass 11B deleted ExportSystemLogsQuery, which had a handler and a
     // Permissions.Logs.Export policy but no caller: the SystemLogs page has never had an Export
     // button. Confirmed by inspection before the count was lowered, which is what this guard is for.
-    private const int ExpectedRequestTypeCount = 21;
+    //
+    // Back to 22 in Pass 12B with SendIdentityMailCommand, which carries Permissions.Users.Edit. It
+    // is a request rather than a notification precisely so its Result can be reported: the two
+    // administrator-facing mail buttons used to claim success unconditionally, because the
+    // notification publisher swallows handler failures.
+    private const int ExpectedRequestTypeCount = 22;
 
     private static Assembly ApplicationAssembly =>
         typeof(CleanArchitecture.Blazor.Application.DependencyInjection).Assembly;

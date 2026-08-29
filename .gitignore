@@ -34,6 +34,17 @@ bld/
 [Ll]og/
 [Ll]ogs/
 
+# Rendered mail written by the development sink. Never sent, but it is real message content
+# addressed to real people - it does not belong in version control.
+#
+# ANCHORED, unlike the [Ll]og/ rule above, and it has to be. A bare "[Mm]ail/" matches every
+# directory of that name at any depth - which silently excluded src/Infrastructure/Services/Mail/
+# and tests/Infrastructure.UnitTests/Mail/, the entire mail implementation, from version control.
+# "Log" happens not to collide with a source directory here; "Mail" very much does.
+/mail/
+/src/Server.UI/[Mm]ail/
+/src/Server.UI/bin/**/[Mm]ail/
+
 # Visual Studio 2015/2017 cache/options directory
 .vs/
 # Uncomment if you have tasks that create the project's static files in wwwroot

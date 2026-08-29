@@ -176,12 +176,60 @@ container is private.
 | `DefaultTimeZone` | Must be a time zone id this system recognises, or startup fails naming the value. |
 | `AllowSelfRegistration` | See below. |
 
-### `SmtpClientOptions`
+### `Mail`
+
+Mail goes out through the **Mailgun HTTP API**. There is no SMTP option.
 
 | Key | Notes |
 |---|---|
-| `Host`, `Port`, `UserName`, `Password`, `UseSsl`, `RequireCredentials` | Standard SMTP settings. Mail is disabled until `Host` is set. |
-| `DefaultFromEmail` | Defaults to `noreply@example.com`, an IANA-reserved domain that can never route. **Set this** before enabling mail, or your messages claim to come from a placeholder. |
+| `Region` | `US` or `EU`, matching where the sending domain is provisioned. Anything else fails startup naming the value. The endpoint URL is composed from this and `Domain`; it is never stored, so the two cannot disagree. |
+| `Domain` | The Mailgun sending domain, e.g. `mg.example.com`. |
+| `FromAddress` | Defaults to `noreply@example.com`, an IANA-reserved domain that can never route. **Set this**, or your messages claim to come from a placeholder. A malformed address fails startup. |
+| `FromName` | Display name shown beside the address. |
+| `Delivery` | `Sink`, `Mailgun`, or empty. **Leave it empty** — see below. |
+| `SinkPath` | Where the sink writes. Defaults to `mail`, which is gitignored. |
+| `TimeoutSeconds` | Defaults to 10. An administrator waits on this synchronously when resending a verification email; `HttpClient`'s 100-second default is indistinguishable from a hang. |
+
+#### The API key is environment-only
+
+`Mail__ApiKey`, from the environment. **It is not in `appsettings.json` and must not be put there.**
+Everything else in the block is environment-true rather than secret — which domain, which address,
+which region — and belongs in committed configuration where a reviewer can see it.
+
+#### The development sink is on by default
+
+With `Delivery` empty, mail goes to the **sink** in Development and to **Mailgun** everywhere else.
+The sink renders each message to `./mail/` and logs a line naming the recipient, subject and path;
+it makes no network call. A developer machine therefore cannot email a real customer by accident,
+and the decision needs no `appsettings.Development.json` — there is none, it is gitignored.
+
+The sink renders through the same renderer as Mailgun, so the file is what would have been sent.
+
+#### Sending for real, including against Mailgun's sandbox
+
+Set `Mail:Delivery` to `Mailgun`, `Mail:Domain` to your sandbox domain
+(`sandboxXXXX.mailgun.org`), and `Mail__ApiKey` in the environment. Mailgun's sandbox only delivers
+to **authorised recipients** you add in their dashboard, so it is the safe way to see a real message
+arrive. Everything else — templates, tokens, the from-address — behaves exactly as in production.
+
+#### Templates
+
+Three Scriban templates ship, in `src/Infrastructure/Resources/EmailTemplates/`:
+`recovery-password.sbn`, `user-activation.sbn`, `welcome.sbn`. Four tokens — `user_name`,
+`app_name`, `company`, `base_url` — are supplied to every template automatically; anything a caller
+sets explicitly wins. `user_name` falls back from display name to user name to `there`, so an email
+never opens "Hi ,".
+
+At startup every template is checked for presence, valid UTF-8, absence of replacement characters,
+and parseability. Outside Development a failure stops the application: a missing template is a broken
+deployment, not a configuration choice.
+
+**Adding a template:** drop the `.sbn` file in that directory and add a `const` to `MailTemplates`.
+The csproj picks it up by wildcard; the startup guard will then require it.
+
+**Note:** `.sbn` files are deliberately kept out of the `Content` item group so the Web SDK cannot
+publish them as static web assets. Do not "fix" this by moving them to `Content` — it would serve
+your email templates over HTTP.
 
 ### `AllowSelfRegistration`
 

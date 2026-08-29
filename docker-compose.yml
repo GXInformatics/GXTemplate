@@ -17,11 +17,9 @@
       - DatabaseSettings__LogConnectionString=${DB_LOG_CONNECTION_STRING}
       - AISettings__GeminiApiKey=${GEMINI_API_KEY}
       - AISettings__OpenAIApiKey=${OPENAI_API_KEY}
-      - SmtpClientOptions__UserName=${SMTP_USERNAME}
-      - SmtpClientOptions__Port=${SMTP_PORT}
-      - SmtpClientOptions__Host=${SMTP_HOST}
-      - SmtpClientOptions__Password=${SMTP_PASSWORD}
-      - SmtpClientOptions__DefaultFromEmail=${SMTP_DEFAULT_FROM}
+      # The API key is the only mail secret, and the only one that belongs here. Domain, region and
+      # from-address are environment-true rather than secret and live in appsettings.json.
+      - Mail__ApiKey=${MAILGUN_API_KEY}
       - Authentication__Microsoft__ClientId=${MS_CLIENT_ID}
       - Authentication__Microsoft__ClientSecret=${MS_CLIENT_SECRET}
       - Authentication__Google__ClientId=${GOOGLE_CLIENT_ID}

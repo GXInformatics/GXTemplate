@@ -42,21 +42,6 @@
     </ItemGroup>
  
     <ItemGroup>
-        <EmbeddedResource Include="Resources\EmailTemplates\_useractivation.cshtml">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </EmbeddedResource>
-        <EmbeddedResource Include="Resources\EmailTemplates\_recoverypassword.cshtml">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </EmbeddedResource>
-        <EmbeddedResource Include="Resources\EmailTemplates\_authenticatorcode.cshtml">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </EmbeddedResource>
-        <EmbeddedResource Include="Resources\EmailTemplates\_welcome.cshtml">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </EmbeddedResource>
-    </ItemGroup>
- 
-    <ItemGroup>
       <ProjectReference Include="..\Infrastructure\Infrastructure.csproj" />
       <ProjectReference Include="..\Migrators\Migrators.MSSQL\Migrators.MSSQL.csproj" />
       <ProjectReference Include="..\Migrators\Migrators.PostgreSQL\Migrators.PostgreSQL.csproj" />

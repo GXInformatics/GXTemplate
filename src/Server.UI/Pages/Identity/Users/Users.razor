@@ -10,6 +10,7 @@
 @using CleanArchitecture.Blazor.Application.Features.Identity.DTOs
 @using CleanArchitecture.Blazor.Application.Features.Identity.Notifications.ResetPassword
 @using CleanArchitecture.Blazor.Application.Features.Identity.Notifications.SendWelcome
+@using CleanArchitecture.Blazor.Application.Features.Identity.Notifications.SendMail
 @using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity
 @using CleanArchitecture.Blazor.Server.UI.Pages.Identity.Roles.Components
 @using CleanArchitecture.Blazor.Server.UI.Pages.Identity.Users.Components
@@ -574,9 +575,30 @@
         var callbackUrl = Navigation.GetUriWithQueryParameters(
         Navigation.ToAbsoluteUri(ConfirmEmail.PageUrl).AbsoluteUri,
         new Dictionary<string, object?> { ["userId"] = model.Id, ["code"] = code, ["returnUrl"] = "/" });
-        await Mediator.Publish(new UserActivationNotification(callbackUrl, model.Email, model.Id, model.UserName));
-        Snackbar.Add(string.Format(L["Verification email sent to {0}"], model.Email), Severity.Info);
-        Logger.LogInformation("Verification email sent to {UserName} (ID: {UserId})", model.UserName, model.Id);
+        // Send, and report what actually happened. This REPLACES the fire-and-forget
+        // Mediator.Publish that used to be here - it is not sent twice. An administrator pressing
+        // this button was previously told "Verification email sent" whether or not anything was
+        // sent, because the notification publisher swallows handler failures.
+        var result = await Mediator.Send(new SendIdentityMailCommand
+        {
+            Kind = IdentityMailKind.Activation,
+            Email = model.Email,
+            UserName = model.UserName,
+            DisplayName = model.DisplayName,
+            CallbackUrl = callbackUrl
+        });
+
+        if (result.Succeeded)
+        {
+            Snackbar.Add(string.Format(L["Verification email sent to {0}"], model.Email), Severity.Info);
+            Logger.LogInformation("Verification email sent to {UserName} (ID: {UserId})", model.UserName, model.Id);
+        }
+        else
+        {
+            Snackbar.Add(
+                string.Format(L["Could not send the verification email to {0}. See the log for details."], model.Email),
+                Severity.Error);
+        }
     }
 
     private async Task SendResetPasswordEmailAsync(ApplicationUserDto model)
@@ -588,8 +610,23 @@
         var callbackUrl = Navigation.GetUriWithQueryParameters(
         Navigation.ToAbsoluteUri(ResetPassword.PageUrl).AbsoluteUri,
         new Dictionary<string, object?> { ["userId"] = user.Id, ["token"] = code });
-        await Mediator.Publish(new ResetPasswordNotification(callbackUrl, model.Email, model.UserName));
-        Snackbar.Add(string.Format(L["A new password for {0} has been sent via email. The user will be required to change it upon first login"], model.UserName), Severity.Info);
+        // As above: this REPLACES the publish, and reports the real outcome. Claiming a password
+        // reset was emailed when it was not is the single most expensive lie this page could tell -
+        // the administrator stops looking, and the user never gets in.
+        var result = await Mediator.Send(new SendIdentityMailCommand
+        {
+            Kind = IdentityMailKind.PasswordReset,
+            Email = model.Email,
+            UserName = model.UserName,
+            DisplayName = model.DisplayName,
+            CallbackUrl = callbackUrl
+        });
+
+        Snackbar.Add(
+            result.Succeeded
+                ? string.Format(L["A new password for {0} has been sent via email. The user will be required to change it upon first login"], model.UserName)
+                : string.Format(L["Could not send the password reset email to {0}. See the log for details."], model.Email),
+            result.Succeeded ? Severity.Info : Severity.Error);
     }
 
     private async Task OpenResetPasswordDialogAsync(ApplicationUserDto model)

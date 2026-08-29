@@ -7,6 +7,7 @@ global using System.Text.Json;
 global using Ardalis.Specification;
 global using CleanArchitecture.Blazor.Application.Features.Identity.DTOs;
 global using CleanArchitecture.Blazor.Application.Common.ExceptionHandlers;
+global using CleanArchitecture.Blazor.Application.Common.Constants;
 global using CleanArchitecture.Blazor.Application.Common.Extensions;
 global using CleanArchitecture.Blazor.Application.Common.Interfaces;
 global using CleanArchitecture.Blazor.Application.Common.Interfaces.Caching;

@@ -156,6 +156,7 @@
         "**/*.db-wal",
         "src/Server.UI/Files/**",
         "src/Server.UI/[Ll]og/**",
+        "src/Server.UI/[Mm]ail/**",
         "docs/**/*",
         "build/**/*"
       ]

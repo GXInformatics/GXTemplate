@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Domain.Identity;
+using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -52,6 +53,9 @@ public sealed class GxWebApplicationFactory : WebApplicationFactory<Program>
 
     /// <summary>The throwaway storage root this instance's disk provider is writing into.</summary>
     public string StorageRoot => Path.Combine(_root, "files");
+
+    /// <summary>The throwaway directory the mail sink renders messages into.</summary>
+    public string MailRoot => Path.Combine(_root, "mail");
 
     /// <summary>
     /// The two databases this fixture runs against, exposed so a test can inspect each one's schema
@@ -99,6 +103,13 @@ public sealed class GxWebApplicationFactory : WebApplicationFactory<Program>
                 // The disk storage provider, rooted where this fixture can delete it afterwards.
                 ["Storage:Provider"] = StorageProviderKeys.Disk,
                 ["Storage:RootPath"] = StorageRoot,
+
+                // The mail sink, stated rather than inferred. The harness runs under Development so
+                // it would default to the sink anyway, but a test suite that could send real email
+                // if somebody changed its environment name is not a risk worth carrying. The path is
+                // under the same root this fixture deletes in Dispose.
+                ["Mail:Delivery"] = nameof(MailDelivery.Sink),
+                ["Mail:SinkPath"] = MailRoot,
 
                 ["AppConfigurationSettings:AppName"] = "GX Application",
                 ["AppConfigurationSettings:DefaultTimeZone"] = "UTC",

@@ -1,6 +1,7 @@
 namespace CleanArchitecture.Blazor.Application.Features.Identity.Notifications.SendWelcome;
 
-public record SendWelcomeNotification(string LoginUrl, string Email, string UserName) : INotification;
+public record SendWelcomeNotification(string LoginUrl, string Email, string UserName, string? DisplayName = null)
+    : INotification;
 
 public class SendWelcomeNotificationHandler : INotificationHandler<SendWelcomeNotification>
 {
@@ -8,7 +9,6 @@ public class SendWelcomeNotificationHandler : INotificationHandler<SendWelcomeNo
     private readonly ILogger<SendWelcomeNotificationHandler> _logger;
     private readonly IMailService _mailService;
     private readonly IApplicationSettings _settings;
-
 
     public SendWelcomeNotificationHandler(
         IStringLocalizer<SendWelcomeNotificationHandler> localizer,
@@ -22,22 +22,30 @@ public class SendWelcomeNotificationHandler : INotificationHandler<SendWelcomeNo
         _settings = settings;
     }
 
-
     public async ValueTask Handle(SendWelcomeNotification notification, CancellationToken cancellationToken)
     {
+        // IApplicationSettings survives here only for the SUBJECT line, which is not a template
+        // token and so is not covered by the central injection. The body's app_name, company,
+        // base_url and user_name all arrive from MailTemplateRenderer.
         var subject = string.Format(_localizer["Welcome to {0}"], _settings.AppName);
-        await _mailService.SendAsync(
-            notification.Email,
+
+        var result = await _mailService.SendAsync(
+            new MailRecipient(notification.Email, notification.DisplayName, notification.UserName),
             subject,
-            "_welcome",
-            new
-            {
-                LoginUrl = notification.LoginUrl, 
-                AppName = _settings.AppName, 
-                Email = notification.Email, 
-                UserName = notification.UserName, 
-                Company = _settings.Company
-            });
-        _logger.LogInformation("Welcome email sent to {Email}.", notification.Email);
+            MailTemplates.Welcome,
+            new { LoginUrl = notification.LoginUrl, Email = notification.Email },
+            cancellationToken);
+
+        // Last place a failure can be observed: the publisher swallows handler exceptions.
+        if (result.Succeeded)
+        {
+            _logger.LogInformation("Welcome email sent to {Email}.", notification.Email);
+        }
+        else
+        {
+            _logger.LogError(
+                "Failed to send '{Template}' to {Email}: {Errors}",
+                MailTemplates.Welcome, notification.Email, result.ErrorMessage);
+        }
     }
 }
