@@ -13,6 +13,14 @@
       "persistenceScope": "templateGroup"
     },
     {
+      "id": "DatabaseName",
+      "name": {
+        "text": "Database name"
+      },
+      "isVisible": true,
+      "persistenceScope": "templateGroup"
+    },
+    {
       "id": "DefaultTimeZone",
       "name": {
         "text": "Default time zone"
@@ -35,6 +43,30 @@
     },
     {
       "id": "DbConnectionStringSetting",
+      "isVisible": false
+    },
+    {
+      "id": "LogDbConnectionStringSetting",
+      "isVisible": false
+    },
+    {
+      "id": "DatabaseNameSafe",
+      "isVisible": false
+    },
+    {
+      "id": "DatabaseNameOrProject",
+      "isVisible": false
+    },
+    {
+      "id": "LogDatabaseName",
+      "isVisible": false
+    },
+    {
+      "id": "DbConnPrefix",
+      "isVisible": false
+    },
+    {
+      "id": "DbConnSuffix",
       "isVisible": false
     },
     {

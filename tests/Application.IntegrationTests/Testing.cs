@@ -18,6 +18,8 @@ using Mediator;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -121,11 +123,71 @@ public class Testing
         
     }
 
+    /// <summary>
+    /// Brings the test database up to the current migrations, recreating it if its history no longer
+    /// matches them.
+    /// </summary>
+    /// <remarks>
+    /// This database persists between runs on a developer machine, so it outlives the migrations it
+    /// was built from. Regenerating <c>InitialCreate</c> - which Pass 7-2 and Pass 11B both did, and
+    /// which is the established way to change the business schema here - leaves a database whose
+    /// <c>__EFMigrationsHistory</c> names a migration that no longer exists. <c>Migrate()</c> then
+    /// tries to apply the new one from scratch and fails with "There is already an object named
+    /// 'AspNetRoles'", nine times, until somebody drops the database by hand. It cost exactly that in
+    /// Pass 11B and was recorded as an anomaly rather than fixed.
+    /// <para>
+    /// The fix compares what the database has applied against what the assembly defines, and starts
+    /// over only when they disagree. That is deliberately narrower than deleting unconditionally:
+    /// <c>EnsureDeleted</c> on every run would cost a full schema rebuild plus reseed each time the
+    /// suite starts, for a problem that occurs only when migrations are regenerated. As written, the
+    /// normal path is one extra metadata query - a few milliseconds - and the expensive path happens
+    /// exactly when it is the only thing that works.
+    /// </para>
+    /// </remarks>
     private static void EnsureDatabase()
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetService<ApplicationDbContext>();
+
+        if (HasStaleMigrationHistory(context))
+        {
+            // Not a silent recovery: a developer who has just regenerated migrations should be told
+            // why their test database vanished, rather than wondering where their seed data went.
+            Console.WriteLine(
+                "Integration test database has a migration history that no longer matches this " +
+                "assembly's migrations - recreating it. This is expected after regenerating InitialCreate.");
+
+            context.Database.EnsureDeleted();
+        }
+
         context.Database.Migrate();
+    }
+
+    /// <summary>
+    /// Whether the database claims migrations this assembly no longer defines.
+    /// </summary>
+    /// <remarks>
+    /// Only that direction is a problem. A database MISSING migrations the assembly defines is the
+    /// ordinary pending-migration case, and <c>Migrate()</c> handles it correctly.
+    /// </remarks>
+    private static bool HasStaleMigrationHistory(ApplicationDbContext context)
+    {
+        try
+        {
+            if (!context.Database.GetService<IRelationalDatabaseCreator>().Exists()) return false;
+
+            var applied = context.Database.GetAppliedMigrations().ToHashSet(StringComparer.Ordinal);
+            if (applied.Count == 0) return false;
+
+            var defined = context.Database.GetMigrations().ToHashSet(StringComparer.Ordinal);
+            return applied.Except(defined).Any();
+        }
+        catch (Exception)
+        {
+            // An unreachable or half-built database is not something to interpret here; let
+            // Migrate() fail with its own, better, message.
+            return false;
+        }
     }
 
     public static async Task<TResponse> SendAsync<TResponse>(IRequest<TResponse> request)

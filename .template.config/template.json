@@ -41,6 +41,14 @@
       ]
     },
 
+    "DatabaseName": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "",
+      "displayName": "Database name",
+      "description": "The name of the databases the generated project connects to. Leave empty to use the project name. The log database takes the same name with a _Logs suffix, so a project named IMS gets IMS and IMS_Logs. Anything outside letters, digits and underscore is stripped, because a database name with a space or a quote produces a connection string that fails obscurely at runtime."
+    },
+
     "DefaultTimeZone": {
       "type": "parameter",
       "datatype": "text",
@@ -72,33 +80,98 @@
       }
     },
 
-    "DbConnectionStringSetting": {
+    "DatabaseNameOrProject": {
+      "type": "generated",
+      "generator": "coalesce",
+      "parameters": {
+        "sourceVariableName": "DatabaseName",
+        "fallbackVariableName": "name"
+      }
+    },
+
+    "DatabaseNameSafe": {
+      "type": "generated",
+      "generator": "regex",
+      "dataType": "string",
+      "parameters": {
+        "source": "DatabaseNameOrProject",
+        "steps": [
+          {
+            "regex": "[^A-Za-z0-9_]",
+            "replacement": ""
+          }
+        ]
+      }
+    },
+
+    "LogDatabaseName": {
+      "type": "generated",
+      "generator": "join",
+      "parameters": {
+        "symbols": [
+          { "type": "ref", "value": "DatabaseNameSafe" },
+          { "type": "const", "value": "_Logs" }
+        ],
+        "separator": "",
+        "removeEmptyValues": false
+      }
+    },
+
+    "DbConnPrefix": {
       "type": "generated",
       "generator": "switch",
-      "replaces": "Host=localhost;Port=5432;Database=GXApplication;Username=postgres;Password=postgres;",
       "parameters": {
         "evaluator": "C++",
         "datatype": "string",
         "cases": [
-          { "condition": "(Database == 'mssql')", "value": "Server=(localdb)\\\\mssqllocaldb;Database=GXApplication;Trusted_Connection=True;MultipleActiveResultSets=true;" },
-          { "condition": "(Database == 'sqlite')", "value": "Data Source=GXApplication.db" },
-          { "condition": "(true)", "value": "Host=localhost;Port=5432;Database=GXApplication;Username=postgres;Password=postgres;" }
+          { "condition": "(Database == 'mssql')", "value": "Server=(localdb)\\\\mssqllocaldb;Database=" },
+          { "condition": "(Database == 'sqlite')", "value": "Data Source=" },
+          { "condition": "(true)", "value": "Host=localhost;Port=5432;Database=" }
         ]
+      }
+    },
+
+    "DbConnSuffix": {
+      "type": "generated",
+      "generator": "switch",
+      "parameters": {
+        "evaluator": "C++",
+        "datatype": "string",
+        "cases": [
+          { "condition": "(Database == 'mssql')", "value": ";Trusted_Connection=True;MultipleActiveResultSets=true;" },
+          { "condition": "(Database == 'sqlite')", "value": ".db" },
+          { "condition": "(true)", "value": ";Username=postgres;Password=postgres;" }
+        ]
+      }
+    },
+
+    "DbConnectionStringSetting": {
+      "type": "generated",
+      "generator": "join",
+      "replaces": "Host=localhost;Port=5432;Database=GXApplication;Username=postgres;Password=postgres;",
+      "parameters": {
+        "symbols": [
+          { "type": "ref", "value": "DbConnPrefix" },
+          { "type": "ref", "value": "DatabaseNameSafe" },
+          { "type": "ref", "value": "DbConnSuffix" }
+        ],
+        "separator": "",
+        "removeEmptyValues": false
       }
     },
 
     "LogDbConnectionStringSetting": {
       "type": "generated",
-      "generator": "switch",
+      "generator": "join",
       "replaces": "Host=localhost;Port=5432;Database=GXApplication_Logs;Username=postgres;Password=postgres;",
       "parameters": {
-        "evaluator": "C++",
-        "datatype": "string",
-        "cases": [
-          { "condition": "(Database == 'mssql')", "value": "Server=(localdb)\\\\mssqllocaldb;Database=GXApplication_Logs;Trusted_Connection=True;MultipleActiveResultSets=true;" },
-          { "condition": "(Database == 'sqlite')", "value": "Data Source=GXApplication_Logs.db" },
-          { "condition": "(true)", "value": "Host=localhost;Port=5432;Database=GXApplication_Logs;Username=postgres;Password=postgres;" }
-        ]
+        "symbols": [
+          { "type": "ref", "value": "DbConnPrefix" },
+          { "type": "ref", "value": "LogDatabaseName" },
+          { "type": "ref", "value": "DbConnSuffix" }
+        ],
+        "separator": "",
+        "removeEmptyValues": false
       }
     },
 

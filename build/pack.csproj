@@ -29,4 +29,66 @@
     <NoDefaultExcludes>true</NoDefaultExcludes>
   </PropertyGroup>
 
+  <!--
+      Assert that the produced package actually contains what makes it a template package.
+
+      This exists because "the package lacks what the repository has" has now bitten three times:
+      Pass 8 §E.1 and Pass 9 §C both lost dot-directory contents to NuGet's default excludes, and
+      Pass 13 §A had to open the .nupkg by hand to rule it out again. The failure is silent in the
+      worst way - the package builds, installs without error, and simply offers no template, or
+      offers one with no options in Visual Studio.
+
+      Three files are checked, and each has a distinct failure if it goes missing:
+        template.json   - no template at all; `dotnet new install` reports success and installs nothing
+        ide.host.json   - the template appears in Visual Studio with NO parameter page, because VS
+                          hides every symbol unless a host file says otherwise (the CLI shows them
+                          by default, which is why this can pass CLI testing and still be broken)
+        icon.png        - the package icon the nuspec <icon> element points at
+
+      Extracting is the only honest check: inspecting the nuspec would test our intent, not NuGet's
+      output, and it is NuGet's own exclude rules that have caused every one of these failures.
+  -->
+  <Target Name="AssertTemplatePackageContents" AfterTargets="Pack" Condition="'$(NoPackageAssert)' != 'true'">
+    <!--
+        Found by globbing the output directory for the nuspec's package id.
+
+        Neither obvious alternative works when packing from a NuspecFile: $(PackageId) is the
+        PROJECT name ("pack"), not the nuspec's id, and @(NuGetPackOutput) carries the SDK's default
+        guess at the filename rather than the one the nuspec actually produced. Both point at
+        "pack.1.0.0.nupkg", which is never written.
+
+        If the nuspec id ever changes, this glob matches nothing and the Error below fires - a loud
+        failure rather than an assertion that silently stops asserting.
+    -->
+    <PropertyGroup>
+      <_PackageOutDir>$([MSBuild]::EnsureTrailingSlash('$(PackageOutputPath)'))</_PackageOutDir>
+      <_PackageAssertDir>$(IntermediateOutputPath)package-assert</_PackageAssertDir>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_ProducedPackage Include="$(_PackageOutDir)GX.Blazor.Template.*.nupkg" />
+    </ItemGroup>
+
+    <RemoveDir Directories="$(_PackageAssertDir)" />
+
+    <Error Condition="'@(_ProducedPackage)' == ''"
+           Text="Pack produced no GX.Blazor.Template.*.nupkg in $(_PackageOutDir) to verify. If the nuspec id changed, update this glob." />
+
+    <Unzip SourceFiles="@(_ProducedPackage)" DestinationFolder="$(_PackageAssertDir)" />
+
+    <Error Condition="!Exists('$(_PackageAssertDir)\content\.template.config\template.json')"
+           Text="The package is missing content/.template.config/template.json. It will install without error and offer no templates. Check the nuspec &lt;files&gt; rules and NoDefaultExcludes." />
+
+    <Error Condition="!Exists('$(_PackageAssertDir)\content\.template.config\ide.host.json')"
+           Text="The package is missing content/.template.config/ide.host.json. The template will appear in Visual Studio with NO parameter page, because VS hides every symbol unless a host file says otherwise. The CLI would still show them, so CLI testing will not catch this." />
+
+    <Error Condition="!Exists('$(_PackageAssertDir)\content\.template.config\icon.png')"
+           Text="The package is missing content/.template.config/icon.png, which ide.host.json references." />
+
+    <Message Importance="high"
+             Text="Template package contents verified: template.json, ide.host.json and icon.png are all present under content/.template.config/." />
+
+    <RemoveDir Directories="$(_PackageAssertDir)" />
+  </Target>
+
 </Project>

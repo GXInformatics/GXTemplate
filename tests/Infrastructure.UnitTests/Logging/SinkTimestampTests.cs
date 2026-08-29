@@ -143,6 +143,13 @@ public class SinkTimestampTests : IDisposable
                 "SystemLogs",
                 LogEventLevel.Information,
                 storeTimestampInUtc: true,
+                // batchSize 1 rather than the default 100. The sink flushes when the batch fills
+                // OR when its internal timer fires, and the timer is not configurable through the
+                // public surface - so with the default the poll below waits on that timer every
+                // time, which is what took Infrastructure.UnitTests from 4s to 21s in Pass 11D. A
+                // batch of one fills immediately. Production keeps the default: batching is the
+                // point there, and nothing waits on it.
+                batchSize: 1,
                 needAutoCreateTable: false)
             .CreateLogger();
 

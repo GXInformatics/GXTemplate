@@ -57,8 +57,14 @@ dotnet new gxblazor -n IMS -o IMS
 ### 3. Set the connection string
 
 Open `src/Server.UI/appsettings.json` and set `DatabaseSettings:ConnectionString` to a database you
-can actually reach. The wizard writes a placeholder of the right shape for the provider you chose,
-but it cannot know your host or credentials.
+can actually reach. The wizard writes a placeholder of the right shape for the provider you chose
+and names it after your project, but it cannot know your host or credentials.
+
+There are **two** connection strings. `LogConnectionString` names a second database, on the same
+server, that Serilog writes to and the SystemLogs page reads from — so log volume stays out of the
+business database's backups and can be retained under its own policy. Create that database before
+first run (SQLite makes its own file); the application creates the table in it. Leave the setting
+empty and the application still runs, logging to console and file only, and says so at startup.
 
 For anything beyond local development, keep secrets out of the file — every setting can be supplied
 as an environment variable using the standard double-underscore form:
@@ -110,14 +116,26 @@ and nothing else.
 
 ## The wizard options
 
-Three options, and they are the whole option surface. Each one is exercised by the template's own
-verification, which is why there are three of them and not thirty.
+Four options, and they are the whole option surface. Each one is exercised by the template's own
+verification, which is why there are four of them and not thirty.
 
 | Option | CLI | Values | Default | Effect |
 |---|---|---|---|---|
 | Database provider | `--Database` | `postgresql`, `mssql`, `sqlite` | `postgresql` | Writes `DatabaseSettings:DBProvider` and a connection string of the right shape into `appsettings.json`. |
+| Database name | `--DatabaseName` | any name | the project name | Names both databases: `<name>` and `<name>_Logs`. |
 | Default time zone | `--DefaultTimeZone` | any time zone id | `UTC` | Writes `AppConfigurationSettings:DefaultTimeZone`, the zone a newly provisioned account gets when nobody has chosen one. |
 | Allow self-registration | `--AllowSelfRegistration` | `true`, `false` | `true` | Writes `AppConfigurationSettings:AllowSelfRegistration`. When `false`, the self-service account-creation surface returns 404. |
+
+**`--DatabaseName`** defaults to the project name, so `dotnet new gxblazor -n IMS` produces databases
+called `IMS` and `IMS_Logs` rather than the `GXApplication` every generated project used to share —
+two projects on one server no longer collide.
+
+The name is **sanitised**: anything outside letters, digits and underscore is stripped, so
+`My DB"; DROP` becomes `MyDBDROP`, and a project named `Acme.Ims` yields `AcmeIms`. The template
+engine offers no way to *reject* a malformed value for a free-text parameter, so it corrects one
+instead — a database name containing a space or a quote produces a connection string that fails
+obscurely at runtime, and silently fixing it beats shipping it. If you want an exact name, pass one
+that is already valid.
 
 Two things worth knowing about `--Database`:
 
@@ -129,8 +147,11 @@ Two things worth knowing about `--Database`:
   regenerate with, for example:
   ```
   DatabaseSettings__DBProvider=postgresql dotnet ef migrations add <Name> \
-    --project src/Migrators/Migrators.PostgreSQL --startup-project src/Server.UI
+    --project src/Migrators/Migrators.PostgreSQL --startup-project src/Server.UI \
+    --context ApplicationDbContext
   ```
+  `--context` is required: the application registers two contexts, and `LogDbContext` deliberately
+  has no migrations of its own.
 
 `--DefaultTimeZone` and `--AllowSelfRegistration` are written as **configuration**, not compiled in.
 A generated project can change its mind about either without regenerating from the template.
@@ -149,7 +170,8 @@ runtime error.
 | Key | Notes |
 |---|---|
 | `DBProvider` | `postgresql`, `mssql` or `sqlite`. Anything else fails startup, naming the supported set. |
-| `ConnectionString` | Required. |
+| `ConnectionString` | Required. The business database. |
+| `LogConnectionString` | The **separate** database Serilog writes to and the SystemLogs page reads from — same server, same provider. Absent is supported: the application runs, logs to console and file only, and says so loudly at startup. It never falls back to `ConnectionString`. |
 
 ### `Storage` — validated at startup
 
@@ -338,8 +360,12 @@ Stated plainly, because finding these out later is worse than reading them now.
 - **The Azure Blob provider is exercised against Azurite, not a real storage account.** The full
   storage contract passes against the emulator. Authentication with a real account key, network
   failure behaviour, and throttling responses are untested.
-- **The PostgreSQL migration is reviewed, not applied, in the template's own verification.** It is
-  generated and its SQL is read; there is no PostgreSQL server in the build environment.
+- **Generating into a deep directory fails with MSB3021.** Windows' 260-character path limit is
+  reached easily here: the solution nests `src/Migrators/Migrators.PostgreSQL/Migrations/` under your
+  chosen name, and the build then writes longer paths still under `obj/`. The failure names a file
+  copy rather than the real cause, so it reads as a mysterious build break. Generate into a short
+  path — `C:\src\IMS` rather than a nested folder under `Documents` — or enable long paths
+  (`git config --global core.longpaths true` plus the `LongPathsEnabled` registry setting).
 - **`tests/Application.IntegrationTests` is pinned to SQL Server LocalDB, whatever `--Database` you
   chose.** Its own `appsettings.json` sets `mssql` and a `(localdb)\mssqllocaldb` connection string,
   and the wizard does not rewrite it. On a machine without LocalDB those 9 tests **fail** — they do
@@ -437,3 +463,27 @@ dotnet new uninstall GX.Blazor.Template
 
 **NuGet caches by id and version.** Re-packing after a change without bumping `<version>` and then
 reinstalling gives you the *old* package back. Uninstall first, or bump the version.
+
+**Pack asserts its own output.** After packing, `build/pack.csproj` extracts the `.nupkg` and fails
+the build unless `content/.template.config/` contains `template.json`, `ide.host.json` and
+`icon.png`. That check exists because "the package lacks what the repository has" has bitten three
+times, and each file fails differently and silently: without `template.json` the package installs
+and offers no template; without `ide.host.json` the template appears in Visual Studio with **no
+parameter page**, because VS hides every symbol unless a host file says otherwise — while the CLI
+shows them regardless, so CLI testing cannot catch it.
+
+### Installing for Visual Studio
+
+`dotnet new install .` from a clone registers the template as a **folder**, which is convenient for
+CLI work but is not how Visual Studio expects to consume one — every other template it lists is a
+versioned package. For Visual Studio, install the package:
+
+```
+dotnet new uninstall <path-to-clone>      # drop the folder registration first
+dotnet pack build/pack.csproj -o .
+dotnet new install ./GX.Blazor.Template.1.0.0.nupkg
+```
+
+Then restart Visual Studio. Its template cache is separate from the CLI's and is only rebuilt when
+it notices a change, so a template installed or changed while VS was open may not be picked up until
+it restarts.
