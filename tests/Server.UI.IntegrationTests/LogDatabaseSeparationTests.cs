@@ -122,10 +122,11 @@ public class LogDatabaseSeparationTests
     }
 
     [Test]
-    public void TheLogDatabase_HasTheSystemLogsTable_CreatedByTheSink()
+    public void TheLogDatabase_HasTheSystemLogsTable_CreatedByTheApplication()
     {
-        // Nothing migrates the log database - it has no migration chain at all - so the presence of
-        // this table is entirely the sink's doing.
+        // Nothing migrates the log database - it has no migration chain at all - and since Pass 11C
+        // no sink creates it either. Its presence is entirely LogTableDdl's doing, run from
+        // LogDatabaseStartupCheck before the business database is even touched.
         TableNames(_factory.LogConnectionString).Should().Contain("SystemLogs");
     }
 

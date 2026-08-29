@@ -15,8 +15,11 @@ public static partial class Permissions
         [Description("Allows searching for log records")]
         public const string Search = "Permissions.Logs.Search";
 
-        [Description("Allows exporting log records")]
-        public const string Export = "Permissions.Logs.Export";
+        // Export is deliberately absent. It existed for ExportSystemLogsQuery, which Pass 11B deleted
+        // as dead code - the SystemLogs page has never had an Export button and nothing ever sent
+        // that query. A permission constant nothing can check is not harmless: it appears in the role
+        // editor as a grantable right, so an administrator can spend a decision on a capability the
+        // application does not have. If log export is ever built, the constant comes back with it.
 
         [Description("Allows purging log records")]
         public const string Purge = "Permissions.Logs.Purge";
@@ -27,6 +30,9 @@ public class LogsAccessRights
 {
     public bool View { get; set; }
     public bool Search { get; set; }
-    public bool Export { get; set; }
+
+    // No Export, matching Permissions.Logs above. PermissionService builds the claim string from the
+    // property NAME - "Permissions.Logs." + prop.Name - so a property left here would go on
+    // manufacturing a claim string that no constant declares and no role can be granted.
     public bool Purge { get; set; }
 } 

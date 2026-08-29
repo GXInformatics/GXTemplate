@@ -1,40 +1,53 @@
+using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
+using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using Xunit;
 
 namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
 
 /// <summary>
-/// Every property EF reads off <see cref="SystemLog"/> has a column in each provider's sink
-/// configuration.
+/// The log table's shape is expressed three times. These tests hold the three to each other, per
+/// provider.
 /// </summary>
 /// <remarks>
-/// The log database has no EF migration chain: its table is created by the sink, from the very
-/// column configuration these tests inspect. So the sink's columns and the entity are two
-/// expressions of one shape, and the failure mode is drift between them - someone adds a property to
-/// SystemLog, no column writer is added, and the page reads a column that is not there.
+/// The three expressions are:
+/// <list type="number">
+/// <item>the <see cref="SystemLog"/> <b>entity</b> - what EF reads back, and therefore what the
+/// SystemLogs page can display;</item>
+/// <item><see cref="LogTableDdl"/> - what this application actually creates, since Pass 11C took
+/// that job away from the sinks;</item>
+/// <item>each sink's <b>column configuration</b> - what Serilog writes.</item>
+/// </list>
+/// Any pair of these can drift, and each drift fails somewhere different and quietly:
+/// <list type="bullet">
+/// <item>a property with no DDL column ⇒ the page throws on a column that is not there;</item>
+/// <item>a property with no sink writer ⇒ the column exists and is always null;</item>
+/// <item><b>a sink writer with no DDL column ⇒ every INSERT fails</b>, asynchronously, into SelfLog,
+/// while the application looks perfectly healthy. That is precisely the disease Pass 11B found on
+/// PostgreSQL, where the sink's own auto-create produced a table with no <c>id</c>; it is worth a
+/// test in its own right rather than trusting that it cannot happen again.</item>
+/// </list>
 /// <para>
-/// <b>Containment, not equality.</b> Extra sink columns are harmless and expected: the MSSQL
-/// configuration legitimately adds ClientIP, UserName and ClientAgent as additional columns, and the
-/// standard-column machinery names things the entity does not model. The direction that matters is
-/// entity to sink.
+/// <b>Containment, not equality.</b> Extra DDL columns are permitted - today there are none, and
+/// <c>TheDdlHasNoColumnsNobodyUses</c> says so rather than leaving it implied.
 /// </para>
 /// <para>
-/// <b>What this cannot see.</b> It compares code with code. Auto-create only ever CREATES - no sink
-/// alters an existing table - so a log database deployed before a new property was added keeps its
-/// old columns and no test here will know. Adding a property to SystemLog carries a manual ALTER on
-/// every deployed log database. That is a stated limitation of auto-create, not an oversight.
+/// <b>What none of this can see.</b> It compares code with code. The DDL creates a table and never
+/// alters one, so a log database deployed before a property was added keeps its old columns and no
+/// test here will know. Adding a property to <see cref="SystemLog"/> carries a manual ALTER on every
+/// deployed log database.
 /// </para>
 /// </remarks>
 public class SinkColumnDriftTests
 {
     /// <summary>The properties EF maps, which are exactly the ones a query can ask a database for.</summary>
-    private static IEnumerable<string> EntityProperties =>
-        typeof(SystemLog).GetProperties().Select(p => p.Name);
+    private static string[] EntityProperties =>
+        typeof(SystemLog).GetProperties().Select(p => p.Name).ToArray();
 
     /// <summary>
     /// PostgreSQL is addressed by the snake_case names <c>UseSnakeCaseNamingConvention()</c>
-    /// produces, so the comparison has to be made in the same alphabet.
+    /// produces, so comparisons against it have to be made in the same alphabet.
     /// </summary>
     private static string ToSnakeCase(string name)
     {
@@ -54,48 +67,114 @@ public class SinkColumnDriftTests
         return result.ToString();
     }
 
-    [Fact]
-    public void TheSqlServerSink_HasAColumnForEveryEntityProperty()
+    /// <summary>The entity's properties, spelled the way the given provider spells columns.</summary>
+    private static string[] EntityColumnsFor(string provider) =>
+        provider == DbProviderKeys.Npgsql
+            ? EntityProperties.Select(ToSnakeCase).ToArray()
+            : EntityProperties;
+
+    /// <summary>What that provider's sink writes.</summary>
+    private static string[] SinkColumnsFor(string provider) => provider switch
+    {
+        DbProviderKeys.SqlServer => SqlServerSinkColumns(),
+        DbProviderKeys.Npgsql => SerilogExtensions.BuildNpgsqlColumnWriters().Keys.ToArray(),
+
+        // The SQLite sink has no configurable column set - the fork writes a fixed statement whose
+        // columns Pass 7-2 extracted from the assembly and Pass 11B re-measured against a real file.
+        // It is the entity's column set, which is why this provider never had a drift problem.
+        DbProviderKeys.SqLite => EntityProperties,
+        _ => throw new InvalidOperationException(provider)
+    };
+
+    private static string[] SqlServerSinkColumns()
     {
         var options = SerilogExtensions.BuildSqlServerColumnOptions();
-
-        var columns = options.Store.Select(s => s.ToString())
+        return options.Store.Select(s => s.ToString())
             .Concat(options.AdditionalColumns!.Select(c => c.ColumnName!))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToArray();
+    }
 
-        var missing = EntityProperties.Where(p => !columns.Contains(p)).ToArray();
+    public static TheoryData<string> Providers =>
+        new() { DbProviderKeys.SqLite, DbProviderKeys.SqlServer, DbProviderKeys.Npgsql };
+
+    // ------------------------------------------------------------- entity -> DDL
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public void EveryPropertyEfReads_HasAColumnInTheDdl(string provider)
+    {
+        var ddl = LogTableDdl.ColumnNames(provider).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var missing = EntityColumnsFor(provider).Where(p => !ddl.Contains(p)).ToArray();
 
         Assert.Empty(missing);
     }
 
-    [Fact]
-    public void ThePostgresSink_HasAColumnForEveryEntityPropertyExceptTheKey()
-    {
-        // Id is the documented exception, and it is the Pass 11B STOP: this sink's column-writer
-        // dictionary has no way to express an identity column, so it can neither write nor create
-        // one. That is why needAutoCreateTable stays false for PostgreSQL - see the comment on
-        // WriteToNpgsql and pass11b-report.md §D. When that is resolved, this test should lose its
-        // exception rather than keep it.
-        var columns = SerilogExtensions.BuildNpgsqlColumnWriters().Keys
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    // ------------------------------------------------------------- entity -> sink
 
-        var missing = EntityProperties
-            .Where(p => p != nameof(SystemLog.Id))
-            .Select(ToSnakeCase)
-            .Where(c => !columns.Contains(c))
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public void EveryPropertyEfReads_HasASinkWriter(string provider)
+    {
+        var sink = SinkColumnsFor(provider).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Id is the exception, on every provider and by design: the database generates it. No sink
+        // writes a key it does not know, and none of them can - the PostgreSQL writer dictionary has
+        // no way to express one at all, which is why the DDL had to take the job.
+        var missing = EntityColumnsFor(provider)
+            .Where(p => !p.Equals(nameof(SystemLog.Id), StringComparison.OrdinalIgnoreCase))
+            .Where(p => !sink.Contains(p))
             .ToArray();
 
         Assert.Empty(missing);
     }
 
-    [Fact]
-    public void ThePostgresSink_StillCannotSupplyTheKey()
+    // ------------------------------------------------------------- sink -> DDL
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public void EverySinkWriter_HasAColumnInTheDdl(string provider)
     {
-        // Stated explicitly so the gap is a recorded fact with a test behind it, not a footnote. If
-        // this ever starts failing, the STOP has been resolved and the exception above can go.
-        var columns = SerilogExtensions.BuildNpgsqlColumnWriters().Keys
+        // The direction that fails loudest and reports itself least: a writer naming a column the
+        // table does not have makes every INSERT fail into SelfLog while the application appears
+        // entirely healthy.
+        var ddl = LogTableDdl.ColumnNames(provider).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var missing = SinkColumnsFor(provider).Where(c => !ddl.Contains(c)).ToArray();
+
+        Assert.Empty(missing);
+    }
+
+    // ------------------------------------------------------------- the other direction
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public void TheDdlHasNoColumnsNobodyUses(string provider)
+    {
+        // Extra DDL columns would be permitted - they cost nothing at read time - but there are none,
+        // and stating that keeps the three expressions exactly congruent rather than merely
+        // compatible. If this ever fails, the extra column wants a comment, not a deletion.
+        var known = EntityColumnsFor(provider)
+            .Concat(SinkColumnsFor(provider))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        Assert.DoesNotContain("id", columns);
+        var extra = LogTableDdl.ColumnNames(provider).Where(c => !known.Contains(c)).ToArray();
+
+        Assert.Empty(extra);
+    }
+
+    // ------------------------------------------------------------- the STOP, now resolved
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public void TheDdlSuppliesTheKeyOnEveryProvider(string provider)
+    {
+        // Pass 11B's STOP 1 inverted. It used to assert that the PostgreSQL sink could NOT supply an
+        // id - written to fail once that was fixed. It is fixed: the DDL supplies the key on all
+        // three providers, which is what makes the reading side work at all.
+        var ddl = LogTableDdl.ColumnNames(provider);
+        var key = provider == DbProviderKeys.Npgsql ? "id" : "Id";
+
+        Assert.Contains(key, ddl, StringComparer.OrdinalIgnoreCase);
     }
 }

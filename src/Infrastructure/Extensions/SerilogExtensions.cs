@@ -119,23 +119,18 @@ public static class SerilogExtensions
     /// <see cref="DatabaseSettings.LogConnectionString"/> - never to the business database.
     /// </summary>
     /// <remarks>
-    /// <b>The sink now creates its own table.</b> Until Pass 11 every provider was told not to
-    /// (<c>AutoCreateSqlTable = false</c>, <c>needAutoCreateTable: false</c>) because EF's migration
-    /// created it in the business database and the sink was only a writer. The log database has no
-    /// migration chain and no EF-owned schema, so that ownership moves to the sink.
+    /// <b>No sink creates its table.</b> Auto-create is off on all three providers, which is where
+    /// this started before Pass 11 and where Pass 11C returned it: Pass 11 briefly made the sinks
+    /// responsible for the table in the new log database, and Pass 11B measured that PostgreSQL's
+    /// auto-create cannot emit an identity column and SQL Server's runs inside
+    /// <c>WebApplicationBuilder.Build()</c>, crashing startup when the log server is unreachable.
+    /// <see cref="Persistence.Logging.LogTableDdl"/> owns the schema instead, and the sinks are only
+    /// writers again.
     /// <para>
-    /// This does not make the table's shape unknown to the reading side. Each provider's table is
-    /// created from the very column configuration written below - the same <c>ColumnOptions</c> and
-    /// <c>ColumnWriter</c> dictionaries that already had to agree with the <c>SystemLog</c> entity
-    /// for the sink's INSERT to work. The shape is the entity, expressed twice; the risk is drift
-    /// between the two expressions, and drift is what <c>SinkColumnDriftTests</c> pins.
-    /// </para>
-    /// <para>
-    /// <b>Auto-create only ever CREATES. It never ALTERS.</b> A log table that predates a new
-    /// property on <c>SystemLog</c> keeps its old columns, and no sink will widen it; the drift test
-    /// compares code against code and cannot see a deployed schema. Adding a property to the entity
-    /// therefore carries a manual ALTER on every deployed log database. This is a stated limitation
-    /// of choosing auto-create over a second migration chain, recorded in the README.
+    /// The column configuration below is therefore the INSERT, not the DDL. The two must still
+    /// agree, in both directions: a writer naming a column the DDL does not create fails silently at
+    /// write time. <c>SinkColumnDriftTests</c> holds the entity, the DDL and each sink's writers to
+    /// one another, per provider.
     /// </para>
     /// <para>
     /// An absent connection string configures NO database sink - and specifically does not fall back
@@ -187,22 +182,17 @@ public static class SerilogExtensions
             // deployments must perform regardless.
             AutoCreateSqlDatabase = false,
 
-            // ALSO still false, against the ratified Pass 11 design, and for a harder reason than
-            // the PostgreSQL one.
+            // Also false, and this one must stay false. The shape was never the problem here: with
+            // it true the sink creates exactly the right table, all eleven columns including Id,
+            // measured against LocalDB in Pass 11B. The problem is WHEN. This sink performs its
+            // CREATE TABLE in its CONSTRUCTOR, which Serilog runs during
+            // WebApplicationBuilder.Build() - so with the log server unreachable the exception comes
+            // out of Build() and the application does not start at all, trading a best-effort
+            // logging failure for a total outage. Wrapping in WriteTo.Async does not help: the inner
+            // sink is still constructed eagerly.
             //
-            // The shape is not the problem here: with this true the sink creates exactly the right
-            // table, all eleven columns including Id, measured against LocalDB. The problem is WHEN.
-            // This sink performs its CREATE TABLE in its constructor, which Serilog runs during
-            // WebApplicationBuilder.Build() - so if the log database is unreachable at startup the
-            // exception comes out of Build(), and the application does not start at all.
-            //
-            // That trades a best-effort logging failure for a hard outage of the whole application,
-            // which is the exact inversion of the ratified rule that a missing or broken log
-            // database must never stop the business application serving. Wrapping in WriteTo.Async
-            // does not help: the inner sink is still constructed eagerly.
-            //
-            // SQLite is unaffected because that sink creates its table lazily, on first write.
-            // This is a Pass 11B STOP awaiting a decision - see pass11b-report.md §D.
+            // LogTableDdl creates the table instead, after the host is built, where a failure can be
+            // reported and survived. That is Pass 11C's resolution of the Pass 11B STOP.
             AutoCreateSqlTable = false,
 
             BatchPostingLimit = 100,
@@ -223,8 +213,9 @@ public static class SerilogExtensions
     /// copy of it that could quietly diverge.
     /// </summary>
     /// <remarks>
-    /// With <c>AutoCreateSqlTable = true</c> this is now the DDL as well as the INSERT: the table
-    /// the SystemLogs page reads is created from exactly these columns.
+    /// This describes the sink's INSERT only. Since Pass 11C the table itself comes from
+    /// <see cref="Persistence.Logging.LogTableDdl"/>, and <c>SinkColumnDriftTests</c> holds the two
+    /// to each other so a writer can never name a column the DDL does not create.
     /// </remarks>
     public static ColumnOptions BuildSqlServerColumnOptions()
     {
@@ -269,7 +260,7 @@ public static class SerilogExtensions
 
     /// <summary>
     /// The PostgreSQL sink's column writers. Extracted from <see cref="WriteToNpgsql"/> so that
-    /// <c>SinkColumnDriftTests</c> and <c>PostgresSinkDdlTests</c> check the configuration the sink
+    /// <c>SinkColumnDriftTests</c> checks the configuration the sink
     /// actually uses rather than a copy of it.
     /// </summary>
     /// <remarks>
@@ -289,7 +280,7 @@ public static class SerilogExtensions
             // declared type only affected parameter binding. It stops being cosmetic the moment this
             // sink creates the table: it renders an unsized Varchar as character varying(50), and
             // properties and log_event are serialised JSON documents routinely longer than that.
-            // PostgresSinkDdlTests pins the rendered DDL.
+            // LogTableDdl now creates the column as text to match.
             { "properties", new PropertiesColumnWriter(NpgsqlDbType.Text) },
             { "log_event", new LogEventSerializedColumnWriter(NpgsqlDbType.Text) },
             { "user_name", new SinglePropertyColumnWriter("UserName", PropertyWriteMethod.Raw, NpgsqlDbType.Text) },
@@ -310,17 +301,16 @@ public static class SerilogExtensions
             BuildNpgsqlColumnWriters(),
             LogEventLevel.Information,
 
-            // STILL FALSE, against the ratified Pass 11 design, because this sink's auto-create
-            // cannot produce a table LogDbContext can read. Its DDL is generated purely from the
-            // dictionary above, and a ColumnWriter dictionary has no way to express an identity
-            // column - so the table it creates has NO id at all, while SystemLog.Id is the EF key
-            // and the SystemLogs page orders by it by default.
+            // False, and this one must stay false. This sink's auto-create cannot produce a table
+            // LogDbContext can read: its DDL is generated purely from the dictionary above, and a
+            // ColumnWriter dictionary has no way to express an identity column, so the table it
+            // creates has NO id at all - while SystemLog.Id is the EF key and the SystemLogs page's
+            // default sort. It also renders an unsized Varchar as character varying(50) and
+            // time_stamp as timestamp WITH time zone, neither of which matches what is read back.
             //
-            // MSSQL and SQLite are unaffected: both were measured to auto-create the full column
-            // set including Id. This is a Pass 11B STOP awaiting a decision - see pass11b-report.md
-            // §D. Until it is resolved a PostgreSQL deployment has no log table, and the startup
-            // check and the SystemLogs page both report the log database unusable rather than
-            // pretending otherwise.
+            // LogTableDdl creates the table instead, in PostgreSQL's own words, with a real
+            // GENERATED BY DEFAULT AS IDENTITY column. That is Pass 11C's resolution of the Pass 11B
+            // STOP.
             needAutoCreateTable: false,
             schemaName: "public",
             useCopy: false
@@ -355,8 +345,11 @@ public static class SerilogExtensions
             // DateTime.UtcNow. West of Greenwich that silently hid recent rows from the page's
             // default view. Pinned by SqliteSinkTimestampTests.
             storeTimestampInUtc: true,
-            // The log database has no EF migration chain; the sink owns this table.
-            needAutoCreateTable: true
+            // False, like the other two, since Pass 11C. This sink's auto-create worked - its DDL
+            // is exactly the SystemLog column set - but leaving it on would mean the log table came
+            // from the sink on SQLite and from LogTableDdl everywhere else, so a shape defect could
+            // only ever be found on two of the three providers. One creator, all three providers.
+            needAutoCreateTable: false
         ));
     }
 

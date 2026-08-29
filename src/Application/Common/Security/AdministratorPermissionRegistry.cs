@@ -63,9 +63,10 @@ public static class AdministratorPermissionRegistry
 
         Permissions.Hangfire.View,
 
+        // Logs.Export was here until Pass 11C removed the constant: its query was deleted as dead
+        // code in Pass 11B, and this list may only name constants that exist.
         Permissions.Logs.View,
         Permissions.Logs.Search,
-        Permissions.Logs.Export,
         Permissions.Logs.Purge,
 
         Permissions.NavigationMenu.View,

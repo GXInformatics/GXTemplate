@@ -6,6 +6,18 @@ public static class HostExtensions
 {
     public static async Task InitializeDatabaseAsync(this IHost host)
     {
+        // FIRST, before the business database is touched, and specifically before seeding.
+        //
+        // On a fresh deployment every line the seeding emits - provisioning roles, the default
+        // organisation, the administrator - is logged before anything else happens. Create the log
+        // table afterwards and all of it is written to a table that does not exist yet and is lost:
+        // the very first run, the one an operator is most likely to want a record of, would be the
+        // one run with no log rows in it.
+        //
+        // It cannot prevent the business database from being prepared: it never throws, and its
+        // failures are reported through the console and file sinks.
+        await host.PrepareLogDatabaseAsync().ConfigureAwait(false);
+
         using (var scope = host.Services.CreateScope())
         {
             var initializer = scope.ServiceProvider.GetRequiredService<ApplicationDbContextInitializer>();
@@ -22,11 +34,6 @@ public static class HostExtensions
                 await initializer.SeedSampleDataAsync().ConfigureAwait(false);
             }
         }
-
-        // Last, and outside the scope above, because it is not part of preparing the business
-        // database and must not be able to prevent it. The business database is fail-fast; the log
-        // database is best-effort-but-loud, and this is where the second half of that is said.
-        await host.CheckLogDatabaseAsync().ConfigureAwait(false);
     }
 
    
