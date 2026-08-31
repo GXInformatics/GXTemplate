@@ -36,6 +36,13 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
     /// The endpoint URL for user logout operations.
     /// </summary>
     public static readonly string Logout = "/pages/authentication/logout";
+
+    /// <summary>
+    /// The endpoint that reissues the current user's authentication cookie from their user record.
+    /// A Blazor circuit cannot write a cookie, so anything a page changes about the user is invisible
+    /// to the principal until a full-page navigation passes through here.
+    /// </summary>
+    public static readonly string RefreshSignIn = "/pages/authentication/refresh-signin";
     
     /// <summary>
     /// The endpoint URL for user login operations.
@@ -534,6 +541,60 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
             // unauthenticated-by-then endpoint into an open redirect.
             return TypedResults.LocalRedirect(ResolveLocalReturnUrl(returnUrl, RedirectUrls.Login));
         }).RequireAuthorization().DisableAntiforgery();
+
+        // Reissues the current user's authentication cookie from their current user record.
+        //
+        // This exists because a Blazor circuit cannot do it. `SignInManager.RefreshSignInAsync`
+        // writes a Set-Cookie, and this application renders every page at
+        // InteractiveServerRenderMode(prerender: false) - so by the time a component's event handler
+        // runs, the response has long since started and there is no cookie to write. Anything a page
+        // changes about the USER RECORD is therefore invisible to the PRINCIPAL until something
+        // reissues the ticket, and nothing did: a full reload (`NavigateTo(..., forceLoad: true)`)
+        // is just another request carrying the same cookie.
+        //
+        // That is what stranded the forced password change (Pass 17). A user who successfully chose
+        // a new password kept the stale MustChangePassword claim, so ForcePasswordChangeMiddleware
+        // sent them straight back to the change-password page; thirty minutes later the security
+        // stamp that ChangePasswordAsync had bumped made SecurityStampValidator reject the cookie
+        // and sign them out instead. Neither outcome is "you are now in the application".
+        //
+        // A GET, because it is reached by a full-page navigation from inside the circuit, which is
+        // the only kind of request a component can cause the browser to make.
+        //
+        // Safe as a GET despite reissuing a cookie: it re-reads the user from the store and rebuilds
+        // the principal from what is there NOW, so it can only ever bring a session INTO line with
+        // the database - it cannot grant anything the store does not already say, and it cannot
+        // clear a flag that is still set. A cross-site link to it would do nothing but resynchronise
+        // the victim's own claims.
+        //
+        // The security stamp keeps doing its job: this session gets the new stamp, every OTHER
+        // session of the same user keeps the old one and is rejected the next time its validator
+        // runs. That is Pass 2 Fix 4 and it is not weakened here.
+        //
+        // NOTE: this path is in ForcePasswordChangeMiddleware's AlwaysAllowed list. It has to be -
+        // the caller still carries the stale claim at the moment it arrives, so the middleware would
+        // otherwise bounce it to the change-password page and the refresh would never happen.
+        accountGroup.MapGet("/refresh-signin", async (
+            HttpContext context,
+            [FromServices] SignInManager<ApplicationUser> signInManager,
+            [FromServices] UserManager<ApplicationUser> userManager,
+            [FromQuery] string? returnUrl = null) =>
+        {
+            var user = await userManager.GetUserAsync(context.User).ConfigureAwait(false);
+            if (user is null)
+            {
+                // Authorized but unresolvable - the account was removed mid-session. Send them to
+                // sign in rather than refreshing a principal for a user that no longer exists.
+                return TypedResults.LocalRedirect(RedirectUrls.Login);
+            }
+
+            await signInManager.RefreshSignInAsync(user).ConfigureAwait(false);
+            logger.LogInformation("Reissued the authentication cookie for {UserName}.", user.UserName);
+
+            // Local-only, for the same reason the logout endpoint discards a non-local return URL:
+            // honouring one would turn this into an open redirect.
+            return TypedResults.LocalRedirect(ResolveLocalReturnUrl(returnUrl, RedirectUrls.Home));
+        }).RequireAuthorization();
 
         // Answers with STATUS CODES, not redirects, and is the one endpoint here that does.
         //

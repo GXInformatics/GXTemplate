@@ -34,6 +34,12 @@ public class ForcePasswordChangeMiddleware
         "/_framework",
         "/_content",
 
+        // The cookie-refresh endpoint. Load-bearing: the caller still carries the stale
+        // MustChangePassword claim at the moment it arrives - reissuing the cookie is the whole
+        // point of the request - so blocking it here would send the user back to the change-password
+        // page and the claim would never be dropped. This is the path out of the flow.
+        "/pages/authentication/refresh-signin",
+
         // Leaving must never be blocked, or the flag becomes a lockout.
         "/pages/authentication/logout",
         "/account/logout",

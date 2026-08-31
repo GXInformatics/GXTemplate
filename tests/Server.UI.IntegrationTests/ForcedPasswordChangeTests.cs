@@ -3,6 +3,9 @@ using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Constants;
+using CleanArchitecture.Blazor.Domain.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
 using FluentAssertions;
 using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
@@ -156,12 +159,145 @@ public class ForcedPasswordChangeTests
     }
 
     [Test]
-    public async Task OnceTheFlagIsCleared_TheApplicationIsReachable()
+    public async Task AUserWhoCompletesTheForcedChange_ReachesTheApplication()
     {
-        // The other end of the gate: it lets go.
-        await _factory.ResetAdministratorPasswordAsync(mustChangePassword: false);
+        // The flow's own regression test, and the one that would have failed for every pass between
+        // 7-3 and 17.
+        //
+        // What it replaced asserted the half that worked: it cleared the flag BEFORE signing in, so
+        // the cookie was issued without the claim and the propagation path - the only part that was
+        // broken - was never exercised. This starts where a real user starts: signed in WITH the
+        // flag, carrying the claim in a live cookie.
+        //
+        // The paths are written as literals rather than through the route constants on purpose. This
+        // pins an HTTP contract that the change-password page depends on, and a test that moved
+        // automatically with a rename would not notice the page and the endpoint drifting apart.
+        using var factory = new GxWebApplicationFactory(Environments.Production);
+        await factory.ResetAdministratorPasswordAsync(mustChangePassword: true);
 
-        using var client = _factory.CreateNonRedirectingClient();
+        using var client = factory.CreateNonRedirectingClient();
+        await CookieLogin.SignInAndExpectSuccessAsync(
+            client, Users.Administrator, GxWebApplicationFactory.KnownPassword);
+
+        // Held on the change-password page, as a flagged user must be.
+        var held = await client.SendAsync(Navigation("/"));
+        held.StatusCode.Should().Be(HttpStatusCode.Found);
+        held.Headers.Location!.ToString().Should().Contain(ChangePasswordPath,
+            "the fixture must actually start inside the gate, or the rest proves nothing");
+
+        // Exactly what ChangePassword.razor's handler does, in order: change the password (which
+        // bumps the security stamp) and clear the flag on the user record.
+        const string chosenPassword = "Gx-User-Chosen-Password-1!";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var users = scope.ServiceProvider
+                .GetRequiredService<UserManager<ApplicationUser>>();
+            var user = await users.FindByNameAsync(Users.Administrator);
+
+            var changed = await users.ChangePasswordAsync(
+                user!, GxWebApplicationFactory.KnownPassword, chosenPassword);
+            changed.Succeeded.Should().BeTrue();
+
+            user!.MustChangePassword = false;
+            await users.UpdateAsync(user);
+        }
+
+        // ...and then the navigation the page performs. Clearing the flag on the record is not
+        // enough on its own: a Blazor circuit cannot write a cookie, so the principal still carries
+        // the stale claim until a real HTTP request rebuilds the ticket.
+        var refresh = await client.SendAsync(Navigation("/pages/authentication/refresh-signin?returnUrl=%2F"));
+
+        refresh.StatusCode.Should().Be(HttpStatusCode.Found,
+            "the refresh endpoint redirects onward after reissuing the cookie");
+        refresh.Headers.Location!.ToString().Should().Be("/",
+            "it must honour the local return URL the page asked for");
+
+        try
+        {
+            // The assertion this whole pass exists for: the next request is IN the application.
+            var landed = await client.SendAsync(Navigation("/"));
+
+            landed.StatusCode.Should().Be(HttpStatusCode.OK,
+                "a user who has chosen a new password must reach the application, not be sent back to " +
+                "{0} - redirected to {1}",
+                ChangePasswordPath, landed.Headers.Location?.ToString() ?? "(nowhere)");
+        }
+        finally
+        {
+            // This test genuinely changes the administrator's password, and against a SERVER
+            // database every fixture in the run shares one. Leaving it changed makes every later
+            // sign-in with KnownPassword fail - which is exactly what it did on PostgreSQL before
+            // this restore existed, while passing on SQLite where each fixture gets its own file.
+            await factory.ResetAdministratorPasswordAsync(mustChangePassword: false);
+        }
+    }
+
+    [Test]
+    public async Task TheRefreshEndpoint_DropsTheClaimWithoutASecondSignIn()
+    {
+        // The same guarantee stated as the claim itself rather than as a redirect, so a future
+        // change that made "/" reachable for some other reason could not make the test above pass
+        // while the claim was still being carried.
+        using var factory = new GxWebApplicationFactory(Environments.Production);
+        await factory.ResetAdministratorPasswordAsync(mustChangePassword: true);
+
+        using var client = factory.CreateNonRedirectingClient();
+        await CookieLogin.SignInAndExpectSuccessAsync(
+            client, Users.Administrator, GxWebApplicationFactory.KnownPassword);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var users = scope.ServiceProvider
+                .GetRequiredService<UserManager<ApplicationUser>>();
+            var user = await users.FindByNameAsync(Users.Administrator);
+            user!.MustChangePassword = false;
+            await users.UpdateAsync(user);
+        }
+
+        // Before the refresh the record says one thing and the cookie still says another.
+        var beforeRefresh = await client.SendAsync(Navigation("/"));
+        beforeRefresh.StatusCode.Should().Be(HttpStatusCode.Found,
+            "the cookie still carries the claim until something reissues it - this is the staleness " +
+            "the refresh endpoint exists to close, and asserting it keeps the endpoint honest");
+
+        await client.SendAsync(Navigation("/pages/authentication/refresh-signin?returnUrl=%2F"));
+
+        var afterRefresh = await client.SendAsync(Navigation("/"));
+        afterRefresh.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Test]
+    public async Task TheRefreshEndpoint_IsNotAWayPastTheGate()
+    {
+        // It is on the middleware's AlwaysAllowed list, so it is worth pinning that it cannot be
+        // used to LEAVE the gate while the flag is still set. It rebuilds the principal from the
+        // user record, so a still-flagged user simply gets the claim back.
+        using var factory = new GxWebApplicationFactory(Environments.Production);
+        await factory.ResetAdministratorPasswordAsync(mustChangePassword: true);
+
+        using var client = factory.CreateNonRedirectingClient();
+        await CookieLogin.SignInAndExpectSuccessAsync(
+            client, Users.Administrator, GxWebApplicationFactory.KnownPassword);
+
+        await client.SendAsync(Navigation("/pages/authentication/refresh-signin?returnUrl=%2F"));
+
+        var stillHeld = await client.SendAsync(Navigation("/"));
+
+        stillHeld.StatusCode.Should().Be(HttpStatusCode.Found);
+        stillHeld.Headers.Location!.ToString().Should().Contain(ChangePasswordPath,
+            "refreshing a principal must not clear a flag the database still holds");
+    }
+
+    [Test]
+    public async Task AnUnflaggedUser_ReachesTheApplication()
+    {
+        // What the old OnceTheFlagIsCleared_TheApplicationIsReachable covered: the gate lets go for
+        // a user who never carried the flag. Kept, because it is the only test of that direction,
+        // but it is no longer the flow's regression test - it cannot fail the way the flow failed.
+        using var factory = new GxWebApplicationFactory(Environments.Production);
+        await factory.ResetAdministratorPasswordAsync(mustChangePassword: false);
+
+        using var client = factory.CreateNonRedirectingClient();
         await CookieLogin.SignInAndExpectSuccessAsync(
             client, Users.Administrator, GxWebApplicationFactory.KnownPassword);
 

@@ -14,9 +14,17 @@ namespace CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 /// nothing to read.
 /// </para>
 /// <para>
-/// The cost of that choice is staleness: the claim only changes when the cookie is reissued. That is
-/// why the change-password flow calls <c>SignInManager.RefreshSignInAsync</c> immediately after
-/// clearing the flag rather than waiting for the security-stamp validation interval to come round.
+/// The cost of that choice is staleness: the claim only changes when the cookie is reissued, and
+/// nothing a Blazor circuit does can reissue it - <c>SignInManager.RefreshSignInAsync</c> writes a
+/// Set-Cookie, and by the time a component's event handler runs the response has already started.
+/// So clearing the flag on the user record is not enough on its own; something has to make a real
+/// HTTP request that rebuilds the ticket.
+/// </para>
+/// <para>
+/// That is what <c>/pages/authentication/refresh-signin</c> is for, and why the change-password page
+/// leaves through it rather than reloading "/" directly. Until Pass 17 it reloaded "/", the stale
+/// claim survived, and a user who had just chosen a new password was sent back to the
+/// change-password page - or, once the security-stamp validation interval elapsed, signed out.
 /// </para>
 /// </summary>
 public class ApplicationUserClaimsPrincipalFactory
