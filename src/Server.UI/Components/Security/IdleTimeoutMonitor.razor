@@ -5,39 +5,50 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject IIdleTimeoutPolicyProvider PolicyProvider
+@inject ILogger<IdleTimeoutMonitor> Logger
 
-@if (_warningOpen)
-{
-    <MudDialog Visible="true" Options="_dialogOptions" aria-live="assertive" role="alertdialog">
-        <TitleContent>
-            <MudText Typo="Typo.h6">
-                <MudIcon Icon="@Icons.Material.Filled.Timer" Class="mb-n1 mr-2" />
-                @AppStrings.SessionExpiringTitle
-            </MudText>
-        </TitleContent>
-        <DialogContent>
-            <MudText Class="mb-4">@AppStrings.SessionExpiringMessage</MudText>
+@* The dialog stays in the render tree and is closed by BINDING Visible, never by being removed.
+   MudBlazor shows an inline dialog through MudDialogProvider, and dropping the <MudDialog> element
+   behind an @if does NOT tell the provider to close it - the provider goes on rendering a dialog the
+   component no longer knows about. With BackdropClick and CloseOnEscapeKey both false (deliberate,
+   below) the result is undismissable and its overlay swallows every click on the page.
 
-            <MudText Typo="Typo.h3" Align="Align.Center" aria-live="assertive">
-                @_secondsRemaining
-            </MudText>
-            <MudText Typo="Typo.caption" Align="Align.Center" Class="d-block mb-2">
-                @AppStrings.Seconds
-            </MudText>
+   That was Pass 18's defect: it left the page frozen on EVERY close path - the Stay Logged In
+   button, and the silent close when another tab reports activity - regardless of what the
+   keep-alive returned.
 
-            <MudProgressLinear Color="Color.Warning" Value="@_countdownPercent" Class="mt-2" />
-        </DialogContent>
-        <DialogActions>
-            <MudButton OnClick="SignOutNowAsync">@AppStrings.SignOutNow</MudButton>
-            <MudButton Color="Color.Primary"
-                       Variant="Variant.Filled"
-                       autofocus
-                       OnClick="StayLoggedInAsync">
-                @AppStrings.StayLoggedIn
-            </MudButton>
-        </DialogActions>
-    </MudDialog>
-}
+   @bind-Visible rather than a one-way Visible: it keeps the flag and the dialog's own state from
+   ever disagreeing. The dialog cannot close itself here, but if a future option let it, the
+   component would hear about it rather than holding a flag that had quietly become a lie. *@
+<MudDialog @bind-Visible="_warningOpen" Options="_dialogOptions" aria-live="assertive" role="alertdialog">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Timer" Class="mb-n1 mr-2" />
+            @AppStrings.SessionExpiringTitle
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Class="mb-4">@AppStrings.SessionExpiringMessage</MudText>
+
+        <MudText Typo="Typo.h3" Align="Align.Center" aria-live="assertive">
+            @_secondsRemaining
+        </MudText>
+        <MudText Typo="Typo.caption" Align="Align.Center" Class="d-block mb-2">
+            @AppStrings.Seconds
+        </MudText>
+
+        <MudProgressLinear Color="Color.Warning" Value="@_countdownPercent" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="SignOutNowAsync">@AppStrings.SignOutNow</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   autofocus
+                   OnClick="StayLoggedInAsync">
+            @AppStrings.StayLoggedIn
+        </MudButton>
+    </DialogActions>
+</MudDialog>
 
 @code {
     // The circuit half of the idle timeout: the dialog, the countdown it displays, and the two
@@ -128,29 +139,90 @@
 
     /// <summary>Another tab is demonstrably in use, so this one stands down without a word.</summary>
     [JSInvokable]
-    public Task OnActivityResumed()
+    public Task OnActivityResumed() => CloseWarningAsync();
+
+    /// <summary>
+    /// Closes the warning, and is the ONLY way this component closes it.
+    /// </summary>
+    /// <remarks>
+    /// Closing means setting the bound flag, never removing the dialog from the render tree - see the
+    /// markup above for why. Every close path goes through here so there is one thing to get right.
+    /// </remarks>
+    private Task CloseWarningAsync()
     {
         _warningOpen = false;
         return InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>
+    /// Stay Logged In: close first, then tell the module - never the other way round.
+    /// </summary>
+    /// <remarks>
+    /// <b>Close before calling out, and do not await the call.</b> The alternative - await the module
+    /// and close afterwards - makes the dialog's fate depend on a network round trip that can hang
+    /// indefinitely, and this dialog is configured to be undismissable by backdrop or Escape, so a
+    /// handler that fails to reach its closing line leaves the page unusable. Pass 18 measured the
+    /// dialog staying open on a hanging call, on a throwing call, and on a perfectly successful one.
+    /// A timeout would bound the hang but would still leave the dialog open for the length of it, for
+    /// no benefit: nothing in the response changes what this method does.
+    /// <para>
+    /// Nothing is lost by not awaiting. <c>extend()</c> owns the session decision entirely - it
+    /// re-pings, and on 401/403 it navigates to the login page itself. The .NET side has no decision
+    /// to make on the result, which is why fire-and-forget is the whole answer here rather than a
+    /// shortcut: a dead session still ends, because the module ends it.
+    /// </para>
+    /// <para>
+    /// The continuation swallows nothing silently but must not rethrow. An exception from a JS call
+    /// awaited in a click handler propagates into the circuit and tears it down - an independent way
+    /// to freeze the page, which Pass 18 also measured. A failed keep-alive is a session question,
+    /// not a reason to destroy the page the user is looking at.
+    /// </para>
+    /// </remarks>
     private async Task StayLoggedInAsync()
     {
-        _warningOpen = false;
+        await CloseWarningAsync();
 
-        // extend() re-pings the server. If the deadline has already passed there, it redirects
-        // instead of reopening the session - a session is never resurrected on the client's say-so.
-        if (_module is not null)
+        if (_module is null)
         {
-            await _module.InvokeVoidAsync("extend");
+            return;
         }
+
+        _ = InvokeModuleSafelyAsync("extend");
     }
 
     private async Task SignOutNowAsync()
     {
-        if (_module is not null)
+        // Same shape and the same reasoning: signOut() navigates away, so there is nothing to wait
+        // for, and a failure to reach the module must not leave the user staring at a live dialog.
+        await CloseWarningAsync();
+
+        if (_module is null)
         {
-            await _module.InvokeVoidAsync("signOut");
+            return;
+        }
+
+        _ = InvokeModuleSafelyAsync("signOut");
+    }
+
+    /// <summary>
+    /// Invokes a module function without letting its failure reach the circuit.
+    /// </summary>
+    private async Task InvokeModuleSafelyAsync(string function)
+    {
+        try
+        {
+            await _module!.InvokeVoidAsync(function);
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is already gone. Ordinary on sign-out; nothing to report.
+        }
+        catch (Exception ex)
+        {
+            // Logged rather than swallowed, and deliberately not rethrown: by the time this runs the
+            // dialog is already closed and the user has their page back, which is the outcome that
+            // matters. The session itself is still governed server-side by IdleSessionEnforcer.
+            Logger.LogWarning(ex, "The idle-timeout module's {Function} call failed.", function);
         }
     }
 
