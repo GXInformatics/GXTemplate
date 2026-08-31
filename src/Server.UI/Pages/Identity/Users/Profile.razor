@@ -2,7 +2,9 @@
 
 @using CleanArchitecture.Blazor.Server.UI.Pages.Identity.Users.Components
 @using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity
+@using CleanArchitecture.Blazor.Application.Common.Interfaces
 @inject IStringLocalizer<Profile> L
+@inject IIdleTimeoutSettings IdleTimeoutSettings
 
 
 <PageTitle>@ApplicationSettings.AppName - @L["Profile"]</PageTitle>
@@ -16,6 +18,17 @@
     <MudTabPanel Text="@L["Change Password"]">
         <ChangePasswordTab />
     </MudTabPanel>
+    @* Absent, not disabled, and absent for the same two reasons SecurityTab itself checks: with the
+       feature off there is nothing to configure, and with user overrides off this is not the user's
+       to set. An empty tab is worse than no tab - it invites a support call asking what belongs in
+       it. The route for the ADMIN screen is closed by SecuritySettingsPageMiddleware; this one is a
+       component, so it is omitted here. *@
+    @if (IdleTimeoutSettings.Enabled && IdleTimeoutSettings.AllowUserOverride)
+    {
+        <MudTabPanel Text="@L["Security"]">
+            <SecurityTab />
+        </MudTabPanel>
+    }
     <MudTabPanel Text="@L["Org Chart"]">
         <OrgChartTab />
     </MudTabPanel>

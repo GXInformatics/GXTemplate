@@ -21,6 +21,15 @@
 		<DataAnnotationsValidator />
 		<MudStack Spacing="2">
 			<MudText Typo="Typo.h4" GutterBottom="true">@L["Sign In"]</MudText>
+
+			@* Informational, not an error: the user did nothing wrong, and a red panel here is the
+			   single most common support call this feature generates. *@
+			@if (string.Equals(Reason, "idle", StringComparison.OrdinalIgnoreCase))
+			{
+				<MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+					@AppStrings.SignedOutForInactivity
+				</MudAlert>
+			}
 			<MudText>
 				@if (ApplicationSettings.AllowSelfRegistration)
 				{
@@ -68,6 +77,9 @@
 	public const string PageUrl = "/account/login";
 	private string? _errorMessage;
 	[SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+
+	/// <summary>Why the browser arrived here. "idle" is set by the idle-timeout sign-out.</summary>
+	[SupplyParameterFromQuery] public string? Reason { get; set; }
 	private string _pageTitle = "Sign In";
 
 	// Password visibility toggle

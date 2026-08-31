@@ -155,6 +155,10 @@ public static class DependencyInjection
         // Before the endpoints, so a disabled registration surface is unreachable by direct URL as
         // well as by the (hidden) link on the login page.
         app.UseMiddleware<SelfRegistrationMiddleware>();
+        // Same reasoning, same shape: with the idle timeout switched off its settings screen does not
+        // exist, so the route answers 404 rather than rendering a page explaining that the feature is
+        // off. The profile page's Security tab is omitted at the component level to match.
+        app.UseMiddleware<SecuritySettingsPageMiddleware>();
         app.UseAntiforgery();
         app.UseHttpsRedirection();
         // Framework and static assets must load for the anonymous login page - without this the

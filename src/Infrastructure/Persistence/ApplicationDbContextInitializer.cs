@@ -120,38 +120,92 @@ public class ApplicationDbContextInitializer
     /// </summary>
     private const string DefaultTenantName = "Default";
 
+    /// <summary>
+    /// Brings the roles and their permission grants up to date, one grant at a time.
+    /// </summary>
+    /// <remarks>
+    /// The obvious shape - <c>if (await _roleManager.RoleExistsAsync(Roles.Admin)) return;</c> - is
+    /// wrong, and wrong silently. It makes provisioning idempotent per RUN rather than per ITEM, so
+    /// a permission added to <see cref="AdministratorPermissionRegistry"/> in a later release never
+    /// reaches any database that was provisioned before it: the role already exists, so nothing
+    /// runs. Nothing fails either. <c>AssertNoDivergence</c> does not catch it, because it compares
+    /// the registry to the permission CONSTANTS, not to what a given database actually holds.
+    /// <para>
+    /// So each role is reconciled by name and each grant by its natural key (role + permission
+    /// value). Two consequences are deliberate:
+    /// </para>
+    /// <para>
+    /// <b>Grant-only, never revoke.</b> Claims this method does not know about are left alone, so a
+    /// permission an operator granted at runtime survives the next restart instead of being tidied
+    /// away by a deployment. The reconcile therefore restores what is missing; it does not enforce
+    /// an exact set.
+    /// </para>
+    /// <para>
+    /// <b>Logs on insert, not on run.</b> A start that changes nothing says nothing, so a line in
+    /// the log means a grant genuinely appeared - which is the only way to tell a no-op restart from
+    /// one that repaired a database.
+    /// </para>
+    /// </remarks>
     private async Task EnsureRolesAsync()
     {
-        if (await _roleManager.RoleExistsAsync(Roles.Admin)) return;
+        await EnsureRoleAsync(Roles.Admin,
+            "Full access to every feature and every setting.",
+            // The administrator grant is an explicit list checked against the Permissions constants
+            // at startup, not a reflection sweep - see AdministratorPermissionRegistry for why.
+            AdministratorPermissionRegistry.Granted);
 
-        _logger.LogInformation("Provisioning roles...");
+        await EnsureRoleAsync(Roles.Basic,
+            "Ordinary member: can see and download documents.",
+            BasicPermissions);
+    }
 
-        var administratorRole = new ApplicationRole(Roles.Admin)
+    /// <summary>
+    /// Creates <paramref name="roleName"/> if it is absent, then grants any of
+    /// <paramref name="permissions"/> it does not already hold.
+    /// </summary>
+    private async Task EnsureRoleAsync(string roleName, string description, IEnumerable<string> permissions)
+    {
+        var role = await _roleManager.FindByNameAsync(roleName);
+
+        if (role is null)
         {
-            Description = "Full access to every feature and every setting.",
-            CreatedAt = DateTime.UtcNow
-        };
-        var basicRole = new ApplicationRole(Roles.Basic)
-        {
-            Description = "Ordinary member: can see and download documents.",
-            CreatedAt = DateTime.UtcNow
-        };
+            role = new ApplicationRole(roleName)
+            {
+                Description = description,
+                CreatedAt = DateTime.UtcNow
+            };
 
-        await _roleManager.CreateAsync(administratorRole);
-        await _roleManager.CreateAsync(basicRole);
+            var created = await _roleManager.CreateAsync(role);
+            if (!created.Succeeded)
+            {
+                // Returning rather than throwing: a role that cannot be created is a broken
+                // installation, but failing the start here would take down an application whose
+                // other roles are fine. The log names the role and the reason.
+                _logger.LogError("Could not provision the {Role} role: {Errors}",
+                    roleName, string.Join("; ", created.Errors.Select(e => e.Description)));
+                return;
+            }
 
-        // The administrator grant is an explicit list checked against the Permissions constants at
-        // startup, not a reflection sweep - see AdministratorPermissionRegistry for why.
-        foreach (var permission in AdministratorPermissionRegistry.Granted)
-        {
-            await _roleManager.AddClaimAsync(
-                administratorRole, new Claim(ApplicationClaimTypes.Permission, permission));
+            _logger.LogInformation("Provisioned the {Role} role.", roleName);
         }
 
-        foreach (var permission in BasicPermissions)
+        var held = (await _roleManager.GetClaimsAsync(role))
+            .Where(c => c.Type == ApplicationClaimTypes.Permission)
+            .Select(c => c.Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var missing = permissions.Where(p => !held.Contains(p)).ToArray();
+
+        foreach (var permission in missing)
         {
             await _roleManager.AddClaimAsync(
-                basicRole, new Claim(ApplicationClaimTypes.Permission, permission));
+                role, new Claim(ApplicationClaimTypes.Permission, permission));
+        }
+
+        if (missing.Length > 0)
+        {
+            _logger.LogInformation("Granted {Count} permission(s) to the {Role} role: {Permissions}",
+                missing.Length, roleName, string.Join(", ", missing));
         }
     }
 

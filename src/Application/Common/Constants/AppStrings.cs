@@ -95,6 +95,29 @@ public static class AppStrings
     public static string UploadSuccess => Localize("Upload successfully");
     public static string ExportFail => Localize("Export failed");
     public static string ImportFail => Localize("Import failed");
+
+    // Idle timeout. Localize() falls back to the key, so these read correctly in English before any
+    // translator has seen them; add the entries to the .resx files to translate.
+    public static string SessionExpiringTitle => Localize("Session about to expire");
+    public static string SessionExpiringMessage =>
+        Localize("You have been inactive for a while. You will be signed out automatically unless you choose to stay.");
+    public static string Seconds => Localize("seconds");
+    public static string StayLoggedIn => Localize("Stay Logged In");
+    public static string SignOutNow => Localize("Sign Out Now");
+    public static string SignedOutForInactivity =>
+        Localize("You were signed out after a period of inactivity.");
+
+    public static string SecuritySettings => Localize("Security Settings");
+    public static string IdleTimeout => Localize("Idle timeout");
+    public static string IdleTimeoutMinutesLabel => Localize("Sign out after (minutes of inactivity)");
+    public static string CountdownSecondsLabel => Localize("Warning countdown (seconds)");
+    public static string IdleTimeoutEffectiveFormat =>
+        Localize("You will be signed out after {0} minutes of inactivity.");
+    public static string IdleTimeoutAffectsLiveSessions =>
+        Localize("This takes effect on sessions that are already open, not only on new sign-ins. A user whose window becomes shorter than their current idle time is signed out on their next request.");
+    public static string SignMeOutSooner => Localize("Sign me out sooner than the organisation default");
+    public static string UseOrganisationDefault => Localize("Use the organisation default");
+    public static string IdleTimeoutBoundsFormat => Localize("Between {0} and {1} minutes.");
     
     
 

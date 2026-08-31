@@ -10,6 +10,13 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
 {
     public void Configure(EntityTypeBuilder<Document> builder)
     {
+        // Named explicitly so the GX naming convention yields. Document derives from
+        // BaseAuditableEntity and is therefore an IBusinessEntity, but it is one of the TEMPLATE's
+        // tables, not this business's: it stays "Documents" in the default schema rather than
+        // becoming core."TBL_DOCUMENT", so that upgrading the template never hands an existing
+        // project a rename migration. GxTableNamingTests pins that.
+        builder.ToTable("Documents");
+
         builder.Property(t => t.DocumentType).HasConversion<string>();
         // The /files endpoint resolves a document by its storage key on every request for a document
         // object, so that lookup gets an index. Not unique: derive-and-retry keeps live keys distinct

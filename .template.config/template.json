@@ -13,7 +13,7 @@
   },
   "sourceName": "CleanArchitecture.Blazor",
   "preferNameDirectory": true,
-  "description": "A Blazor Server solution template for .NET 10 in Clean Architecture layers, with multi-tenant identity, deny-by-default authorization and transactional auditing.",
+  "description": "A Blazor Server solution template for .NET 10 in Clean Architecture layers, with multi-tenant identity, deny-by-default authorization and transactional auditing. Business models you add are mapped into the core schema as TBL_UPPER_SNAKE automatically, by deriving from BaseEntity.",
 
   "symbols": {
     "Database": {

@@ -234,6 +234,113 @@ public class ProvisioningTests
             "a second start must not duplicate claims");
     }
 
+    // ---- reconciliation ------------------------------------------------------------------------
+    //
+    // Provisioning has to be idempotent per ITEM, not per RUN. The shape these tests exist to
+    // prevent is `if (RoleExistsAsync) return;`, which passes every test above - the roles and
+    // claims are all correct on a fresh database - while silently never delivering a permission
+    // added in a later release to any database provisioned before it.
+
+    private async Task RevokeAsync(string roleName, string permission)
+    {
+        using var scope = _provider.CreateScope();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+        var role = await roleManager.FindByNameAsync(roleName);
+        await roleManager.RemoveClaimAsync(
+            role!, new System.Security.Claims.Claim(ApplicationClaimTypes.Permission, permission));
+    }
+
+    private async Task GrantAsync(string roleName, string permission)
+    {
+        using var scope = _provider.CreateScope();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+        var role = await roleManager.FindByNameAsync(roleName);
+        await roleManager.AddClaimAsync(
+            role!, new System.Security.Claims.Claim(ApplicationClaimTypes.Permission, permission));
+    }
+
+    [Test]
+    public async Task Provisioning_RestoresAGrantRemovedBehindItsBack()
+    {
+        // Stands in for the case that actually bites: a permission that did not exist when this
+        // database was provisioned, added to AdministratorPermissionRegistry in a later release.
+        // Removing an existing grant is the same situation from the database's point of view, and
+        // it is one a test can arrange.
+        await ProvisionAsync();
+
+        var revoked = AdministratorPermissionRegistry.Granted.First();
+        await RevokeAsync(Roles.Admin, revoked);
+        (await ClaimsOfAsync(Roles.Admin)).Should().NotContain(revoked, "the arrangement must take");
+
+        await ProvisionAsync();
+
+        (await ClaimsOfAsync(Roles.Admin)).Should().Contain(revoked,
+            "a later start must deliver a grant the database does not hold");
+    }
+
+    [Test]
+    public async Task Provisioning_RestoresAGrantOnTheBasicRoleToo()
+    {
+        // The old guard tested the ADMIN role and returned, so the Basic role's grants were never
+        // reconciled either - a second failure hiding behind the first.
+        await ProvisionAsync();
+
+        var revoked = Permissions.Documents.Download;
+        await RevokeAsync(Roles.Basic, revoked);
+
+        await ProvisionAsync();
+
+        (await ClaimsOfAsync(Roles.Basic)).Should().Contain(revoked);
+    }
+
+    [Test]
+    public async Task Provisioning_RecreatesARoleThatWasDeleted()
+    {
+        await ProvisionAsync();
+
+        using (var scope = _provider.CreateScope())
+        {
+            var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+            await roleManager.DeleteAsync((await roleManager.FindByNameAsync(Roles.Basic))!);
+        }
+
+        await ProvisionAsync();
+
+        (await RoleNamesAsync()).Should().Contain(Roles.Basic);
+        (await ClaimsOfAsync(Roles.Basic)).Should().BeEquivalentTo(
+            new[] { Permissions.Documents.View, Permissions.Documents.Download });
+    }
+
+    [Test]
+    public async Task Provisioning_DoesNotRevokeAGrantAnOperatorAdded()
+    {
+        // Grant-only. Reconciling to an exact set would make every deployment quietly undo the
+        // permission someone granted at runtime to unblock a user, which is a worse failure than
+        // the one being fixed - and a silent one.
+        await ProvisionAsync();
+
+        var extra = Permissions.Documents.Create;
+        await GrantAsync(Roles.Basic, extra);
+
+        await ProvisionAsync();
+
+        (await ClaimsOfAsync(Roles.Basic)).Should().Contain(extra,
+            "provisioning restores what is missing; it does not enforce an exact set");
+    }
+
+    [Test]
+    public async Task ProvisioningTwice_AddsNoDuplicateGrants()
+    {
+        // The reconcile compares against what the role already holds, so the second run inserts
+        // nothing. Without that comparison this is where AddClaimAsync would duplicate every row.
+        await ProvisionAsync();
+        var afterFirst = await ClaimsOfAsync(Roles.Admin);
+
+        await ProvisionAsync();
+
+        (await ClaimsOfAsync(Roles.Admin)).Should().BeEquivalentTo(afterFirst);
+    }
+
     [Test]
     public async Task AnAdministratorUnderAnyName_SuppressesProvisioning()
     {

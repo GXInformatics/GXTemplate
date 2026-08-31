@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Domain.Identity;
+using CleanArchitecture.Blazor.Infrastructure.Services.Security;
 using CleanArchitecture.Blazor.Server.UI.Pages.Identity.Login;
 using DocumentFormat.OpenXml.InkML;
 using Microsoft.AspNetCore.Antiforgery;
@@ -533,6 +534,70 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
             // unauthenticated-by-then endpoint into an open redirect.
             return TypedResults.LocalRedirect(ResolveLocalReturnUrl(returnUrl, RedirectUrls.Login));
         }).RequireAuthorization().DisableAntiforgery();
+
+        // Answers with STATUS CODES, not redirects, and is the one endpoint here that does.
+        //
+        // Everything else on this surface is browser-facing, so a challenge that redirects to the
+        // login page is right for it. This one is machine-facing - no human ever navigates to it -
+        // and the redirect was actively harmful: the browser's fetch() follows redirects by default,
+        // so an expired session answered 302 -> /account/login -> 200, and every place the client
+        // checks for a dead session saw success. The focus re-verification, the ping's own check and
+        // the "do not resurrect a dead session" guard behind Stay Logged In were all inert (Pass
+        // 16A, Finding 1).
+        //
+        // Hence AllowAnonymous plus an explicit check, rather than RequireAuthorization: the
+        // fallback policy's challenge is what produces the redirect, and it fires before any handler
+        // runs, so this cannot be fixed from inside the handler while the policy still applies. The
+        // authorization is not lost, it is stated here - and this endpoint has nothing to protect in
+        // any case, since it returns a bare status and the last-activity stamp is written by
+        // IdleSessionEnforcer during AUTHENTICATION, for an authenticated principal only, whatever
+        // this handler decides. An anonymous caller learns only that they are not signed in.
+        //
+        // Deliberately NOT done by touching the cookie handler's OnRedirectToLogin: that event is
+        // shared by every page and endpoint in the application, and Pass 4B-H is the standing
+        // lesson in what a blanket change to authentication responses costs.
+        //
+        // The JSON bodies are not decoration either. UseStatusCodePagesWithReExecute("/not-found")
+        // rewrites any 400-599 response that has no body and no content type, so a bare
+        // Results.Unauthorized() would come back as the not-found page. Giving the response a
+        // content type keeps it the terse machine answer the client is reading.
+        //
+        // The rest is unchanged: it exists to make an AUTHENTICATED HTTP REQUEST and nothing else. A
+        // Blazor Server user working inside one long-lived SignalR circuit makes almost none, so the
+        // sliding authentication cookie never renews and expires underneath somebody who has been
+        // working for hours; the first real request afterwards - a download, a refresh, an export -
+        // bounces them to the login page mid-task. This ping is what keeps the sliding window
+        // moving, which is also why "Stay Logged In" calls it rather than only resetting a timer in
+        // the browser.
+        //
+        // It is load-bearing in a second way: IdleSessionEnforcer treats a request to THIS path, and
+        // only this path, as the user being present, and stamps the ticket's last-activity from it.
+        // Every other authenticated request deliberately does not count - otherwise an unattended
+        // workstation would keep renewing its own session.
+        //
+        // Mapped outside accountGroup because the enforcer matches an absolute path that
+        // Infrastructure names (IdleTimeoutRoutes.KeepAlive), and a route group prefix would put the
+        // two out of step.
+        //
+        // Origin-checked rather than antiforgery-tokenised, matching the login endpoint. It is not
+        // exempt from CSRF thinking just because it returns nothing: this application sets
+        // SameSite=None on the authentication cookie, so a cross-site POST would carry it, and an
+        // unchecked keep-alive would let any page the user happens to have open hold their session
+        // open indefinitely - defeating precisely the control this endpoint serves.
+        endpoints.MapPost(IdleTimeoutRoutes.KeepAlive, (HttpContext context) =>
+            {
+                if (context.User.Identity?.IsAuthenticated != true)
+                {
+                    return Results.Json(new { signedOut = true }, statusCode: StatusCodes.Status401Unauthorized);
+                }
+
+                return ValidateRequestOrigin(context, logger)
+                    ? Results.NoContent()
+                    : Results.Json(new { forbidden = true }, statusCode: StatusCodes.Status403Forbidden);
+            })
+            .AllowAnonymous() // see above: the check is stated in the handler so the answer can be a status code
+            .DisableAntiforgery();
+
 
 
         accountGroup.MapPost("/PasskeyCreationOptions", async (

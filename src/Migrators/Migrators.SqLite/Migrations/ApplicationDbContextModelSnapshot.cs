@@ -112,7 +112,7 @@ namespace CleanArchitecture.Blazor.Migrators.SqLite.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Documents");
+                    b.ToTable("Documents", (string)null);
                 });
 
             modelBuilder.Entity("CleanArchitecture.Blazor.Domain.Entities.PicklistSet", b =>
@@ -157,7 +157,38 @@ namespace CleanArchitecture.Blazor.Migrators.SqLite.Migrations
                     b.HasIndex("Name", "Value")
                         .IsUnique();
 
-                    b.ToTable("PicklistSets");
+                    b.ToTable("PicklistSets", (string)null);
+                });
+
+            modelBuilder.Entity("CleanArchitecture.Blazor.Domain.Entities.SecurityPolicy", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CountdownSeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("IdleTimeoutMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastModifiedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastModifiedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SecurityPolicies", (string)null);
                 });
 
             modelBuilder.Entity("CleanArchitecture.Blazor.Domain.Entities.Tenant", b =>
@@ -303,6 +334,9 @@ namespace CleanArchitecture.Blazor.Migrators.SqLite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("EmailConfirmed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("IdleTimeoutMinutes")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsActive")

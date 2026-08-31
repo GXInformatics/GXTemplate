@@ -93,6 +93,9 @@ public static class AdministratorPermissionRegistry
         Permissions.Roles.ManageClaimsInRole,
         Permissions.Roles.ViewClaimsInRole,
 
+        Permissions.SecuritySettings.View,
+        Permissions.SecuritySettings.Edit,
+
         Permissions.Tenants.View,
         Permissions.Tenants.Create,
         Permissions.Tenants.Edit,

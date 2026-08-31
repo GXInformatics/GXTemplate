@@ -10,6 +10,10 @@ public class PicklistSetConfiguration : IEntityTypeConfiguration<PicklistSet>
 {
     public void Configure(EntityTypeBuilder<PicklistSet> builder)
     {
+        // Named explicitly so the GX naming convention yields - see DocumentConfiguration for why
+        // the template's own tables stay out of the core schema.
+        builder.ToTable("PicklistSets");
+
         builder.Property(t => t.Name).HasConversion<string>().HasMaxLength(30);
         builder.Property(t => t.Value).HasMaxLength(50);
         builder.Property(t => t.Text).HasMaxLength(100);

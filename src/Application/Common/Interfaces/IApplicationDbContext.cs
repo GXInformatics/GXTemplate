@@ -12,6 +12,9 @@ public interface IApplicationDbContext: IAsyncDisposable
     DbSet<AuditTrail> AuditTrails { get; set; }
     DbSet<Document> Documents { get; set; }
     DbSet<PicklistSet> PicklistSets { get; set; }
+
+    /// <summary>The administered security policy - one row. See <c>SecurityPolicy</c>.</summary>
+    DbSet<SecurityPolicy> SecurityPolicies { get; set; }
     DbSet<Tenant> Tenants { get; set; }
     DbSet<TenantUser> TenantUsers { get; set; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);

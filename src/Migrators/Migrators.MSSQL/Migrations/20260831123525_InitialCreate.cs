@@ -63,6 +63,24 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "SecurityPolicies",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    IdleTimeoutMinutes = table.Column<int>(type: "int", nullable: false),
+                    CountdownSeconds = table.Column<int>(type: "int", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    CreatedById = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
+                    LastModifiedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    LastModifiedById = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_SecurityPolicies", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Tenants",
                 columns: table => new
                 {
@@ -115,6 +133,7 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
                     TimeZoneId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
                     LanguageCode = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
                     MustChangePassword = table.Column<bool>(type: "bit", nullable: false),
+                    IdleTimeoutMinutes = table.Column<int>(type: "int", nullable: true),
                     UserName = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: true),
                     NormalizedUserName = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: true),
                     Email = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: true),
@@ -476,6 +495,9 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
 
             migrationBuilder.DropTable(
                 name: "PicklistSets");
+
+            migrationBuilder.DropTable(
+                name: "SecurityPolicies");
 
             migrationBuilder.DropTable(
                 name: "TenantUsers");

@@ -121,7 +121,7 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("Documents");
+                    b.ToTable("Documents", (string)null);
                 });
 
             modelBuilder.Entity("CleanArchitecture.Blazor.Domain.Entities.PicklistSet", b =>
@@ -169,7 +169,40 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
                         .IsUnique()
                         .HasFilter("[Value] IS NOT NULL");
 
-                    b.ToTable("PicklistSets");
+                    b.ToTable("PicklistSets", (string)null);
+                });
+
+            modelBuilder.Entity("CleanArchitecture.Blazor.Domain.Entities.SecurityPolicy", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CountdownSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<int>("IdleTimeoutMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("LastModifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastModifiedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SecurityPolicies", (string)null);
                 });
 
             modelBuilder.Entity("CleanArchitecture.Blazor.Domain.Entities.Tenant", b =>
@@ -320,6 +353,9 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
 
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("bit");
+
+                    b.Property<int?>("IdleTimeoutMinutes")
+                        .HasColumnType("int");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");

@@ -26,7 +26,11 @@ public class RequestAuthorizationRegistryTests
     // is a request rather than a notification precisely so its Result can be reported: the two
     // administrator-facing mail buttons used to claim success unconditionally, because the
     // notification publisher swallows handler failures.
-    private const int ExpectedRequestTypeCount = 22;
+    // 24 since the idle-timeout pass: GetSecurityPolicyQuery (SecuritySettings.View) and
+    // UpdateSecurityPolicyCommand (SecuritySettings.Edit). Both carry their own permission rather
+    // than a general administration right - changing how long a session may sit unattended is a
+    // security control, and the people who should hold it are not the people who edit picklists.
+    private const int ExpectedRequestTypeCount = 24;
 
     private static Assembly ApplicationAssembly =>
         typeof(CleanArchitecture.Blazor.Application.DependencyInjection).Assembly;

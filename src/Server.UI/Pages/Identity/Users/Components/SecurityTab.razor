@@ -1,0 +1,166 @@
+@using CleanArchitecture.Blazor.Application.Common.Interfaces
+@using CleanArchitecture.Blazor.Domain.Identity
+@inherits OwningComponentBase
+@inject IStringLocalizer<CleanArchitecture.Blazor.Server.UI.Pages.Identity.Users.Profile> L
+@inject IIdleTimeoutSettings IdleTimeoutSettings
+@inject IIdleTimeoutPolicyProvider PolicyProvider
+
+@if (!IdleTimeoutSettings.Enabled || !IdleTimeoutSettings.AllowUserOverride)
+{
+    @* Absent, not disabled. A greyed-out control invites a support call asking how to enable it;
+       a deployment that has switched user overrides off has decided this is not the user's to set. *@
+}
+else if (_loaded)
+{
+    <MudGrid Class="pa-4" Justify="Justify.Center">
+        <MudItem xs="12" sm="8" md="6">
+            <MudText Typo="Typo.h6" GutterBottom="true">@AppStrings.IdleTimeout</MudText>
+
+            @* Stated plainly, because a countdown that appears unexpectedly is the most common
+               support call this feature generates. *@
+            <MudAlert Severity="Severity.Normal" Dense="true" Class="mb-4">
+                @string.Format(AppStrings.IdleTimeoutEffectiveFormat, _effectiveMinutes)
+            </MudAlert>
+
+            <MudSwitch T="bool"
+                       Value="_useOwn"
+                       ValueChanged="OnUseOwnChanged"
+                       Color="Color.Primary"
+                       Label="@AppStrings.SignMeOutSooner" />
+
+            @if (_useOwn)
+            {
+                <MudNumericField T="int"
+                                 @bind-Value="_chosenMinutes"
+                                 Label="@AppStrings.IdleTimeoutMinutesLabel"
+                                 HelperText="@string.Format(AppStrings.IdleTimeoutBoundsFormat, IdleTimeoutSettings.MinIdleTimeoutMinutes, _administeredMinutes)"
+                                 Min="IdleTimeoutSettings.MinIdleTimeoutMinutes"
+                                 Max="_administeredMinutes"
+                                 Immediate="true"
+                                 Class="mt-4" />
+            }
+
+            <MudStack Row Class="mt-6" Spacing="2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="_saving" OnClick="SaveAsync">
+                    @AppStrings.Save
+                </MudButton>
+                @if (_useOwn)
+                {
+                    <MudButton Variant="Variant.Text" Disabled="_saving" OnClick="ResetAsync">
+                        @AppStrings.UseOrganisationDefault
+                    </MudButton>
+                }
+            </MudStack>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    // "Sign me out sooner than the organisation default" - and only sooner.
+    //
+    // The upper bound on this field is the ADMINISTERED window, not the deployment maximum, so the
+    // control cannot express a longer session at all. That is the point: an idle timeout guards an
+    // unattended workstation, and a user who could raise their own would simply raise it. Shortening
+    // is both safe and useful - someone on a shared shop-floor terminal can choose five minutes.
+    //
+    // The bound here is a courtesy, not the enforcement: IdleTimeoutPolicyProvider takes the minimum
+    // of the two at read time, so a value put into the database by other means is still narrowed.
+
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationStateTask { get; set; } = null!;
+
+    private UserManager<ApplicationUser> _userManager = null!;
+    private string? _userId;
+    private bool _loaded;
+    private bool _saving;
+    private bool _useOwn;
+    private int _chosenMinutes;
+    private int _administeredMinutes;
+    private int _effectiveMinutes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!IdleTimeoutSettings.Enabled || !IdleTimeoutSettings.AllowUserOverride)
+        {
+            return;
+        }
+
+        _userManager = ScopedServices.GetRequiredService<UserManager<ApplicationUser>>();
+
+        var state = await AuthenticationStateTask;
+        _userId = _userManager.GetUserId(state.User);
+
+        var administered = await PolicyProvider.GetAdministeredAsync();
+        _administeredMinutes = administered.IdleMinutes;
+
+        var user = _userId is null ? null : await _userManager.FindByIdAsync(_userId);
+        _useOwn = user?.IdleTimeoutMinutes is not null;
+        _chosenMinutes = user?.IdleTimeoutMinutes ?? _administeredMinutes;
+
+        _effectiveMinutes = (await PolicyProvider.GetEffectiveAsync(state.User)).IdleMinutes;
+        _loaded = true;
+    }
+
+    private void OnUseOwnChanged(bool value)
+    {
+        _useOwn = value;
+        if (!value)
+        {
+            _chosenMinutes = _administeredMinutes;
+        }
+    }
+
+    private Task SaveAsync() => PersistAsync(_useOwn ? _chosenMinutes : null);
+
+    private Task ResetAsync()
+    {
+        _useOwn = false;
+        _chosenMinutes = _administeredMinutes;
+        return PersistAsync(null);
+    }
+
+    private async Task PersistAsync(int? minutes)
+    {
+        if (_userId is null) return;
+
+        if (minutes is { } chosen &&
+            (chosen < IdleTimeoutSettings.MinIdleTimeoutMinutes || chosen > _administeredMinutes))
+        {
+            Snackbar.Add(
+                string.Format(AppStrings.IdleTimeoutBoundsFormat,
+                    IdleTimeoutSettings.MinIdleTimeoutMinutes, _administeredMinutes),
+                Severity.Error);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var user = await _userManager.FindByIdAsync(_userId);
+            if (user is null) return;
+
+            user.IdleTimeoutMinutes = minutes;
+            var result = await _userManager.UpdateAsync(user);
+
+            if (!result.Succeeded)
+            {
+                Snackbar.Add(string.Join("; ", result.Errors.Select(e => e.Description)), Severity.Error);
+                return;
+            }
+
+            // Immediately, so the change is live on this user's very next request rather than at
+            // their next sign-in. This is the reason the preference is read from the database and
+            // not carried as a claim - see IdleTimeoutPolicyProvider's remarks.
+            PolicyProvider.InvalidateUser(_userId);
+
+            var state = await AuthenticationStateTask;
+            _effectiveMinutes = (await PolicyProvider.GetEffectiveAsync(state.User)).IdleMinutes;
+
+            Snackbar.Add(AppStrings.SaveSuccess, Severity.Info);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

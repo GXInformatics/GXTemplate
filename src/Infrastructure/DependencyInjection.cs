@@ -1,6 +1,7 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using Microsoft.AspNetCore.Authentication;
 using System.Reflection;
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.PublishStrategies;
@@ -92,6 +93,18 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddSingleton(s => s.GetRequiredService<IOptions<StorageSettings>>().Value);
 
+        // IdleTimeoutSettings follows the same idiom, and the startup failure earns its keep here:
+        // these values size the authentication cookie, so a deployment that configures a countdown
+        // longer than the shortest window it permits would produce sessions ending at a time nobody
+        // chose. Note this section is nested - "SecuritySettings:IdleTimeout" - so GetSection takes
+        // the path, not a top-level name.
+        services.AddOptions<IdleTimeoutSettings>()
+            .Bind(configuration.GetSection(IdleTimeoutSettings.Key))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton(s => s.GetRequiredService<IOptions<IdleTimeoutSettings>>().Value)
+            .AddSingleton<IIdleTimeoutSettings>(s => s.GetRequiredService<IOptions<IdleTimeoutSettings>>().Value);
+
         return services;
     }
     #endregion
@@ -122,6 +135,12 @@ public static class DependencyInjection
         },  ServiceLifetime.Scoped);
 
         services.AddScoped<IApplicationDbContextFactory, ApplicationDbContextFactory>();
+
+        // The idle-timeout pair. Scoped because the provider resolves a scoped context factory; the
+        // enforcer is resolved from HttpContext.RequestServices inside the cookie event, which is
+        // the request scope.
+        services.AddScoped<IIdleTimeoutPolicyProvider, IdleTimeoutPolicyProvider>();
+        services.AddScoped<IdleSessionEnforcer>();
         services.AddScoped<ApplicationDbContextInitializer>();
 
         AddLogDatabaseServices(services);
@@ -160,14 +179,39 @@ public static class DependencyInjection
             // registers its own ISaveChangesInterceptor to translate save failures into typed
             // exceptions, and this context has no saves to fail. The purge goes through
             // ExecuteDeleteAsync, which does not run save-changes interceptors at all.
-            m.UseDatabase(databaseSettings.DBProvider, databaseSettings.LogConnectionString);
+
+            // snakeCaseNaming: the ONLY context that asks for it. Serilog's PostgreSQL sink owns this
+            // table and writes snake_case columns, so the model has to match what the sink created.
+            // ApplicationDbContext above deliberately does not - see UseDatabase's remarks.
+            m.UseDatabase(databaseSettings.DBProvider, databaseSettings.LogConnectionString,
+                snakeCaseNaming: true);
         }, ServiceLifetime.Scoped);
 
         services.AddScoped<ILogDbContextFactory, LogDbContextFactory>();
     }
 
+    /// <summary>
+    /// Configures the provider for one context.
+    /// </summary>
+    /// <param name="snakeCaseNaming">
+    /// Applies EFCore.NamingConventions on PostgreSQL. <b>True only for the log context.</b> It must
+    /// never be true for <see cref="ApplicationDbContext"/>, and the reason is not stylistic. The
+    /// plugin rewrites the MIGRATION HISTORY repository's model too, so __EFMigrationsHistory is
+    /// created with migration_id / product_version columns; the day the plugin is removed - or a
+    /// project reaches for it and then thinks better of it - EF queries "MigrationId" and fails with
+    /// <c>42703: column "MigrationId" does not exist</c>. The database can then be neither migrated
+    /// forward nor inspected, and the only fix is hand-altering EF's own bookkeeping table. The
+    /// business context also carries the GX naming standard (see <see cref="GxNamingConventions"/>),
+    /// whose quoted UPPER_SNAKE table names and PascalCase columns this plugin would rewrite
+    /// wholesale. <c>GxTableNamingTests</c> asserts the business model stays PascalCase.
+    /// <para>
+    /// The log context genuinely wants it: Serilog's PostgreSQL sink owns that table and writes
+    /// snake_case columns, and the model has to match what the sink created - see
+    /// <c>LogTableDdl</c> and <c>SinkColumnDriftTests</c>.
+    /// </para>
+    /// </param>
     private static DbContextOptionsBuilder UseDatabase(this DbContextOptionsBuilder builder, string dbProvider,
-        string connectionString)
+        string connectionString, bool snakeCaseNaming = false)
     {
         switch (dbProvider.ToLowerInvariant())
         {
@@ -189,9 +233,13 @@ public static class DependencyInjection
                 //
                 // TimestamptzModelInvariantTests fails if the switch returns by any route, and
                 // ProcessWideStateTests asserts it is unset after a real boot.
-                return builder.UseNpgsql(connectionString,
-                        e => e.MigrationsAssembly(POSTGRESQL_MIGRATIONS_ASSEMBLY))
-                    .UseSnakeCaseNamingConvention();
+                var npgsql = builder.UseNpgsql(connectionString,
+                    e => e.MigrationsAssembly(POSTGRESQL_MIGRATIONS_ASSEMBLY));
+
+                // Opt-in, and only the log context opts in - see the parameter's remarks. Applying
+                // it here unconditionally, as this template did before the GX naming standard
+                // landed, snake_cases the business schema AND EF's own __EFMigrationsHistory.
+                return snakeCaseNaming ? npgsql.UseSnakeCaseNamingConvention() : npgsql;
 
             case DbProviderKeys.SqlServer:
                 return builder.UseSqlServer(connectionString,
@@ -463,13 +511,60 @@ public static class DependencyInjection
 
         services.ConfigureApplicationCookie(options =>
         {
-            options.ExpireTimeSpan = TimeSpan.FromDays(15);
+            var idle = configuration.GetSection(IdleTimeoutSettings.Key).Get<IdleTimeoutSettings>()
+                       ?? new IdleTimeoutSettings();
+
+            // Sized from the WIDEST window any policy may reach, not from the policy in force. A
+            // cookie is issued once and cannot be shortened afterwards, so deriving its lifetime
+            // from a runtime-administered value would mean an administrator's change never reaching
+            // sessions already open. Tightening is enforced per request by IdleSessionEnforcer
+            // instead; this is only the outer bound.
+            options.ExpireTimeSpan = idle.Enabled
+                ? idle.CookieLifetime
+                : IdleTimeoutSettings.DisabledCookieLifetime;
+
             options.SlidingExpiration = true;
             options.SessionStore = new MemoryCacheTicketStore();
             options.LoginPath = LOGIN_PATH;
             options.Cookie.SameSite = SameSiteMode.None;
             options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-            
+
+            if (!idle.Enabled)
+            {
+                return;
+            }
+
+            // CHAINED, never replaced. At this point OnValidatePrincipal is Identity's security-stamp
+            // validator, installed by AddIdentityCookies above - the thing that makes "changing a
+            // user's roles or password signs their existing sessions out" true. Assigning over it
+            // would delete that guarantee silently: every escalation guard in the application would
+            // still compile, still pass its own tests, and no longer end a session whose permissions
+            // had been revoked. IdleTimeoutWiringTests asserts the chain survives.
+            var securityStampValidation = options.Events.OnValidatePrincipal;
+
+            options.Events.OnValidatePrincipal = async context =>
+            {
+                await securityStampValidation(context).ConfigureAwait(false);
+
+                // The stamp validator rejects by nulling the principal. Nothing left to enforce.
+                if (context.Principal is null)
+                {
+                    return;
+                }
+
+                var enforcer = context.HttpContext.RequestServices
+                    .GetRequiredService<IdleSessionEnforcer>();
+
+                if (await enforcer.IsStillValidAsync(context).ConfigureAwait(false))
+                {
+                    return;
+                }
+
+                context.RejectPrincipal();
+                await context.HttpContext
+                    .SignOutAsync(IdentityConstants.ApplicationScheme)
+                    .ConfigureAwait(false);
+            };
         });
         services.AddDataProtection().PersistKeysToDbContext<ApplicationDbContext>();
 

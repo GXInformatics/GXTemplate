@@ -2,7 +2,10 @@
 @inherits LayoutComponentBase
 @using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity
 
+@using CleanArchitecture.Blazor.Application.Common.Interfaces
+@using CleanArchitecture.Blazor.Server.UI.Components.Security
 @inject LayoutService LayoutService
+@inject IIdleTimeoutSettings IdleTimeoutSettings
 @implements IDisposable
 <MudLayout>
     <AuthorizeView>
@@ -38,6 +41,10 @@
           
             <UserLoginState />
             <ForcePasswordChangeGuard />
+
+            @* Once, here - not per page. A second instance would mean two sets of activity
+               listeners writing the same localStorage keys and two dialogs racing to sign out. *@
+            <IdleTimeoutMonitor KeepAliveEnabled="@IdleTimeoutSettings.KeepAlivePingEnabled" />
         </Authorized>
     </AuthorizeView>
 </MudLayout>

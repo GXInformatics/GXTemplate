@@ -241,6 +241,22 @@ Stored files are addressed by a provider-opaque **storage key** of the shape
 **both** providers. There is no anonymous static-file route for uploaded content, and the Azure
 container is private.
 
+### `SecuritySettings:IdleTimeout` — validated at startup
+
+Bounds and bootstrap defaults only; the policy in force is administered at runtime. See
+[Idle timeout and auto-logout](#idle-timeout-and-auto-logout).
+
+| Key | Notes |
+|---|---|
+| `Enabled` | `false` makes the feature inert end to end — no JS module fetched, no principal check, the security-settings route answers 404 and its menu entry and the profile Security tab are both absent, and the cookie falls back to a fixed 8 hours. |
+| `DefaultIdleTimeoutMinutes` | Seeded into a fresh database on first read. Must lie within `[Min, Max]`. |
+| `DefaultCountdownSeconds` | Seeded likewise. Between 10 and 600, and **must not exceed** `MinIdleTimeoutMinutes` in seconds — equal is allowed, which is what the shipped 1-minute minimum and 60-second countdown rely on. |
+| `MinIdleTimeoutMinutes` | Floor for every policy, administered or per-user. At least 1. |
+| `MaxIdleTimeoutMinutes` | Ceiling, **and the only value that sizes the authentication cookie** (max + countdown + grace). A deployment decision rather than an administrator's, because a cookie is issued once and cannot be shortened afterwards. At most 480. |
+| `AllowUserOverride` | When false the Profile → Security field is absent, not disabled, and an existing preference is ignored rather than honoured. |
+| `KeepAlivePingEnabled` | The browser ping that renews the sliding cookie inside a long-lived circuit. Turning it off reintroduces the trap described in the standards section. |
+| `CookieGraceMinutes` | Slack on the cookie's lifetime so it never lapses marginally before the enforcement meant to end the session. At least 1. |
+
 ### `AppConfigurationSettings` — validated at startup
 
 | Key | Notes |
@@ -392,6 +408,241 @@ they hold, are guarded:
 - Changing a user's roles or password refreshes their security stamp, so existing sessions do not
   keep the old permissions.
 
+### Idle timeout and auto-logout
+
+**Contract: the browser shows a warning and counts down; the server ends the session, and would do
+so if the browser never ran at all.**
+
+A JavaScript timer is not security. It can be disabled, paused on a breakpoint, or stopped when the
+Blazor circuit drops, and while the authentication cookie is valid the user is still authenticated —
+a modal covering the UI has signed nobody out. So the feature has two halves that read one policy:
+
+| Concern | Mechanism |
+|---|---|
+| Detect inactivity, warn, count down | `wwwroot/js/gxIdleTimeout.js` + `IdleTimeoutMonitor.razor` |
+| End the session gracefully | the template's existing sign-out endpoint |
+| End it even if the circuit is dead | the JS deadline is absolute, and fires without .NET |
+| Guarantee it ends regardless of the browser | `IdleSessionEnforcer`, in `OnValidatePrincipal` |
+| Absolute upper bound on any session | `ExpireTimeSpan` = max window + countdown + grace |
+
+`IdleSessionEnforcer` runs on **every authenticated HTTP request** and reads the policy in force at
+that moment — so an administrator shortening the window takes effect on sessions already open, which
+is the whole point of making it administrable. The cookie's own expiry is only the outer bound: a
+cookie is issued once and cannot be shortened afterwards, which is why it is sized from
+`MaxIdleTimeoutMinutes` rather than from the current policy.
+
+**Three levels, and only one of them is the user's.**
+
+| Level | Who | Where |
+|---|---|---|
+| Bounds and seed defaults | deployment | `SecuritySettings:IdleTimeout` in `appsettings.json` |
+| Policy in force | administrator | System → Security Settings (`Permissions.SecuritySettings.Edit`) |
+| Preference | user | Profile → Security — may only **shorten** |
+
+The user level is tighten-only because an idle timeout is a control against unattended workstations.
+If a user could raise their own, the first person to find it inconvenient sets it to eight hours and
+the control is gone — the same argument that keeps password policy out of a user profile. Shortening
+is safe and genuinely useful: someone on a shared shop-floor terminal can pick five minutes. The
+narrowing is applied at **read time** in `IdleTimeoutPolicyProvider`, not only in the screen's
+validator, so a value forced into the database directly is still clamped.
+
+`Enabled: false` makes the feature inert end to end: no module is fetched, no principal check runs,
+the cookie falls back to a fixed eight hours, and **both screens go away rather than emptying out** —
+`/system/security-settings` answers 404 through `SecuritySettingsPageMiddleware` (the same shape and
+the same 404-not-403 reasoning the self-registration surface uses), its navigation entry is dropped,
+and `Profile.razor` omits the Security tab panel entirely. `AllowUserOverride: false` removes that
+tab too. Absent, never disabled: an empty tab invites a support call asking what belongs in it.
+
+**The policy is installation-wide, not per-tenant.** `SecurityPolicies` holds a single row and the
+cache key is a constant, so every tenant in a multi-tenant deployment shares one idle window. This is
+a deliberate starting point rather than an oversight — every reader goes through
+`IIdleTimeoutPolicyProvider` precisely so that adding a tenant column and keying the cache by tenant
+is a migration plus one cache key, not a redesign — but today one tenant's administrator sets the
+policy for all of them.
+
+**The row is seeded lazily, on first read.** A freshly provisioned database has an **empty**
+`SecurityPolicies` table until something asks for the policy; until then the configured
+`DefaultIdleTimeoutMinutes` / `DefaultCountdownSeconds` are what is in force. That is what lets the
+feature work on a database provisioned before it existed, with no data migration — but do not read an
+empty table as "the feature is not configured".
+
+**The per-user preference is deliberately not audited.** Changing the administered policy writes an
+audit row, because `SecurityPolicy` implements `IAuditable`. A user shortening their own window does
+not, because it lives on `ApplicationUser` and Identity entities are deliberately outside the audit
+trail (see [Transactional audit](#transactional-audit)). Auditing it would mean auditing Identity,
+which is a larger decision than this feature should make on its own.
+
+**Two failure modes this is built around, both invisible until they bite:**
+
+1. **The Blazor Server sliding-cookie trap.** Cookie `SlidingExpiration` renews on HTTP requests, and
+   a user working inside one long-lived SignalR circuit makes almost none — so somebody actively
+   working for two hours can have their cookie expire underneath them, and the next real request (a
+   download, a refresh, an export) bounces them to the login page mid-task. The keep-alive ping at
+   `/account/keep-alive` exists solely to make that request. It is also why **Stay Logged In** calls
+   the endpoint rather than only resetting a timer. Any existing GX app on this stack without one is
+   worth checking: work past the cookie lifetime without a full page load, then refresh.
+
+2. **Multi-tab false logouts.** Activity is shared across tabs through `localStorage`, and every tab
+   measures idleness against the most recent activity in *any* tab. With one deliberate asymmetry:
+   activity in **another** tab cancels a countdown (the user is demonstrably working), while activity
+   in the tab **showing** the countdown does not (a stray mouse movement must not silently extend a
+   session). Dismissal there requires the button.
+
+**Sign-out is simultaneous across every tab**, by two mechanisms on purpose. The tab that ends the
+session writes a `gx:idle:signedOut` record and every other tab leaves on the `storage` event; and
+any tab regaining focus re-pings the server, so a tab that was throttled or asleep through the whole
+countdown gets a 401 and redirects. The second is the robust one — it depends on no message being
+received, and it covers sign-out from *any* cause, not just idle: an explicit logout elsewhere, an
+administrator disabling the account, or the cookie simply expiring.
+
+**Four things here are load-bearing in ways that are easy to undo:**
+
+- **The cookie event is chained, never replaced.** `OnValidatePrincipal` is Identity's security-stamp
+  validator — the mechanism behind "changing a user's roles or password signs their existing sessions
+  out". Assigning over it would delete that guarantee silently: everything would still compile, boot
+  and pass its own tests. `IdleTimeoutWiringTests` drives the real delegate and fails if the stamp
+  validator stops running.
+- **Only the keep-alive path counts as activity.** If any authenticated request renewed the window,
+  an unattended workstation would keep itself signed in through whatever its browser happened to
+  fetch.
+- **The keep-alive endpoint is origin-checked.** It returns nothing and changes no business data, but
+  it does renew a session, and this application sets `SameSite=None` — so an unchecked endpoint would
+  let any page the user has open hold their session open indefinitely, defeating the control it
+  serves.
+- **The keep-alive answers with status codes, not redirects.** It is the one endpoint on this surface
+  that does, and it is `AllowAnonymous` with the check stated in the handler for exactly that reason:
+  the fallback policy's challenge fires before any handler and redirects to the login page, and the
+  browser's `fetch` follows redirects, so an expired session read as `200` and every client-side
+  check for a dead session was inert. It answers `401` unauthenticated and `403` origin-refused, and
+  the JSON bodies keep `UseStatusCodePagesWithReExecute` from rewriting a bodiless error into the
+  not-found page. Do **not** "fix" this by teaching the cookie handler's `OnRedirectToLogin` about
+  the path — that event is shared by every page in the application.
+
+The user preference is read from the database behind a per-user cache rather than carried as a claim
+(the way `MustChangePassword` is). A claim only changes when the cookie is reissued, and
+`SignInManager.RefreshSignInAsync` cannot run inside a Blazor circuit — the response has already
+started — so a claim would take effect at the user's *next sign-in*, which is not what the screen
+says it does.
+
+**Testing it by hand.** Set the policy to 1 minute with a 15-second countdown, then check the
+multi-tab and circuit-drop behaviour: three idle tabs must all land on the login page when the
+countdown expires, including one backgrounded throughout; killing the SignalR connection during the
+countdown must still sign you out at the deadline; and signing in again must not be bounced straight
+out by the stale `gx:idle:signedOut` key. None of that is reachable from the automated suite.
+
+### Database naming
+
+**Contract: your business models live in the `core` schema as `TBL_UPPER_SNAKE`, and you get that by
+deriving from `BaseEntity` — there is nothing to remember per entity.**
+
+| Rule | Value |
+|---|---|
+| Schema for business models | `core` |
+| Table naming | `TBL_UPPER_SNAKE` — `core."TBL_STOCK_MOVEMENT"` |
+| Lookup tables | `TBL_LK_UPPER_SNAKE` — `core."TBL_LK_ADJUSTMENT_REASON"` |
+| Column naming | PascalCase, quoted — EF's default, **no snake_case plugin** |
+| Applied by | one convention loop in `OnModelCreating`, not `[Table]` per entity |
+
+`BaseEntity` implements `IBusinessEntity`, so every entity you derive from it is picked up by
+`GxNamingConventions.ApplyGxTableNaming()`, which runs last in `ApplicationDbContext.OnModelCreating`.
+Mark a table as a lookup by implementing `ILookupEntity` as well.
+
+**What counts as a lookup.** One question: *does any code branch on this row's value?*
+
+- **No** → it is a lookup (`TBL_LK_`). The application treats every row identically; it is code plus
+  description and nothing else, and a client can safely add rows without a developer.
+- **Yes** → it is not a lookup (`TBL_`), however small or dropdown-ish it looks. A tax code carrying
+  rates and GL mappings is `TBL_`; so is an account that posting rules resolve to.
+
+Deliberately a two-way split. Resist a third category for "master data with behaviour": the boundary
+between a master and a transactional document is a spectrum (versioned price lists, BOMs with
+lifecycle states), so a third category produces per-entity judgement calls and therefore
+inconsistency. Having **no** lookup tables at all is a normal outcome — a status the code switches on
+belongs in a C# enum stored as a string, not in a table.
+
+**The convention ships dormant.** The template defines no entity that reaches it — the only three
+deriving from `BaseAuditableEntity` are pinned below — so a freshly generated project has **no `core`
+schema and no `TBL_` table at all**, and its migration contains no `EnsureSchema("core")`. The schema
+appears the moment you add your first entity deriving from `BaseEntity` / `BaseAuditableEntity`. If
+you generate a project, go looking for `core`, and find nothing, that is why.
+
+**The template's own tables stay out of `core`.** Identity, `Tenants`, `AuditTrails`, `Documents`,
+`PicklistSets`, `SecurityPolicies`, `DataProtectionKeys` and `__EFMigrationsHistory` keep their names
+in the default schema, so opening pgAdmin shows a visible line between the framework's tables and
+your business's, and so a template upgrade never hands an existing project a rename migration.
+`Documents`, `PicklistSets` and `SecurityPolicies` derive from `BaseAuditableEntity` like any entity
+of yours, and stay put only because their configurations call `ToTable(...)` explicitly — which the
+convention yields to, on schema as well as name.
+
+`GxTableNamingTests` and `TemplateTablesStayOutOfCoreTests` assert all of the above, including the
+acronym handling (`UomConversion` → `TBL_UOM_CONVERSION`, not `TBL_U_OM_CONVERSION`) and that a
+second `dotnet ef migrations add` produces an *empty* migration.
+
+Four consequences, because they are not obvious and they bite late:
+
+1. **Hand-written SQL must quote its identifiers.** PostgreSQL folds unquoted names to lowercase, so
+   check constraints, index filters, triggers and plpgsql functions must be written
+   `core."TBL_JOURNAL_ENTRY"`, `"Status"`, `"Debit"`. A single unquoted identifier is rejected at
+   `database update`, so it fails loudly — but it fails *after* the model looks fine.
+
+2. **Never apply `UseSnakeCaseNamingConvention()` to `ApplicationDbContext`.** `UseDatabase` takes a
+   `snakeCaseNaming` flag and only `LogDbContext` sets it, because Serilog's PostgreSQL sink owns
+   that table and writes snake_case columns. On the business context the plugin also rewrites EF's
+   *migration history* model, creating `__EFMigrationsHistory` with `migration_id` /
+   `product_version`; the day it is removed, EF queries `"MigrationId"` and fails with
+   `42703: column "MigrationId" does not exist` — a database that can be neither migrated forward nor
+   inspected, recoverable only by hand-altering EF's own bookkeeping table.
+
+3. **`ApplyConfigurationsFromAssembly`'s namespace filter is case-sensitive.** Both contexts filter
+   by `t.Namespace == …Namespace`, computed from a `typeof(...)` rather than a string literal, for
+   exactly this reason: a hard-coded namespace whose casing does not match (`Ims.` vs `IMS.`) drops
+   **every** configuration silently — no check constraints, no unique indexes, no row versions — and
+   the application still builds and boots. Keep it type-derived, or assert the configuration count
+   in a test.
+
+4. **Seeders must be idempotent per item, never per "has anything been seeded".** This is the
+   template's own seeding pattern, in `ApplicationDbContextInitializer.EnsureRoleAsync`: each role is
+   reconciled by name and each permission by its natural key, so a grant added to
+   `AdministratorPermissionRegistry` in a later release reaches databases provisioned before it. The
+   shape to avoid is `if (await _roleManager.RoleExistsAsync(Roles.Admin)) return;` — correct on a
+   fresh database, and thereafter silently delivering nothing new. `AssertNoDivergence` does not
+   catch it: it compares the registry to the permission constants, not to what a database holds.
+   Grants are added, never revoked, so a permission an operator granted at runtime survives a
+   deployment; and a start that changes nothing logs nothing, so a line in the log means a grant
+   genuinely appeared. `ProvisioningTests` covers the provision → revoke behind the initializer's
+   back → provision → restored cycle, on both roles, plus a deleted role and an operator's extra
+   grant. Follow the same pattern for anything you seed.
+
+**On SQLite the schema is ignored, not honoured.** The provider drops it and creates a bare
+`TBL_STOCK_MOVEMENT`; PostgreSQL and SQL Server both emit `EnsureSchema("core")` and a qualified
+name. That is benign — but two same-named tables in different schemas would collide on SQLite.
+
+#### Upgrading an existing PostgreSQL project
+
+Adopting this standard renames every table and every column on a project that was previously
+snake_cased — and those databases also carry a snake_cased `__EFMigrationsHistory`, which blocks EF
+before it can apply anything at all. **This is a deliberate, tested exercise per project, not a
+template bump.**
+
+If the project has **no deployed database**, do not migrate: delete its migrations and regenerate a
+single clean initial. Far better than layering hundreds of renames into the first page of its
+history.
+
+Otherwise:
+
+1. Take a backup, and confirm it restores. Not "confirm it exists".
+2. Rename EF's own bookkeeping first, or nothing else can run:
+   ```sql
+   ALTER TABLE "__EFMigrationsHistory" RENAME COLUMN migration_id  TO "MigrationId";
+   ALTER TABLE "__EFMigrationsHistory" RENAME COLUMN product_version TO "ProductVersion";
+   ```
+3. Generate the rename migration against the new conventions and **read every operation** — confirm
+   they are `RenameTable` / `RenameColumn`, never drop-and-create. EF will happily generate the
+   latter, and it takes the data with it.
+4. Re-point any hand-written SQL — views, functions, triggers, reports, scripts outside EF — at the
+   new quoted identifiers. EF does not find these for you, and they fail at the point of use.
+5. Rehearse the whole sequence on a restored copy of production before touching production.
+
 ---
 
 ## Known limitations
@@ -427,6 +678,11 @@ Stated plainly, because finding these out later is worse than reading them now.
   what they prove. It is also why the newer HTTP harness, `tests/Server.UI.IntegrationTests`,
   defaults to SQLite: that one needs a database, not a particular one. To run these, install
   LocalDB, or point that file at any SQL Server you can reach.
+- **`BaseEntity` is `IEntity<int>`, with no `long` variant.** A project with high-volume tables — a
+  ledger, a movement history — cannot use the template base and must carry its own, which then has to
+  implement `IEntity<T>` by hand before the pagination and specification helpers will accept it. It
+  also puts that entity outside `IBusinessEntity`, so the GX naming convention skips it unless the
+  project's own base implements the marker too.
 
 ---
 

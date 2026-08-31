@@ -48,4 +48,21 @@ public class ApplicationUser : IdentityUser
     /// </para>
     /// </summary>
     public bool MustChangePassword { get; set; }
+
+    /// <summary>
+    /// This user's own idle window, in minutes, or <c>null</c> to follow the administered policy.
+    /// </summary>
+    /// <remarks>
+    /// May only ever SHORTEN the administered window - the effective value is the smaller of the two,
+    /// applied at read time by <c>IIdleTimeoutPolicyProvider</c> so that a value forced in by other
+    /// means is still clamped. Lengthening is refused because an idle timeout is a control against
+    /// unattended workstations: if a user could raise their own, the first person to find it
+    /// inconvenient would set it to eight hours and the control would be gone.
+    /// <para>
+    /// Projected onto the principal as a claim by <c>ApplicationUserClaimsPrincipalFactory</c>, so
+    /// that the per-request principal check costs no database round-trip. Changing it therefore has
+    /// to refresh the sign-in, exactly as the change-password flow does for MustChangePassword.
+    /// </para>
+    /// </remarks>
+    public int? IdleTimeoutMinutes { get; set; }
 }

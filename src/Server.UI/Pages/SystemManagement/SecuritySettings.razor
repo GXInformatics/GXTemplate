@@ -1,0 +1,129 @@
+@page "/system/security-settings"
+@using CleanArchitecture.Blazor.Application.Features.SecuritySettings.Commands
+@using CleanArchitecture.Blazor.Application.Features.SecuritySettings.Queries
+
+@attribute [Authorize(Policy = Permissions.SecuritySettings.View)]
+@inject IStringLocalizer<SecuritySettings> L
+<PageTitle>@AppStrings.SecuritySettings</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="pa-0">
+    <MudCard Elevation="2">
+        <MudCardHeader>
+            <CardHeaderContent>
+                <MudStack Row AlignItems="AlignItems.Center" Spacing="2">
+                    <MudIcon Icon="@Icons.Material.Filled.Timer" Size="Size.Large" />
+                    <MudText Typo="Typo.h5">@AppStrings.IdleTimeout</MudText>
+                </MudStack>
+            </CardHeaderContent>
+        </MudCardHeader>
+
+        <MudCardContent>
+            @if (_model is null)
+            {
+                <MudProgressCircular Indeterminate="true" />
+            }
+            else if (!_model.Enabled)
+            {
+                <MudAlert Severity="Severity.Info">
+                    @L["The idle timeout is switched off for this deployment. Enable it in configuration (SecuritySettings:IdleTimeout:Enabled) to administer a policy here."]
+                </MudAlert>
+            }
+            else
+            {
+                <MudForm @ref="_form" Model="_model">
+                    @* State the effective value plainly. A countdown that appears unexpectedly is
+                       the single most common support call this feature generates, and an
+                       administrator who cannot see what they have set cannot answer it. *@
+                    <MudAlert Severity="Severity.Normal" Dense="true" Class="mb-4">
+                        @string.Format(AppStrings.IdleTimeoutEffectiveFormat, _model.IdleTimeoutMinutes)
+                    </MudAlert>
+
+                    <MudNumericField T="int"
+                                     @bind-Value="_model.IdleTimeoutMinutes"
+                                     Label="@AppStrings.IdleTimeoutMinutesLabel"
+                                     HelperText="@string.Format(AppStrings.IdleTimeoutBoundsFormat, _model.MinIdleTimeoutMinutes, _model.MaxIdleTimeoutMinutes)"
+                                     Min="_model.MinIdleTimeoutMinutes"
+                                     Max="_model.MaxIdleTimeoutMinutes"
+                                     Immediate="true"
+                                     Class="mb-4" />
+
+                    <MudNumericField T="int"
+                                     @bind-Value="_model.CountdownSeconds"
+                                     Label="@AppStrings.CountdownSecondsLabel"
+                                     Min="10"
+                                     Max="600"
+                                     Immediate="true"
+                                     Class="mb-4" />
+
+                    <MudAlert Severity="Severity.Warning" Dense="true">
+                        @AppStrings.IdleTimeoutAffectsLiveSessions
+                    </MudAlert>
+                </MudForm>
+            }
+        </MudCardContent>
+
+        <MudCardActions>
+            <AuthorizeView Policy="@Permissions.SecuritySettings.Edit">
+                <Authorized>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Disabled="@(_saving || _model is null || !_model.Enabled)"
+                               OnClick="SaveAsync">
+                        @if (_saving)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        }
+                        @AppStrings.Save
+                    </MudButton>
+                </Authorized>
+            </AuthorizeView>
+        </MudCardActions>
+    </MudCard>
+</MudContainer>
+
+@code {
+    // Read and write both go through the mediator, so the deny-by-default request authorization
+    // covers them - View to load, Edit to save - rather than the page attribute being the only
+    // check. The AuthorizeView above hides the button; the command attribute is what enforces it.
+
+    private SecurityPolicyDto? _model;
+    private MudForm? _form;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Mediator.Send(new GetSecurityPolicyQuery());
+        result.Match(
+            dto => _model = dto,
+            errors => Snackbar.Add(errors, Severity.Error));
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null) return;
+
+        _saving = true;
+        try
+        {
+            var result = await Mediator.Send(new UpdateSecurityPolicyCommand
+            {
+                IdleTimeoutMinutes = _model.IdleTimeoutMinutes,
+                CountdownSeconds = _model.CountdownSeconds
+            });
+
+            result.Match(
+                _ =>
+                {
+                    Snackbar.Add(AppStrings.SaveSuccess, Severity.Info);
+                    // Say it out loud on the save, not only in the static warning above: an
+                    // administrator tightening the window is about to sign people out.
+                    Snackbar.Add(AppStrings.IdleTimeoutAffectsLiveSessions, Severity.Warning);
+                },
+                errors => Snackbar.Add(errors, Severity.Error));
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

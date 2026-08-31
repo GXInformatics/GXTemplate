@@ -5,7 +5,13 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CleanArchitecture.Blazor.Domain.Common.Entities;
 
-public abstract class BaseEntity : IEntity<int>
+/// <summary>
+/// The base every project entity derives from. Implementing <see cref="IBusinessEntity"/> here
+/// rather than on each entity is what makes the GX table-naming convention automatic - see
+/// <see cref="IBusinessEntity"/> for the schema and prefix rules, and for why the template's own
+/// entities stay outside them.
+/// </summary>
+public abstract class BaseEntity : IEntity<int>, IBusinessEntity
 {
     private readonly List<DomainEvent> _domainEvents = new();
 

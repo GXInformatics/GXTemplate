@@ -26,6 +26,7 @@ public class ApplicationDbContext : IdentityDbContext<
     public DbSet<Document> Documents { get; set; }
 
     public DbSet<PicklistSet> PicklistSets { get; set; }
+    public DbSet<SecurityPolicy> SecurityPolicies { get; set; }
     public DbSet<DataProtectionKey> DataProtectionKeys { get; set; }
 
     /// <summary>
@@ -51,6 +52,14 @@ public class ApplicationDbContext : IdentityDbContext<
             t => t.Namespace == ConfigurationsNamespace);
 
         builder.ApplyGlobalFilters<ISoftDelete>(s => s.DeletedAt == null);
+
+        // LAST, and after ApplyConfigurationsFromAssembly: the GX naming standard yields to an
+        // explicit ToTable, so the configurations have to have been applied before it runs. It maps
+        // every IBusinessEntity - i.e. everything deriving from BaseEntity - to
+        // core."TBL_UPPER_SNAKE", and leaves this template's own tables (Identity, Tenants,
+        // AuditTrails, Documents, PicklistSets, DataProtectionKeys, __EFMigrationsHistory) in the
+        // default schema under their existing names. See GxNamingConventions.
+        builder.ApplyGxTableNaming();
     }
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

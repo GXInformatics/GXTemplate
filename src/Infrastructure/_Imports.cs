@@ -13,6 +13,7 @@ global using CleanArchitecture.Blazor.Infrastructure.Services;
 global using CleanArchitecture.Blazor.Infrastructure.Services.Storage;
 global using CleanArchitecture.Blazor.Infrastructure.Services.Caching;
 global using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
+global using CleanArchitecture.Blazor.Infrastructure.Services.Security;
 global using CleanArchitecture.Blazor.Infrastructure.Configurations;
 global using CleanArchitecture.Blazor.Domain.Entities;
 global using Microsoft.AspNetCore.Components.Authorization;
