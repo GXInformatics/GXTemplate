@@ -115,10 +115,32 @@
         // Generate a simplified, friendly message based on the exception type.
         UserFriendlyMessage = GetUserFriendlyMessage(Exception);
 
-        var sanitizedUri = Navigation.Uri.Replace("\n", "").Replace("\r", "");
-        
+        // The PATH only - never the query string. Stripping CR/LF (log injection) was the whole of
+        // the old sanitising, which left the parameters intact: an exception raised while the user
+        // sat on /account/reset-password?userId=...&token=... wrote a live reset token into the log
+        // database, readable from /system/logs by any Permissions.Logs.View holder. The page
+        // identity is what has diagnostic value here; the parameters are what carry the secrets.
+        var sanitizedUri = SanitiseForLog(Navigation.Uri);
+
         // Log the full exception details including the original message.
         Logger.LogError(Exception, "{Message}. request url: {@url} {@UserName}", OriginalMessage, sanitizedUri, userName);
+    }
+
+    /// <summary>
+    /// The request URL reduced to what is safe to persist: scheme, host and path, with CR and LF
+    /// removed so a crafted URL cannot forge extra log lines.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to stripping everything from the first '?' if the value will not parse as a URI,
+    /// so a malformed URL cannot smuggle a query string through by failing to parse.
+    /// </remarks>
+    internal static string SanitiseForLog(string uri)
+    {
+        var withoutQuery = Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+            ? parsed.GetLeftPart(UriPartial.Path)
+            : uri.Split('?', '#')[0];
+
+        return withoutQuery.Replace("\n", "").Replace("\r", "");
     }
 
     private void OnRefresh()

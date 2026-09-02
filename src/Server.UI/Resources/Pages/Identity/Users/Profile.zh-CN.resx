@@ -189,9 +189,6 @@
   <data name="Superior Name" xml:space="preserve">
     <value>上级</value>
   </data>
-  <data name="Org Chart" xml:space="preserve">
-    <value>组织结构图</value>
-  </data>
   <data name="Click upload a image" xml:space="preserve">
     <value>点击上传图片</value>
   </data>

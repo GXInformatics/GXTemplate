@@ -36,9 +36,14 @@ public class UserActivationNotificationHandler : INotificationHandler<UserActiva
         // Last place a failure can be observed: the publisher swallows handler exceptions.
         if (result.Succeeded)
         {
-            _logger.LogInformation(
-                "Activation email sent to {Email}, Activation Callback URL: {ActivationUrl}.",
-                notification.Email, notification.ActivationUrl);
+            // The ACTIVATION URL IS NOT LOGGED, and must not be added back as a debugging
+            // convenience. It carries userId plus the base64url confirmation token, and this
+            // logger reaches the database sink - SerilogExtensions excludes only two
+            // property-marked categories and applies no level filter - so the token would be
+            // readable from /system/logs by any Permissions.Logs.View holder. Anyone who could
+            // read it could confirm an address they do not control. The address alone is enough
+            // to answer "did the mail go out?", which is what this line is for.
+            _logger.LogInformation("Activation email sent to {Email}.", notification.Email);
         }
         else
         {

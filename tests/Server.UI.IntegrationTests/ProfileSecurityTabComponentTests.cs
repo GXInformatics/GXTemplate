@@ -83,7 +83,6 @@ public class ProfileSecurityTabComponentTests
         // keeps this about which panels the page declares.
         _ctx.ComponentFactories.AddStub<ProfileInformationTab>();
         _ctx.ComponentFactories.AddStub<ChangePasswordTab>();
-        _ctx.ComponentFactories.AddStub<OrgChartTab>();
         _ctx.ComponentFactories.AddStub<SecurityTab>();
     }
 
@@ -136,7 +135,14 @@ public class ProfileSecurityTabComponentTests
             var markup = _ctx.Render<Profile>().Markup;
 
             markup.Should().Contain("Change Password", $"enabled={enabled} allowOverride={allowOverride}");
-            markup.Should().Contain("Org Chart", $"enabled={enabled} allowOverride={allowOverride}");
+
+            // "Org Chart" was the second header asserted here until Pass 21 removed that tab: it
+            // rendered every user in every tenant, with their email and phone, to anyone who could
+            // reach their own profile. Its ABSENCE is now the assertion, and it is checked in every
+            // one of these three states for the same reason the presence of the others is - to
+            // catch it coming back through a state nobody thought to look at. See
+            // ProfileDirectoryExposureComponentTests.
+            markup.Should().NotContain("Org Chart", $"enabled={enabled} allowOverride={allowOverride}");
 
             _ctx.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }

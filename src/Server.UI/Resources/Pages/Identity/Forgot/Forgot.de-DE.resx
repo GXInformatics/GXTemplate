@@ -82,10 +82,4 @@
   <data name="Forgot Password" xml:space="preserve">
     <value>Passwort vergessen</value>
   </data>
-  <data name="If an account with this email exists, a password reset link will be sent." xml:space="preserve">
-    <value>Falls ein Konto mit dieser E-Mail-Adresse existiert, wird ein Link zum Zurücksetzen des Passworts gesendet.</value>
-  </data>
-  <data name="Your email address has not been confirmed. Please check your inbox for a confirmation email or request a new one." xml:space="preserve">
-    <value>Ihre E-Mail-Adresse wurde nicht bestätigt. Bitte überprüfen Sie Ihren Posteingang auf eine Bestätigungs-E-Mail oder fordern Sie eine neue an.</value>
-  </data>
 </root> 

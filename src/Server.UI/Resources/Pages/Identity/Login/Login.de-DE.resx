@@ -150,17 +150,11 @@
   <data name="Forgot password?" xml:space="preserve">
     <value>Passwort vergessen?</value>
   </data>
-  <data name="The specified user does not exist." xml:space="preserve">
-    <value>Der angegebene Benutzer existiert nicht.</value>
-  </data>
   <data name="Your account is inactive. Please contact support for assistance." xml:space="preserve">
     <value>Ihr Konto ist inaktiv. Bitte wenden Sie sich an den Support für Hilfe.</value>
   </data>
   <data name="The username or password is incorrect. Please try again." xml:space="preserve">
     <value>Der Benutzername oder das Passwort ist falsch. Bitte versuchen Sie es erneut.</value>
-  </data>
-  <data name="The account has been locked due to multiple failed login attempts." xml:space="preserve">
-    <value>Das Konto wurde aufgrund mehrerer fehlgeschlagener Anmeldeversuche gesperrt.</value>
   </data>
   <data name="The account is locked due to multiple failed attempts. Please try again later." xml:space="preserve">
     <value>Das Konto ist aufgrund mehrerer fehlgeschlagener Versuche gesperrt. Bitte versuchen Sie es später erneut.</value>

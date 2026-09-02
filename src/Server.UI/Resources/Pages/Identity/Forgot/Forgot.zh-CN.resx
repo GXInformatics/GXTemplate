@@ -82,10 +82,4 @@
   <data name="Forgot Password" xml:space="preserve">
     <value>忘记密码</value>
   </data>
-  <data name="If an account with this email exists, a password reset link will be sent." xml:space="preserve">
-    <value>如果该邮箱的账户存在，密码重置链接将被发送。</value>
-  </data>
-  <data name="Your email address has not been confirmed. Please check your inbox for a confirmation email or request a new one." xml:space="preserve">
-    <value>您的电子邮件地址尚未确认。请检查您的收件箱中的确认邮件或请求新的确认邮件。</value>
-  </data>
 </root> 

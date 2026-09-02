@@ -6,9 +6,13 @@
             var uri = new Uri(Navigation.Uri);
             var returnUrl = uri.PathAndQuery.TrimStart('/');
 
-            // Use forceLoad: true to perform a full page reload
-            // This avoids JavaScript interop issues with SignalR connections
-            Navigation.NavigateTo($"/account/login?returnUrl={returnUrl}", forceLoad: true);
+            // EscapeDataString, because returnUrl is a path AND QUERY. Interpolated raw, the second
+            // parameter of the page being returned to became a parameter of the LOGIN url instead:
+            // /pages/documents?a=1&b=2 produced "...login?returnUrl=pages/documents?a=1&b=2", so
+            // returnUrl silently truncated at "?a=1" and the user was sent somewhere they had not
+            // asked for. Any '&' or '#' in the original address did this.
+            Navigation.NavigateTo(
+                $"/account/login?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
         }
         catch (Exception)
         {

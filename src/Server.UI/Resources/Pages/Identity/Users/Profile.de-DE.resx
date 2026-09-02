@@ -189,9 +189,6 @@
   <data name="Superior Name" xml:space="preserve">
     <value>Vorgesetzter</value>
   </data>
-  <data name="Org Chart" xml:space="preserve">
-    <value>Organigramm</value>
-  </data>
   <data name="Click upload a image" xml:space="preserve">
     <value>Klicken Sie auf „Bild hochladen“</value>
   </data>

@@ -119,58 +119,76 @@
 
 	private async Task HandleSubmitAsync()
 	{
-		// Check if the user exists
+		// NOTHING before a correct password may distinguish one account from another. This page
+		// used to answer "The specified user does not exist." on an unknown name, and to report
+		// lockout and inactivity BEFORE checking the password - so an anonymous visitor could
+		// enumerate the whole user list at one request per name, without ever needing a credential.
+		//
+		// The two messages a real user genuinely needs - "you are locked out" and "your account is
+		// inactive" - are not deleted. They are moved behind a correct password, which is the point
+		// at which the person asking has proved the account is theirs and can be told the truth
+		// about it. Everything an anonymous caller can reach collapses to one message.
 		var user = await _userManager.FindByNameAsync(_formModel.UserName);
-		if (user == null)
+
+		// CheckPasswordAsync verifies the hash only - it does not consider lockout - so it is safe
+		// to ask it first and interpret lockout afterwards.
+		var isPasswordValid = user is not null
+			&& await _userManager.CheckPasswordAsync(user, _formModel.Password);
+
+		if (!isPasswordValid)
 		{
-			_errorMessage = L["The specified user does not exist."];
-			Snackbar.Add(_errorMessage, Severity.Error);
+			if (user is not null)
+			{
+				// Still counts against the lockout policy; the caller is simply not told the
+				// outcome, because "the account has now been locked" confirms the account exists.
+				await _userManager.AccessFailedAsync(user);
+			}
+
+			ShowGenericFailure();
 			return;
 		}
-		// Check if the user is currently locked out
-		if (await _userManager.IsLockedOutAsync(user))
+
+		// From here the password was correct, so these messages disclose nothing to a stranger.
+		if (await _userManager.IsLockedOutAsync(user!))
 		{
 			_errorMessage = L["The account is locked due to multiple failed attempts. Please try again later."];
 			Snackbar.Add(_errorMessage, Severity.Error);
 			return;
 		}
-		if (!user.IsActive)
+
+		// Whether an inactive account should be able to sign in at all is a policy question left
+		// untouched here - this changes only WHEN the user is told, never the refusal itself.
+		if (!user!.IsActive)
 		{
 			_errorMessage = L["Your account is inactive. Please contact support for assistance."];
 			Snackbar.Add(_errorMessage, Severity.Error);
 			return;
 		}
-		var isPasswordValid = await _userManager.CheckPasswordAsync(user, _formModel.Password);
-		if (isPasswordValid)
-		{
 
-			if (_auth is null) return;
-			await _auth.InvokeVoidAsync("postLogin", new
-			{
-				userName = _formModel.UserName,
-				password = _formModel.Password,
-				rememberMe = _formModel.RememberMe,
-				returnUrl = ReturnUrl
-			});
-		}
-		else
+		if (_auth is null) return;
+		await _auth.InvokeVoidAsync("postLogin", new
 		{
-			// Login Failed: Increment the failed access count
-			await _userManager.AccessFailedAsync(user);
+			userName = _formModel.UserName,
+			password = _formModel.Password,
+			rememberMe = _formModel.RememberMe,
+			returnUrl = ReturnUrl
+		});
+	}
 
-			// Check if the account has been locked after this failure
-			if (await _userManager.IsLockedOutAsync(user))
-			{
-				_errorMessage = L["The account has been locked due to multiple failed login attempts."];
-				Snackbar.Add(_errorMessage, Severity.Error);
-			}
-			else
-			{
-				_errorMessage = L["The username or password is incorrect. Please try again."];
-				Snackbar.Add(_errorMessage, Severity.Error);
-			}
-			
-		}
+	/// <summary>
+	/// The single answer an anonymous caller can provoke: unknown name, wrong password, wrong
+	/// password on a locked account - all identical.
+	/// </summary>
+	/// <remarks>
+	/// KNOWN RESIDUAL, accepted rather than fixed: an unknown name skips the password hash
+	/// comparison and the AccessFailedAsync write, so the cases stay distinguishable by response
+	/// time to an attacker who can measure it. Closing that means hashing against a dummy for
+	/// unknown names. Out of scope here; see the Pass 21 report.
+	/// </remarks>
+	private void ShowGenericFailure()
+	{
+		_errorMessage = L["The username or password is incorrect. Please try again."];
+		Snackbar.Add(_errorMessage, Severity.Error);
 	}
 
 	public sealed class InputModel

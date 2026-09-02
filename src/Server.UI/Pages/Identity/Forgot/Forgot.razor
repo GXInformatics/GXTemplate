@@ -44,7 +44,6 @@
 	private string _pageTitle = "Forgot Password";
 	private UserManager<ApplicationUser> _userManager = null!;
 	private InputModel _formModel { get; set; } = new();
-	private string? _statusMessage;
 
 	protected override Task OnInitializedAsync()
 	{
@@ -56,32 +55,47 @@
 
 	private async Task HandleValidSubmitAsync()
 	{
+		// ONE outcome for every input. This page used to answer three different ways - a "no such
+		// account" snackbar, a "not confirmed" snackbar, and a silent navigation on success - so an
+		// anonymous visitor could sort any address into exists-and-confirmed, exists-unconfirmed,
+		// or unknown, one request at a time. Neutralising the MESSAGE alone would not have been
+		// enough: the navigation was a tell on its own, readable with the snackbar suppressed.
+		//
+		// The address is deliberately absent from this line, and the line is deliberately outside
+		// every branch: logged per-request it records that a reset was asked for - the signal that
+		// makes a spraying attempt visible - while answering nothing about which addresses exist.
+		// It used to log the address on the SUCCESS branch only, which made the log database a
+		// second oracle for anyone holding Permissions.Logs.View. (The mail handler still records
+		// what it actually sent, and should: that is an operational record of outbound mail, not a
+		// record of what an anonymous stranger typed.)
+		Logger.LogInformation("Password reset requested.");
+
 		var user = await _userManager.FindByEmailAsync(_formModel.Email);
-		if (user is null)
+
+		// Both refusals are unchanged in BEHAVIOUR - an unknown address gets no mail, and an
+		// unconfirmed one still gets no reset link. Only the response is now identical. Whether an
+		// unconfirmed address SHOULD be able to recover is a policy question, not a defect, and it
+		// is deliberately left alone here.
+		if (user is not null && await _userManager.IsEmailConfirmedAsync(user))
 		{
-			_statusMessage = L["If an account with this email exists, a password reset link will be sent."];
-			Snackbar.Add(_statusMessage, Severity.Error);
-			return;
+			var code = await _userManager.GeneratePasswordResetTokenAsync(user);
+			code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
+			var callbackUrl = Navigation.GetUriWithQueryParameters(
+				Navigation.ToAbsoluteUri(ResetPassword.PageUrl).AbsoluteUri,
+				new Dictionary<string, object?> { ["userId"] = user.Id, ["token"] = code });
+			await Mediator.Publish(new ResetPasswordNotification(callbackUrl, user.Email!, user.UserName!));
 		}
 
-		if (!await _userManager.IsEmailConfirmedAsync(user))
-		{
-			_statusMessage = L["Your email address has not been confirmed. Please check your inbox for a confirmation email or request a new one."];
-			Snackbar.Add(_statusMessage, Severity.Error);
-			return;
-		}
+		// KNOWN RESIDUAL, accepted rather than fixed: the branch above does measurably more work
+		// than the branches that skip it - a token generation and a notification enqueue - so the
+		// three cases remain distinguishable by response time to an attacker who can measure it.
+		// Closing that means not doing the work on the request path at all, which changes what
+		// happens when mail fails. Out of scope here; see the Pass 21 report.
 
-		var code = await _userManager.GeneratePasswordResetTokenAsync(user);
-		code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
-		var callbackUrl = Navigation.GetUriWithQueryParameters(
-			Navigation.ToAbsoluteUri(ResetPassword.PageUrl).AbsoluteUri,
-			new Dictionary<string, object?> { ["userId"] = user.Id, ["token"] = code });
-		await Mediator.Publish(new ResetPasswordNotification(callbackUrl, user.Email!, user.UserName!));
-		Logger.LogInformation("Rest password email sent to {Email}.", _formModel.Email);
-
-		// No query parameters. The callback URL above goes to the mail handler and nowhere else;
-		// it used to be appended here as well, which put a live reset token in the address bar of
-		// whoever typed the address in - account takeover with no mailbox access.
+		// No query parameters, and the same destination whatever the address was. The callback URL
+		// above goes to the mail handler and nowhere else; it used to be appended here as well,
+		// which put a live reset token in the address bar of whoever typed the address in -
+		// account takeover with no mailbox access.
 		Navigation.NavigateTo(ForgotPasswordConfirmation.PageUrl);
 
 	}

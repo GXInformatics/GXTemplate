@@ -29,11 +29,14 @@
             <SecurityTab />
         </MudTabPanel>
     }
-    <MudTabPanel Text="@L["Org Chart"]">
-        <OrgChartTab />
-    </MudTabPanel>
-
-
+    @* An Org Chart tab used to sit here. It loaded EVERY user in the installation - no permission
+       check, no tenant filter - and painted each one's email and phone number onto a node. This
+       page carries no [Authorize(Policy = ...)], only the route fallback policy, so every
+       authenticated user reaches it: a self-registered account holding nothing but Documents.View
+       had the complete directory of every tenant. It was removed rather than gated or filtered,
+       because an org chart of the whole organisation is not "your profile". If one is wanted, it
+       belongs on a page of its own with its own permission, where who may see it is answered
+       explicitly instead of inherited from whoever can see their own profile. *@
 </MudTabs>
 
 

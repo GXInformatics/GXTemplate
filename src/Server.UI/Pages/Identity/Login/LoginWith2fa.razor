@@ -53,9 +53,14 @@
 	<MudText Typo="Typo.body1">
 		@L["If you do not have access to your authenticator device, you may"]
 	</MudText>
+	@* The href is EscapeDataString'd: ReturnUrl arrives from the query string, and a '&' or '#' in
+	   it would otherwise end the parameter early and send the user somewhere else after sign-in.
+	   Not an open redirect - the href always begins with the compile-time PageUrl constant - but a
+	   corrupted destination. (The comment sits outside the attribute list on purpose: MudBlazor's
+	   analyzer reads a Razor comment between attributes as an illegal attribute, MUD0002.) *@
 	<MudButton Variant="Variant.Outlined"
 			   Color="Color.Primary"
-			   href="@($"{LoginWithRecoveryCode.PageUrl}?ReturnUrl={ReturnUrl}")"
+			   href="@($"{LoginWithRecoveryCode.PageUrl}?ReturnUrl={Uri.EscapeDataString(ReturnUrl ?? string.Empty)}")"
 			   StartIcon="Icons.Material.Filled.Key"
 			   Class="mt-2">
 		@L["Log in with a recovery code"]
