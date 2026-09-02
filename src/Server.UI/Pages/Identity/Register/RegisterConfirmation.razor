@@ -15,24 +15,17 @@
 
 	<StatusMessage Message="@_statusMessage" Error="@_hasError" />
 
-	@if (EmailConfirmationLink is not null)
-	{
-		<MudText>@L["For testing purposes, you can directly access the email confirmation link below."]</MudText>
-		<MudButton href="@EmailConfirmationLink" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large">
-			<MudText>@L["Confirm Account"]</MudText>
-		</MudButton>
-	}
-	else
-	{
-		<MudText Typo="Typo.body1">@L["Please check your email and follow the instructions to confirm your account."]</MudText>
-	}
+	@* The same deletion as ForgotPasswordConfirmation, for the same reason. This page used to
+	   render an EmailConfirmationLink query parameter as a working button, which let anyone
+	   confirm an address they do not control and was a second unvalidated href - an open redirect
+	   on an anonymous page. The confirmation link goes to the mailbox, and only to the mailbox. *@
+	<MudText Typo="Typo.body1">@L["Please check your email and follow the instructions to confirm your account."]</MudText>
 </MudStack>
 @code {
 	private UserManager<ApplicationUser> _userManager = null!;
 
 
 	public const string PageUrl = "/account/registerconfirmation";
-	[SupplyParameterFromQuery] private string? EmailConfirmationLink { get; set; }
 	private string? _statusMessage;
 	private bool _hasError;
 

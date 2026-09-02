@@ -61,12 +61,6 @@
   <data name="Register confirmation" xml:space="preserve">
     <value>注册确认</value>
   </data>
-  <data name="For testing purposes, you can directly access the email confirmation link below." xml:space="preserve">
-    <value>出于测试目的，您可以直接访问下面的邮箱确认链接。</value>
-  </data>
-  <data name="Confirm Account" xml:space="preserve">
-    <value>确认账户</value>
-  </data>
   <data name="Please check your email and follow the instructions to confirm your account." xml:space="preserve">
     <value>请检查您的邮箱并按照说明确认您的账户。</value>
   </data>

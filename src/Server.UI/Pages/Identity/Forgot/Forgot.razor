@@ -78,10 +78,11 @@
 			new Dictionary<string, object?> { ["userId"] = user.Id, ["token"] = code });
 		await Mediator.Publish(new ResetPasswordNotification(callbackUrl, user.Email!, user.UserName!));
 		Logger.LogInformation("Rest password email sent to {Email}.", _formModel.Email);
-		var url = Navigation.GetUriWithQueryParameters(
-			   Navigation.ToAbsoluteUri(ForgotPasswordConfirmation.PageUrl).AbsoluteUri,
-			   new Dictionary<string, object?> { ["ResetPasswordLink"] = callbackUrl });
-		Navigation.NavigateTo(url);
+
+		// No query parameters. The callback URL above goes to the mail handler and nowhere else;
+		// it used to be appended here as well, which put a live reset token in the address bar of
+		// whoever typed the address in - account takeover with no mailbox access.
+		Navigation.NavigateTo(ForgotPasswordConfirmation.PageUrl);
 
 	}
 
