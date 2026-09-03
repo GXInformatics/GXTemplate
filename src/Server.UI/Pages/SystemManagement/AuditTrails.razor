@@ -42,7 +42,13 @@
 						@AppStrings.Refresh
 					</MudButton>
 				</MudStack>
+				@* Gated on Permissions.AuditTrails.Search, which was granted, listed in the role
+				   editor and checked by nothing - while AuditTrailsAccessRights was already loaded
+				   by this page and never read. Same one-line idiom Documents and PicklistSets use
+				   for their own search controls. *@
 				<MudStack Row Spacing="1" AlignItems="AlignItems.End">
+				@if (_accessRights.Search)
+				{
 					<!-- Search by audit type -->
 					<MudEnumSelect TEnum="AuditType?"
 								   Placeholder="@L["Search by audit type"]"
@@ -65,6 +71,7 @@
 									  IconSize="Size.Small">
 						</MudTextField>
 					</MudHidden>
+				}
 				</MudStack>
 			</MudStack>
 		</MudStack>

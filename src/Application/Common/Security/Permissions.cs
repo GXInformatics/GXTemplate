@@ -36,13 +36,12 @@ public static partial class Permissions
         return permissions.Distinct().ToList();
     }
 
-    [DisplayName("Navigation Menu Permissions")]
-    [Description("Set permissions for navigation menu")]
-    public static class NavigationMenu
-    {
-        [Description("Allows viewing the navigation menu")]
-        public const string View = "Permissions.NavigationMenu.View";
-    }
+    // Permissions.NavigationMenu was removed in Pass 26. It gated nothing, and had it been wired it
+    // would have been a THIRD gating mechanism in front of destinations that are already protected
+    // twice: the navigation menu filters its entries by ROLE (see MenuSectionItemModel.Roles and
+    // AppLayout.razor, which passes the principal's assigned roles into the component), and every
+    // destination behind it carries its own permission on its own page. A menu-level right would
+    // have been weaker than both and consulted by neither.
 
     [DisplayName("Hangfire Permissions")]
     [Description("Set permissions for Hangfire dashboard")]

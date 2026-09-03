@@ -149,15 +149,43 @@ public class AdministratorPermissionRegistryTests
     }
 
     [Test]
-    public void TheExcludedEmailTemplatePermissions_AreTheOnesWhosePageDoesNotExist()
+    public void TheExcludedPermissions_AreTheOnesWhoseSurfaceDoesNotExist()
     {
+        // Pass 26 added six to this list. It was the four email-template rights alone, and the
+        // assertion said so; the list is now every constant that names a surface this template does
+        // not have. Naming them exhaustively is the point of the test - an exclusion is a decision,
+        // and a decision that can be added without anyone noticing is not one.
         AdministratorPermissionRegistry.Excluded.Keys.Should().BeEquivalentTo(new[]
         {
+            // No email-template management page: no route, no component, no request type.
             Permissions.EmailTemplates.View,
             Permissions.EmailTemplates.Create,
             Permissions.EmailTemplates.Edit,
-            Permissions.EmailTemplates.Delete
-        }, "only the email-template page is missing from this template");
+            Permissions.EmailTemplates.Delete,
+
+            // No users-in-role or claims-in-role administration, and no read-only permission
+            // viewer - viewing happens inside the dialog Roles.ManagePermissions already gates.
+            Permissions.Roles.ManageUsersInRole,
+            Permissions.Roles.ViewUsersInRole,
+            Permissions.Roles.ManageClaimsInRole,
+            Permissions.Roles.ViewClaimsInRole,
+            Permissions.Roles.ViewPermissions,
+
+            // The dashboard is routed at "/", so gating it would 403 every user at sign-in.
+            Permissions.Dashboards.View
+        }, "an exclusion names a surface this template does not have");
+    }
+
+    [Test]
+    public void EveryExclusionCarriesAReason()
+    {
+        // The reason is what makes an exclusion reviewable: without it the list is indistinguishable
+        // from a set of permissions somebody forgot to grant.
+        foreach (var (permission, reason) in AdministratorPermissionRegistry.Excluded)
+        {
+            reason.Should().NotBeNullOrWhiteSpace($"{permission} is excluded and must say why");
+            reason.Length.Should().BeGreaterThan(40, $"{permission}'s reason should explain, not label");
+        }
     }
 }
 #nullable restore

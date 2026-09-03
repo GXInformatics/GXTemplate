@@ -52,11 +52,17 @@
                         </MudButton>
                     }
 				</MudStack>
+                @* Gated on Permissions.Logs.Search, which was granted, listed in the role editor and
+                   checked by nothing - while LogsAccessRights was already loaded here and only its
+                   Purge property was ever read. *@
                 <MudStack Row Spacing="1">
-                    <MudEnumSelect TEnum="LogLevel?" Placeholder="@L["Search by level"]" Value="@_systemLogsQuery.Level" Clearable="true" ValueChanged="OnChangedLevel" Style="min-width:120px" FullWidth="true"> </MudEnumSelect>
-                    <MudTextField T="string" Style="min-width:120px" ValueChanged="@(OnSearch)" Value="@_systemLogsQuery.Keyword" Placeholder="Search" Adornment="Adornment.End"
-                    AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium">
-                    </MudTextField>
+                    @if (_accessRights.Search)
+                    {
+                        <MudEnumSelect TEnum="LogLevel?" Placeholder="@L["Search by level"]" Value="@_systemLogsQuery.Level" Clearable="true" ValueChanged="OnChangedLevel" Style="min-width:120px" FullWidth="true"> </MudEnumSelect>
+                        <MudTextField T="string" Style="min-width:120px" ValueChanged="@(OnSearch)" Value="@_systemLogsQuery.Keyword" Placeholder="Search" Adornment="Adornment.End"
+                        AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium">
+                        </MudTextField>
+                    }
                 </MudStack>
             </MudStack>
         </MudStack>

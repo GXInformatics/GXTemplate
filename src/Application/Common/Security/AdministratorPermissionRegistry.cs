@@ -32,6 +32,21 @@ public static class AdministratorPermissionRegistry
         "under Resources/EmailTemplates are a different thing entirely - they are the bodies of the " +
         "welcome, activation and recovery emails, and they are live.)";
 
+    private const string ExcludedRoleSurface =
+        "There is no users-in-role or claims-in-role administration in this template, and no " +
+        "read-only permission viewer: the Roles page's one permission feature is the dialog " +
+        "Roles.ManagePermissions already gates, and viewing happens inside it. Granting these " +
+        "would advertise a role-administration surface the application does not have. The " +
+        "constants stay so the names are reserved and the intent is visible; grant them if and " +
+        "when the surface is built.";
+
+    private const string ExcludedDashboard =
+        "The dashboard is routed at @page \"/\" - it is the landing page every authenticated user " +
+        "arrives on. Gating it would strand a principal without this right on a 403 at sign-in, " +
+        "which is a worse failure than the right doing nothing. The name is reserved for when the " +
+        "dashboard moves off the root route; at that point it becomes a one-line page attribute " +
+        "and this entry moves back to Granted.";
+
     /// <summary>
     /// Every permission granted to the administrator role at provisioning time.
     /// <para>
@@ -50,16 +65,16 @@ public static class AdministratorPermissionRegistry
         Permissions.AuditTrails.Search,
         Permissions.AuditTrails.Export,
 
-        Permissions.Dashboards.View,
-
         Permissions.Documents.View,
         Permissions.Documents.Create,
         Permissions.Documents.Edit,
         Permissions.Documents.Delete,
         Permissions.Documents.Download,
         Permissions.Documents.Search,
-        Permissions.Documents.Export,
-        Permissions.Documents.Import,
+
+        // Documents.Export and Documents.Import were here until Pass 26 removed the constants:
+        // neither capability exists, and the two query files they named were empty. Same reason,
+        // and the same treatment, as Logs.Export below.
 
         Permissions.Hangfire.View,
 
@@ -68,8 +83,6 @@ public static class AdministratorPermissionRegistry
         Permissions.Logs.View,
         Permissions.Logs.Search,
         Permissions.Logs.Purge,
-
-        Permissions.NavigationMenu.View,
 
         Permissions.PicklistSets.View,
         Permissions.PicklistSets.Create,
@@ -87,11 +100,9 @@ public static class AdministratorPermissionRegistry
         Permissions.Roles.Export,
         Permissions.Roles.Import,
         Permissions.Roles.ManagePermissions,
-        Permissions.Roles.ViewPermissions,
-        Permissions.Roles.ManageUsersInRole,
-        Permissions.Roles.ViewUsersInRole,
-        Permissions.Roles.ManageClaimsInRole,
-        Permissions.Roles.ViewClaimsInRole,
+
+        // The five other Roles.* rights are EXCLUDED rather than granted - see below. They name a
+        // role-administration surface this template does not have.
 
         Permissions.SecuritySettings.View,
         Permissions.SecuritySettings.Edit,
@@ -133,7 +144,15 @@ public static class AdministratorPermissionRegistry
             [Permissions.EmailTemplates.View] = ExcludedEmailTemplates,
             [Permissions.EmailTemplates.Create] = ExcludedEmailTemplates,
             [Permissions.EmailTemplates.Edit] = ExcludedEmailTemplates,
-            [Permissions.EmailTemplates.Delete] = ExcludedEmailTemplates
+            [Permissions.EmailTemplates.Delete] = ExcludedEmailTemplates,
+
+            [Permissions.Roles.ManageUsersInRole] = ExcludedRoleSurface,
+            [Permissions.Roles.ViewUsersInRole] = ExcludedRoleSurface,
+            [Permissions.Roles.ManageClaimsInRole] = ExcludedRoleSurface,
+            [Permissions.Roles.ViewClaimsInRole] = ExcludedRoleSurface,
+            [Permissions.Roles.ViewPermissions] = ExcludedRoleSurface,
+
+            [Permissions.Dashboards.View] = ExcludedDashboard
         };
 
     /// <summary>

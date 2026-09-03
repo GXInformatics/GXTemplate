@@ -27,11 +27,15 @@ public static partial class Permissions
         [Description("Allows searching for document records")]
         public const string Search = "Permissions.Documents.Search";
 
-        [Description("Allows exporting document records")]
-        public const string Export = "Permissions.Documents.Export";
-
-        [Description("Allows importing document records")]
-        public const string Import = "Permissions.Documents.Import";
+        // Export and Import are deliberately absent. Neither capability exists: the Documents page
+        // has no export or import control, and the two request types they were named for -
+        // ExportDocumentsQuery and GetAllDocumentsQuery - were empty 3-byte files that declared no
+        // type and were sent by nothing. A permission constant nothing can check is not harmless: it
+        // appears in the role editor as a grantable right, so an administrator spends a decision on
+        // a capability the application does not have. If document export is ever built, the
+        // constants come back with it.
+        //
+        // Same removal, for the same reason, that Pass 11B/11C performed on Permissions.Logs.Export.
     }
 }
 
@@ -43,6 +47,9 @@ public class DocumentsAccessRights
     public bool Delete { get; set; }
     public bool Download { get; set; }
     public bool Search { get; set; }
-    public bool Export { get; set; }
-    public bool Import { get; set; }
-} 
+
+    // No Export or Import, matching Permissions.Documents above. PermissionService builds the claim
+    // string from the property NAME - "Permissions.Documents." + prop.Name - so a property left here
+    // would go on manufacturing a claim string that no constant declares and no role can be granted.
+    // The same pairing LogsAccessRights documents for its own missing Export.
+}
