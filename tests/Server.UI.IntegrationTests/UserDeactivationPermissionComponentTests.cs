@@ -106,7 +106,15 @@ public class UserDeactivationPermissionComponentTests
         // in InitializeServices. Nothing here participates in what is under test - the page must
         // simply be able to start.
         services.AddSingleton(Mock.Of<IPermissionQueryService>());
-        services.AddSingleton(Mock.Of<IUserContextAccessor>());
+
+        // An ambient principal who may see the seeded tenant. Required since Pass 27: the users grid
+        // bounds its rows by UserContext.AllowedTenantIds and fails closed, so a context-less
+        // accessor now yields an empty grid - which would make every assertion below pass for
+        // entirely the wrong reason.
+        var userContext = new Mock<IUserContextAccessor>();
+        userContext.SetupGet(x => x.Current).Returns(
+            new UserContext("viewer", "viewer", TenantId: TenantId, AllowedTenantIds: new[] { TenantId }));
+        services.AddSingleton(userContext.Object);
 
         services.AddSingleton(Mock.Of<IUserPreferencesService>());
         services.AddScoped<LayoutService>();

@@ -128,6 +128,14 @@ public static class AdministratorPermissionRegistry
         Permissions.Users.SuppressLoginNotification,
         Permissions.Users.SwitchTenants,
         Permissions.Users.SwitchToAnyTenant,
+
+        // Granted, which PRESERVES what a default installation shows: the bootstrap administrator is
+        // seeded into every tenant, and before Pass 27 the users grid was unfiltered, so an
+        // administrator saw every tenant's users either way. What changes is that the capability is
+        // now named, enforced and revocable - the same move Pass 22 made for IsActive, where a
+        // posture that held by accident was replaced by one that is stated.
+        Permissions.Users.ViewAllTenants,
+
         Permissions.Users.ViewOnlineStatus
     ];
 

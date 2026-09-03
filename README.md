@@ -4,11 +4,12 @@ A Blazor Server solution template for .NET 10, laid out in Clean Architecture la
 multi-tenant **data model**, deny-by-default request authorization, transactional audit trails, and
 pluggable file storage.
 
-**Multi-tenant data, not yet multi-tenant isolation.** The distinction is deliberate and is
+**Multi-tenant data, and isolation on two areas of it.** The distinction is deliberate and is
 described in full under [Tenancy](#tenancy): tenants, per-user tenant membership and tenant-stamped
-rows all exist, and Documents is scoped end to end — but the administration surfaces are **not**
-tenant-scoped. A holder of the relevant permission sees every tenant's users, audit trails, system
-logs, roles and picklists. Read that section before quoting this one.
+rows all exist; **Documents and the Users area are scoped end to end**, with a named, revocable
+cross-tenant right; and the remaining administration surfaces are **not** — a holder of the relevant
+permission still sees every tenant's audit trails, system logs, roles and picklists. Read that
+section before quoting this one.
 
 This README ships with the template and with every project generated from it, so parts of it are
 addressed to whoever is generating a project and parts to whoever is maintaining the generated one.
@@ -409,27 +410,43 @@ the installation rather than to a tenant. Any future per-tenant view has to surf
 rather than quietly dropping it: a tenant administrator who cannot see that the application restarted
 is being shown an edited log.
 
-**What is actually filtered.** Only **Documents**, and there it is enforced on every entry point —
-the listing and all four of its list views, the download button, the `/files` streaming endpoint, the
-edit command and the delete command. One rule, `VisibleDocumentSpecification.IsVisibleTo`, is the
-single definition; a document's tenant is set by the interceptor on creation and cannot be changed
-through the edit command by anyone.
+**What is actually filtered.** **Documents** and the **Users** area.
 
-**What is not filtered.** Everything else, and this is the sentence that matters:
+Documents is enforced on every entry point — the listing and all four of its list views, the download
+button, the `/files` streaming endpoint, the edit command and the delete command. One rule,
+`VisibleDocumentSpecification.IsVisibleTo`, is the single definition; a document's tenant is set by
+the interceptor on creation and cannot be changed through the edit command by anyone.
+
+The Users area is bounded by `UserContext.AllowedTenantIds` — the union of the principal's
+`TenantUsers` membership and their own current tenant. The grid and the export share one predicate so
+they cannot diverge, and the tenant pickers and the "superior" search are bounded by the same
+visibility. **All of it fails closed**: no ambient principal, or a principal belonging to no tenant,
+yields no rows rather than every row.
+
+**The escape is `Permissions.Users.ViewAllTenants`**, granted to the administrator by default. It is
+deliberately *not* `SwitchToAnyTenant`: seeing across tenants and acting across them are different
+capabilities, and switching is a persistent write that re-parents everything the principal
+subsequently creates.
+
+**What is still not filtered:**
 
 | Surface | Tenant-scoped? |
 |---|---|
 | Documents — list, download, edit, delete | **Yes** |
-| Users grid, user **export**, tenant pickers | No — any `Permissions.Users.View` holder sees every tenant's users, with email and phone number |
+| Users grid and user **export** | **Yes** — bounded by `AllowedTenantIds`, widened by `Users.ViewAllTenants` |
+| Tenant filter dropdown and `TenantSelect` | **Yes** — same bound, so a user cannot be assigned into a tenant the administrator cannot see |
+| "Superior" user search | **Yes** — confined to the edited user's tenant, and empty when no tenant is supplied |
+| Tenant **switcher** (app shell) | n/a — bounded by membership, not visibility; it asks which tenants you may switch *into* |
 | Audit trails | No — stamped, not filtered |
 | System logs | No — stamped, not filtered |
 | Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation |
-| Picklists | No — shared reference data by design |
+| Picklists | No — stamped, not filtered; shared reference data by design |
 | Security settings (idle policy) | No — one row per installation, by design |
 | Presence, chat and login notifications | No — broadcast to every connected client |
 
-If you are deploying several customers into one installation, **treat the administration area as
-installation-wide** until that changes.
+If you are deploying several customers into one installation, **treat everything below the Users row
+as installation-wide** until that changes. In particular an audit trail and a system log are readable
+in full by any holder of their view permission, whichever tenant they belong to.
 
 **One provider-specific gap in the stamping.** `SystemLog.TenantId` is written by the SQL Server and
 PostgreSQL sinks and is **always null on SQLite**: that sink is a third-party package with a fixed
@@ -717,11 +734,12 @@ Stated plainly, because finding these out later is worse than reading them now.
 - **Granular Create/Delete permission constants gate rendering only.** Some fine-grained permission
   constants control whether a button is shown, not whether the underlying operation is permitted.
   Treat the coarse feature permission as the real boundary.
-- **Tenant isolation is not enforced outside Documents.** Rows are tenant-stamped, and Documents is
-  filtered on every entry point, but the administration surfaces are not: users, the user export,
-  audit trails, system logs, roles and picklists are all installation-wide to whoever holds the
-  relevant permission. See [Tenancy](#tenancy) for the full table and for the one provider-specific
-  gap in the stamping.
+- **Tenant isolation covers Documents and the Users area, and nothing else yet.** Rows are
+  tenant-stamped throughout, and those two areas are filtered on every entry point — including the
+  user export, which shares its predicate with the grid. **Audit trails, system logs, roles and
+  picklists remain installation-wide** to whoever holds the relevant view permission, as do presence,
+  chat and login notifications. See [Tenancy](#tenancy) for the full table, the cross-tenant right,
+  and the one provider-specific gap in the stamping.
 - **Identity entities are not audited.** `ApplicationUser`, `ApplicationRole` and their claim tables
   do not implement `IAuditable`, so user and role changes do not produce audit rows. Login events
   are recorded separately; permission and role changes are not.

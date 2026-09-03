@@ -56,6 +56,26 @@ public static partial class Permissions
 
         [Description("Allows switching to any tenant (admin privilege)")]
         public const string SwitchToAnyTenant = "Permissions.Users.SwitchToAnyTenant";
+
+        /// <summary>
+        /// Sees users from every tenant, rather than only the ones this principal belongs to.
+        /// </summary>
+        /// <remarks>
+        /// <b>Deliberately not <see cref="SwitchToAnyTenant"/>.</b> Reusing that was considered and
+        /// rejected in Pass 27's gate, on three grounds. Switching is <b>serial</b> - it shows one
+        /// tenant at a time, never the cross-tenant listing this right exists for. Switching is a
+        /// <b>write</b>: <c>TenantSwitchService</c> persists <c>ApplicationUser.TenantId</c>, and
+        /// since the audit interceptor stamps new rows from it, looking at another tenant that way
+        /// would re-parent everything the principal subsequently creates. And it is not even
+        /// <b>reachable</b>: the tenant selector offers membership-only tenants, so no principal can
+        /// currently switch into a tenant they do not belong to whatever they hold.
+        /// <para>
+        /// Seeing across tenants and acting across them are different capabilities, and an auditor
+        /// or support engineer may need the first without ever wanting the second.
+        /// </para>
+        /// </remarks>
+        [Description("Allows viewing users from every tenant, not only the principal's own")]
+        public const string ViewAllTenants = "Permissions.Users.ViewAllTenants";
     }
 }
 
@@ -77,4 +97,9 @@ public class UsersAccessRights
     public bool SuppressLoginNotification { get; set; }
     public bool SwitchTenants { get; set; }
     public bool SwitchToAnyTenant { get; set; }
+
+    // The property NAME is what PermissionService turns into "Permissions.Users.ViewAllTenants", so
+    // this must stay spelled exactly like the constant - see LogsAccessRights for what a mismatch
+    // costs.
+    public bool ViewAllTenants { get; set; }
 } 

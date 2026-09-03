@@ -32,6 +32,7 @@
 @inject IDataSourceService<ApplicationRoleDto> RoleService
 @inject IStringLocalizer<Users> L
 @inject IUserProfileState UserProfileState
+@inject IUserContextAccessor UserContextAccessor
 @inject ILogger<Users> Logger
 
 <PageTitle>@_pageTitle</PageTitle>
@@ -289,6 +290,22 @@
     // Permissions control
     private UsersAccessRights _accessRights = new();
 
+    /// <summary>
+    /// The tenants whose users this principal may see. Empty means none.
+    /// </summary>
+    /// <remarks>
+    /// Taken from <c>UserContext.AllowedTenantIds</c>, which Pass 25 made the union of the
+    /// principal's <c>TenantUsers</c> rows and their own current tenant - so a principal switched
+    /// into a tenant they hold no membership row for still sees the tenant they are actually in.
+    /// <para>
+    /// <b>Empty is the fail-closed default</b>, used both when there is no ambient context and when
+    /// the context reports no tenants. The distinction between a null and an empty
+    /// <c>AllowedTenantIds</c> matters to a caller deciding whether the answer is known
+    /// (<c>UserContext</c> documents it), but not here: neither one authorises a row.
+    /// </para>
+    /// </remarks>
+    private string[] _visibleTenantIds = Array.Empty<string>();
+
     // DataGrid reference
     private MudDataGrid<ApplicationUserDto> _dataGrid = null!;
 
@@ -301,6 +318,13 @@
         _pageTitle = $"{ApplicationSettings.AppName} - {L[_currentUserDto.GetClassDescription()]}";
         InitializeServices();
         _accessRights = await PermissionService.GetAccessRightsAsync<UsersAccessRights>();
+
+        // The ambient principal, not one the page reconstructs: the hub filter pushes it for the
+        // duration of every circuit invocation, and it is the same context AuthorizationBehaviour
+        // already checked to let this page run at all. Absent context yields an empty set, which the
+        // predicate treats as "no rows".
+        _visibleTenantIds = UserContextAccessor.Current?.AllowedTenantIds?.ToArray()
+                            ?? Array.Empty<string>();
         await RoleService.InitializeAsync();
         await TenantService.InitializeAsync();
 
@@ -325,8 +349,40 @@
 
     #region Data Loading and Searching
 
+    /// <summary>
+    /// The rows this principal may see, narrowed by whatever they have typed or selected.
+    /// </summary>
+    /// <remarks>
+    /// <b>The tenant bound lives HERE, and that is the point of the method.</b> The grid
+    /// (<c>LoadServerData</c>) and the export (<c>ExportUsersAsync</c>) both call this and must go on
+    /// both calling it: before Pass 27 neither was bounded, so any holder of
+    /// <c>Permissions.Users.View</c> could list - and download to a spreadsheet, with email and
+    /// phone number - every user in every tenant. A boundary implemented twice is a boundary that
+    /// will eventually be implemented once.
+    /// <para>
+    /// <b>Fail closed.</b> <c>_visibleTenantIds</c> is empty when there is no ambient principal or
+    /// when the principal belongs to no tenant, and an empty set matches nothing - so the failure
+    /// mode is an empty grid, never an unfiltered one. That direction is not a preference: an
+    /// isolation predicate that opens when it cannot answer is the defect it exists to prevent.
+    /// </para>
+    /// <para>
+    /// <b>The "ALL" item keeps its meaning</b> - everything this principal may see. It is not the
+    /// tenant bound; it is a narrowing on top of it, which is why the two clauses are separate and
+    /// both present.
+    /// </para>
+    /// <para>
+    /// A user with a null <c>TenantId</c> belongs to no tenant and is therefore visible only to a
+    /// <c>ViewAllTenants</c> holder. That follows from failing closed rather than being a separate
+    /// decision, and it is asserted so it cannot change silently.
+    /// </para>
+    /// </remarks>
     private Expression<Func<ApplicationUser, bool>> CreateSearchPredicate()
     {
+        // Captured as locals so the expression tree carries values EF can translate rather than
+        // field accesses on the component.
+        var unbounded = _accessRights.ViewAllTenants;
+        var visibleTenantIds = _visibleTenantIds;
+
         return x =>
         (x.UserName!.Contains(_searchString) ||
         x.Email!.Contains(_searchString) ||
@@ -334,7 +390,8 @@
         x.PhoneNumber!.Contains(_searchString) ||
         x.Provider!.Contains(_searchString)) &&
         (_searchRole == null || x.UserRoles.Any(ur => ur.Role.Name == _searchRole)) &&
-        (string.IsNullOrEmpty(_selectedTenantId) || x.TenantId == _selectedTenantId);
+        (string.IsNullOrEmpty(_selectedTenantId) || x.TenantId == _selectedTenantId) &&
+        (unbounded || visibleTenantIds.Contains(x.TenantId!));
     }
 
     private async Task<GridData<ApplicationUserDto>> LoadServerData(GridState<ApplicationUserDto> state, CancellationToken

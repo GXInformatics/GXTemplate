@@ -64,7 +64,19 @@
                     <MudTextField For="@(() => Model.DisplayName)" @bind-Value="Model.DisplayName" Label="@L[Model.GetMemberDisplayName(x => x.DisplayName)]" Placeholder="@L["Enter a display name"]" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
+                    @* Bounded by the tenant this user is being put in, so the superior list matches
+                       where they will live rather than the whole installation. Before Pass 27 no
+                       tenant was passed at all and the component's absent-parameter default was
+                       "every tenant", which made this a cross-tenant user directory.
+
+                       Resolved through the same PrimaryTenantRule the save path uses, so the list
+                       tracks the tenant selection above as it changes. The form carries a SET with
+                       no primary-tenant concept, so this is the first selected tenant - which is
+                       what the user's primary will be for a new account, and for an existing
+                       multi-tenant account is still one the user genuinely belongs to. Conservative
+                       rather than exact, and never wider than the user's own tenants. *@
                     <PickSuperiorAutocomplete For="@(() => Model.Superior)" T="ApplicationUserDto"
+                                              TenantId="@PrimaryTenantRule.Resolve(null, Model.Tenants.Select(t => t.Id))"
                                               OwnerName="@Model.UserName"
                                               Clearable="true"
                                               Label="@L[Model.GetMemberDisplayName(x => x.Superior)]"
