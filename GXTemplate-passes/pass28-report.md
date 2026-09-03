@@ -1,10 +1,11 @@
 # Pass 28 — The Switchable Set, and the Unfiltered User Query
 
-**Nature:** editing pass (§B and Pass 27 A3 implemented) with a **decision gate at §A, not
-implemented**. **No git actions.** **Date:** 2026-09-03.
+**Nature:** editing pass. §B and Pass 27 A3 were implemented first; **§A was a gate, was ratified
+mid-pass, and is now implemented in full**. **No git actions.** **Date:** 2026-09-03.
 
-> **§A is a gate and stops for review.** §B and A3 are independent of it and were implemented, as
-> the brief permits. **`TenantSelector` and `AvailableTenants` were not touched.**
+> §A reached the gate as a recommendation. §2.1-2.4 are left exactly as they were written, so the
+> reasoning that was ratified can be read as it was put; **§2.5 records the ratification and what
+> was built from it.**
 
 ---
 
@@ -110,6 +111,91 @@ is to switch it**, for consistency and because the cost is one line.
 
 ---
 
+### 2.5 Ratified — and what was built
+
+§A was ratified as recommended, with four additions. All four are implemented.
+
+**(i) The ladder is written once, and both answers derive from it.**
+`TenantSwitchService` gained a private `SwitchScope` enum — `None` / `Membership` / `All` — and a
+private `ScopeForAsync(userId)` that resolves it. `CanSwitchToTenantAsync` and the new
+`GetSwitchableTenantsAsync` are both `switch`es over that one result:
+
+```csharp
+SwitchScope.All        => await TenantExistsAsync(tenantId),
+SwitchScope.Membership => await IsMemberOfAsync(userId, tenantId),
+_                      => false
+```
+
+and, for the list, `All` → every tenant, `Membership` → the tenants with a `TenantUsers` row,
+`None` → `Array.Empty<TenantDto>()`. **Menu-and-service agreement is therefore structural.** It is
+not two rules that happen to match: there is one rule, and the only way to make the list disagree
+with the check is to change what both read.
+
+That mattered more here than it would for a read. Switching is a **write** —
+`SwitchToTenantAsync` persists `ApplicationUser.TenantId`, and the audit interceptor stamps every
+subsequently created row from it — so putting a tenant in the menu is offering that mutation. A
+superset offers a switch the service will refuse; a subset hides a granted capability. Neither is
+reachable now.
+
+**(ii) The property test.** `WhatIsOfferedIsExactlyWhatIsPermitted` asserts
+`menu.Contains(t) == CanSwitchToTenantAsync(user, t)` across **every tenant in the installation ×
+every principal shape**, `None` included:
+
+| `SwitchTenants` | `SwitchToAnyTenant` | scope | offered |
+|:--:|:--:|---|---|
+| ✗ | ✗ | `None` | — |
+| ✓ | ✗ | `Membership` | A, B |
+| ✗ | ✓ | `All` | A, B, C |
+| ✓ | ✓ | `All` | A, B, C |
+
+The tenant fixture is deliberately three tenants with membership of two, so "narrowed" and
+"emptied" are distinguishable and so is "narrowed to one".
+
+**(iii) `IPermissionQueryService`, per the caveat.** `TenantSwitchService` no longer takes
+`IPermissionService`. That interface resolves the principal through Blazor's
+`AuthenticationStateProvider`, so a non-Blazor host cannot construct anything depending on it —
+which is not hypothetical: Pass 27 hit exactly that when a datasource took the dependency and
+`Application.IntegrationTests` stopped being able to build one. The swap also fixes a subtler
+mismatch: `IPermissionService` answers about the *current* principal while both methods here take a
+`userId` **argument**, which is the defect Pass 25 removed from this very method.
+
+**(iv) §A.4 — absent, not disabled.** `TenantSelector` no longer carries a `Disabled=` attribute.
+A principal with neither right gets the organisation name as **plain content**:
+
+```razor
+@if (!_canSwitch)
+{
+    <MudStack …>  …the app name and the organisation name…  </MudStack>
+}
+else
+{
+    <MudMenu …>  …the switchable tenants…  </MudMenu>
+}
+```
+
+The gate removes the **action**, not the **information**. A disabled menu tells a user they are
+missing something without telling them what; the organisation name is something everyone needs to
+read. This is the template's own precedent — Pass 16A's Security tab, Pass 25's deactivation toggle.
+
+**And the gate itself is now the list.** The component no longer restates the ladder:
+
+```csharp
+private bool _canSwitch => _switchableTenants.Count > 0;
+```
+
+Its previous gate — `PermissionService.HasPermissionAsync(Permissions.Users.SwitchTenants)` — was
+the ladder badly restated in markup, which is why a `SwitchToAnyTenant` holder saw a disabled menu.
+`@inject IPermissionService` is gone from the file.
+
+**What was *not* done, per the ratification.** `UserProfile.AvailableTenants` is untouched — still
+computed, still a membership projection, still public. `TenantDataSourceService` was not used as the
+source: it answers *visibility*, bounded by `AllowedTenantIds` and widened by `Users.ViewAllTenants`,
+which is a different question from *switchability*. A principal may legitimately see a tenant without
+being able to become it, and the reverse. `SwitchabilityIsNotVisibility` asserts the two are not
+collapsed.
+
+---
+
 ## 3. §B — the user query, bounded
 
 ### 3.1 The predicate is now shared, not restated
@@ -190,6 +276,38 @@ changes, the field must go.
 Captured by restoring each pre-pass body, then restoring from backups
 (`grep -rn "PRE-PASS-28" src/` → nothing).
 
+**§A: 10 red → 10 green**, captured in two halves because the change has two halves.
+
+*The service.* Replacing `GetSwitchableTenantsAsync`'s body with the membership-only list the
+selector used to read — no ladder — turned **5 of the 10 `SwitchableTenantsTests` red**, including
+the property test:
+
+```
+Failed WhatIsOfferedIsExactlyWhatIsPermitted
+Failed ACrossTenantHolderIsOfferedEveryTenant_HoldingThatRightAlone
+Failed ACrossTenantHolderCanActuallySwitchToANonMemberTenant
+Failed APrincipalWithNeitherRightIsOfferedNothing
+Failed SwitchabilityIsNotVisibility
+```
+
+`TenantSelectorComponentTests` stayed green throughout that capture, which is correct and worth
+stating: it mocks `ITenantSwitchService`, so it tests the component's *use* of the list, not the
+list's contents. The two halves are independently falsifiable.
+
+*The component.* Restoring `TenantSelector.razor` to its `HEAD` body turned **all 5
+`TenantSelectorComponentTests` red** — the two ladder cases, the two narrowed-not-emptied cases, and
+§A.4, which fails on the old markup because a disabled `mud-menu-activator` is still present.
+
+**§A's late finding: 1 further red → green.** See §10 A5 — the live run found
+`CanSwitchToTenantAsync` answering **true for a tenant id that does not exist**, and
+`ATenantThatDoesNotExistIsRefused_EvenForACrossTenantHolder` was written red against it before the
+`TenantExistsAsync` guard was added.
+
+**The narrowed-not-emptied controls for §A.** `AMembershipHolderIsOfferedBOTHOfTheirTenants` and
+`TheMenuShowsEveryTenantTheServiceOffers`: a list or a menu that returned only the *current* tenant
+would satisfy every "does not offer C" assertion above while quietly removing a real capability.
+Both are green, at both layers.
+
 **§B: 7 red / 2 green → 9 green.** Red: the bound, the two-tenant case, the tenantless user, both
 fail-closed cases, the partition demonstration, and the scope assertion.
 
@@ -204,17 +322,24 @@ claimed.
 
 ### 5.2 Counts
 
-| Suite | Start | After | Delta |
-|---|---:|---:|---:|
-| `Infrastructure.UnitTests` | 208 | **217** | +9 |
-| `Application.IntegrationTests` | 9 | 9 | 0 |
-| `Application.UnitTests` | 407 (+12 skipped) | 407 (+12 skipped) | 0 |
-| `Server.UI.IntegrationTests` | 171 | **175** | +4 |
-| **Total passed** | **795** | **808** | **+13** |
-| Skipped / Failed | 12 / 0 | 12 / 0 | 0 |
+| Suite | Start | After §B/A3 | After §A | Delta |
+|---|---:|---:|---:|---:|
+| `Infrastructure.UnitTests` | 208 | 217 | **217** | +9 |
+| `Application.IntegrationTests` | 9 | 9 | 9 | 0 |
+| `Application.UnitTests` | 407 (+12 skipped) | 407 (+12 skipped) | **418** (+12 skipped) | +11 |
+| `Server.UI.IntegrationTests` | 171 | 175 | **180** | +9 |
+| **Total passed** | **795** | **808** | **824** | **+29** |
+| Skipped / Failed | 12 / 0 | 12 / 0 | **12 / 0** | 0 |
 
-**+13 is exactly the new tests:** `UserVisibilityTests` 9, `SuperiorBoundComponentTests` 4. **No test
-was modified, renamed or deleted.**
+**+29 is exactly the new tests, itemised:** `UserVisibilityTests` 9 and
+`SuperiorBoundComponentTests` 4 from §B/A3; then `SwitchableTenantsTests` **11** and
+`TenantSelectorComponentTests` **5** from §A. (11, not the 10 the §A plan called for: A5 added one.)
+
+**No test was deleted or renamed.** One was **modified**, and only in its fixture:
+`TenantSwitchAuthorizationTests.CreateService` now mocks `IPermissionQueryService` instead of
+`IPermissionService`, because the service's constructor changed. Its **12 assertions are byte-identical** — the change is `Mock.Of<IPermissionService>` returning a bool becoming
+`Mock<IPermissionQueryService>` returning two `PermissionModel` rows with the same two `Assigned`
+flags. The fixture had to follow the constructor; nothing was relaxed to accommodate a result.
 
 ### 5.3 Warnings
 
@@ -223,21 +348,27 @@ new warning.
 
 ### 5.4 The boundary suites — green and byte-unmodified
 
-`git status` shows no change to any of them:
+`git diff --quiet HEAD` returns clean for every one of them:
 
 | Suite | Result |
 |---|---|
-| `DataSourceScopeTests` (Pass 26) | green — §B changes a scoped datasource |
-| `UserTenantScopeComponentTests` (Pass 27) | green — the grid and export still agree |
-| `TenantVisibilityTests` (Pass 27) | green |
-| `SuperiorAutocompleteScopeComponentTests` (Pass 27) | green — the component clause still narrows |
+| `DataSourceScopeTests` (Pass 26) | unchanged, green — §B changes a scoped datasource |
+| `UserTenantScopeComponentTests` (Pass 27) | unchanged, green — the grid and export still agree |
+| `TenantVisibilityTests` (Pass 27) | unchanged, green — the **visibility** bound, which §A must not disturb |
+| `SuperiorAutocompleteScopeComponentTests` (Pass 27) | unchanged, green — the component clause still narrows |
+| `UserVisibilityTests` (Pass 28 §B) | unchanged, green |
+| `SuperiorBoundComponentTests` (Pass 28 A3) | unchanged, green |
 
-33 tests across the four. That Pass 27's grid/export tests pass untouched is the specific proof that
-moving the bound out of `CreateSearchPredicate` into `VisibleUsers()` preserved the behaviour.
+46 tests across the six. Two of them carry the load for §A specifically: `TenantVisibilityTests`
+passing untouched is the evidence that adding a *switchability* bound did not move the *visibility*
+bound, which is the collapse §2.5 says was refused. And Pass 27's grid/export tests passing untouched
+is the evidence that moving §B's bound out of `CreateSearchPredicate` into `VisibleUsers()` preserved
+the behaviour.
 
 ### 5.5 The live run
 
-Against a freshly seeded two-tenant database, driving the **real** `UserDataSourceService`:
+**§B — the user query.** Against a freshly seeded two-tenant database, driving the **real**
+`UserDataSourceService`:
 
 ```
 tenants : Default, Europe
@@ -256,20 +387,65 @@ B  cache scope          : PerUser       (expect PerUser)
 Bounded, widened by the escape, empty in both fail-closed positions, and narrowed-not-emptied
 visible in the first three lines.
 
-*The switch cases are not in this capture* — they belong to §A, which is not implemented.
+**§A — the switch cases.** Three principals, each a member of `live-org-1` **only**, differing solely
+in which switch permission they hold, driving the **real** `TenantSwitchService` resolved from the
+real container against the real SQL Server harness:
+
+```
+SEEDED TENANTS: live-org-1/Org One, live-org-2/Org Two
+EACH PRINCIPAL IS A MEMBER OF live-org-1 ONLY.
+
+[SwitchTenants only ]  OFFERED = [live-org-1]
+    CanSwitchTo(live-org-1)     = True    offered = True
+    CanSwitchTo(live-org-2)     = False   offered = False
+    CanSwitchTo(no-such-tenant) = False
+    SWITCH -> live-org-2: Succeeded=False  PERSISTED TenantId=live-org-1
+
+[SwitchToAnyTenant  ]  OFFERED = [live-org-1, live-org-2]
+    CanSwitchTo(live-org-1)     = True    offered = True
+    CanSwitchTo(live-org-2)     = True    offered = True
+    CanSwitchTo(no-such-tenant) = False
+    SWITCH -> live-org-2: Succeeded=True   PERSISTED TenantId=live-org-2
+
+[neither right      ]  OFFERED = []
+    CanSwitchTo(live-org-1)     = False   offered = False
+    CanSwitchTo(live-org-2)     = False   offered = False
+    CanSwitchTo(no-such-tenant) = False
+    SWITCH -> live-org-2: Succeeded=False  PERSISTED TenantId=live-org-1
+```
+
+Every §C case, live: the membership holder is offered their own tenant and **refused a non-member
+tenant with nothing written**; the cross-tenant holder is offered both, switches into a tenant they
+have no membership row for, and **the write lands**; the holder of neither is offered nothing and
+cannot switch. `offered` equals `CanSwitchTo` on every line — the property test's invariant holding
+against a real database, not a mock.
+
+The `no-such-tenant` column is the A5 finding. On the **first** run of this probe that line read
+`True` for the cross-tenant holder; the capture above is the re-run after the fix.
+
 
 ### 5.6 Generation probe
 
 ```
-dotnet pack → install → dotnet new gxblazor -n P28 → build (0 errors)
-             → dotnet test: 808 passed, 12 skipped, 0 failed → uninstall
+dotnet pack build/pack.csproj -o .          → GX.Blazor.Template.1.0.0.nupkg
+dotnet new install ./GX.Blazor.Template.1.0.0.nupkg
+dotnet new gxblazor -n P28A                 → created
+dotnet build P28A.slnx                      → Build succeeded, 0 Error(s)
+dotnet test  P28A.slnx                      → 824 passed, 12 skipped, 0 failed
+dotnet new uninstall GX.Blazor.Template     → uninstalled
 ```
+
+Identical to source, suite for suite. **Generated at `C:\gxp28`, not in the scratchpad:** the first
+attempt failed with `MSB3021 … exceeds the OS max path limit` on a `browser-wasm` native asset. That
+is the session scratchpad's own depth plus the repo's nesting, not a template defect — the same
+template generates and tests clean two directories down. Recorded in case the next pass generates
+into a deep path and reads the error as a regression.
 
 ---
 
 ## 6. README
 
-No surface changed status, so the table's rows stand. Two clauses were made more precise:
+**One surface changed status** — the tenant switcher. Three other clauses were made more precise:
 
 - The Users-area paragraph now names `UserTenantVisibility.IsVisibleTo` as the single definition and
   states that the datasource shares it.
@@ -278,6 +454,12 @@ No surface changed status, so the table's rows stand. Two clauses were made more
 - The "superior" row now says the list it searches is bounded by the same rule *and then* narrowed to
   the edited user's tenant, which is §3.3's two-layer distinction stated where a reader will meet it.
 
+- The **tenant switcher row** changed status. It read *"n/a — bounded by membership, not visibility"*,
+  which was true of the old component only by accident: it was gated on one permission and sourced
+  from a membership projection, so it agreed with membership without ever asking the question. It now
+  reads **"Yes, on a different bound"** and names the ladder, then states that the menu and the guard
+  on the write derive from one rule — which is the property a reader needs in order to trust it.
+
 ---
 
 ## 7. What remains unscoped
@@ -285,42 +467,52 @@ No surface changed status, so the table's rows stand. Two clauses were made more
 **Audit trails, system logs, roles, picklists, security settings, presence and chat** — unchanged by
 this pass and stated as such in the README. Stage 5 takes the first three.
 
-Also still open, and deferred by direction: **`TenantSelector` (§A)**, which remains gated on the
-wrong permission and sourced from a membership-only list.
+§A is no longer on this list. What it leaves behind is **A1**: `UserProfile.AvailableTenants` is now
+computed and unread, kept deliberately and flagged for its own decision.
 
 ---
 
 ## 8. File map and diffstat
 
-**Modified — source (3)**
+**Modified — source (6)**
 
-| File | Lines | Why |
-|---|---:|---|
-| `…/Services/Identity/UserDataSourceService.cs` | 75 | §B — the bound, the scope correction, the permission query |
-| `…/Identity/Users/Components/UserFormDialog.razor` | 37 | A3 — `InputModel.TenantId` and the picker's bound |
-| `src/Server.UI/Pages/Identity/Users/Users.razor` | 63 | §B — `VisibleUsers()`, the shared rule, A3's model wiring |
-| `README.md` | 15 | §6 |
+| File | Pass part | Why |
+|---|---|---|
+| `…/Services/Identity/UserDataSourceService.cs` | §B | the bound, the scope correction, the permission query |
+| `…/Identity/Users/Components/UserFormDialog.razor` | A3 | `InputModel.TenantId` and the picker's bound |
+| `src/Server.UI/Pages/Identity/Users/Users.razor` | §B, A3 | `VisibleUsers()`, the shared rule, A3's model wiring |
+| `src/Infrastructure/Services/TenantSwitchService.cs` | §A | `SwitchScope`, `ScopeForAsync`, `GetSwitchableTenantsAsync`, `TenantExistsAsync`, `IPermissionQueryService` |
+| `src/Application/Common/Interfaces/ITenantSwitchService.cs` | §A | `GetSwitchableTenantsAsync` on the contract |
+| `src/Server.UI/Components/AppShell/TenantSelector.razor` | §A | the gate, the source, §A.4's absent-not-disabled branch |
+| `README.md` | §6 | the switcher row and three clauses |
 
-**New — source (1)** · `src/Application/Features/Identity/UserTenantVisibility.cs` — 65 lines, the
+**New — source (1)** · `src/Application/Features/Identity/UserTenantVisibility.cs` — 65 lines, §B's
 shared rule.
 
-**New — tests (2)**
+**New — tests (4)**
 
-| File | Lines | Tests |
-|---|---:|---:|
-| `tests/Infrastructure.UnitTests/Services/UserVisibilityTests.cs` | 205 | 9 |
-| `tests/Server.UI.IntegrationTests/SuperiorBoundComponentTests.cs` | 218 | 4 |
+| File | Lines | Tests | Pass part |
+|---|---:|---:|---|
+| `tests/Infrastructure.UnitTests/Services/UserVisibilityTests.cs` | 205 | 9 | §B |
+| `tests/Server.UI.IntegrationTests/SuperiorBoundComponentTests.cs` | 218 | 4 | A3 |
+| `tests/Application.UnitTests/Identity/Users/SwitchableTenantsTests.cs` | 288 | 11 | §A |
+| `tests/Server.UI.IntegrationTests/TenantSelectorComponentTests.cs` | 197 | 5 | §A |
 
-**Diffstat:** `4 files changed, 139 insertions(+), 51 deletions(-)` plus 3 new files. No migration was
-touched — this pass changes no schema.
+**Modified — tests (1)** · `TenantSwitchAuthorizationTests.cs`, fixture only (§5.2).
+
+**Diffstat, §A alone:** `5 files changed, 240 insertions(+), 50 deletions(-)` plus 2 new test files.
+No migration was touched by any part of this pass — it changes no schema.
 
 ### Edit fidelity
 
-- **Line endings unchanged** — LF throughout.
-- **No BOM added or removed.**
-- **No scaffolding left behind** — `grep -rn "PRE-PASS-28" src/` returns nothing.
-- **No test was edited** to accommodate a change; the two fixture completions this programme has
-  needed before were not needed here.
+- **Line endings uniform** — every touched file is wholly CRLF, matching the repo; no file was left
+  mixed.
+- **No BOM added or removed.** `TenantSwitchService.cs` and `TenantSelector.razor` still carry
+  theirs at offset 0, verified with `od`. One edit displaced the BOM to line 2 mid-pass (§10 A6);
+  it was restored before the file was built against.
+- **No scaffolding left behind** — `grep -rn "PRE-PASS-28" src/ tests/` returns nothing.
+- **No test was weakened** to accommodate a change. The one test file modified changed only its
+  constructor mock, and only because the constructor changed (§5.2).
 
 ---
 
@@ -328,23 +520,33 @@ touched — this pass changes no schema.
 
 | Probe | Purpose | Disposed |
 |---|---|---|
-| `scratchpad/p28/` | backups of the two changed sources for the red captures | deleted |
+| `scratchpad/p28/` | backups of §B's two changed sources for the red captures | deleted |
 | `scratchpad/probe28/` | a console project driving the real datasource against the live database | deleted |
 | `scratchpad/live28/` | the seeded SQLite business and log databases | deleted |
-| `C:\src\P28` | the generated project | deleted, template uninstalled |
+| `scratchpad/p28a/` | backups of §A's two changed sources for the red captures | deleted |
+| `tests/…/Services/ScratchLiveTenantSwitchProbe.cs` | §A's live run — three principals against the real SQL Server harness | **deleted from the repo** |
+| `C:\gxp28\P28A` | the generated project | deleted, template uninstalled |
+| `C:\src\P28` | the earlier generated project | deleted |
 
-No database on any server was created or dropped. The root `.nupkg` was rebuilt and is gitignored.
+The §A live probe is worth naming precisely because it lived **inside the test tree** rather than in
+the scratchpad: it needed the `Application.IntegrationTests` container to resolve the real service
+against the real database. It reached the harness's private scope factory **by reflection**
+specifically so that no shared harness file was modified by a scratch probe. `git status` after
+removal shows only the six §A files, no residue.
+
+No database on any server was created or dropped; the probe seeded two tenants into the harness
+database the suite already resets between tests. The root `.nupkg` was rebuilt and is gitignored.
 
 ---
 
 ## 10. Anomalies
 
-**A1 — `AvailableTenants` will become unconsumed if §A is ratified.** It has exactly one reader
-today (§2.2), and the recommendation moves that reader elsewhere. It would then be a correct,
-cheaply-computed, entirely unread field on a public record — the same shape as
-`PickUserAutocomplete` before Pass 27 deleted it. **Not deleted here**, because removing a public
-member of `UserProfile` is visible to generated projects and deserves its own decision; flagged so
-that decision gets made rather than forgotten.
+**A1 — `AvailableTenants` is now unconsumed.** It had exactly one reader (§2.2), and §A moved that
+reader to `GetSwitchableTenantsAsync`. It is now a correct, cheaply-computed, entirely unread field
+on a public record — the same shape as `PickUserAutocomplete` before Pass 27 deleted it. **Kept, by
+direction:** the ratification said it stays exactly as it is. Removing a public member of
+`UserProfile` is visible to every generated project and deserves its own decision; flagged so that
+decision gets made rather than forgotten.
 
 **A2 — `UserDataSourceService` now costs one permission query per cache miss.** Small, and bounded by
 the `PerUser` cache entry, but it is a database round trip inside a datasource load that previously
@@ -360,3 +562,58 @@ duplication.
 `Render<UserFormDialog>` produces a component whose body is never in the render tree, because
 `MudDialog` hands its content to the dialog instance rather than rendering it inline. The first
 attempt failed exactly that way. Recorded because the next person to test a dialog will hit it.
+
+**A5 — `CanSwitchToTenantAsync` said yes to tenants that do not exist. Found by the live run, fixed.**
+The `All` branch returned `true` unconditionally, so a `SwitchToAnyTenant` holder was "permitted" any
+string at all. The write was still refused — `SwitchToTenantAsync` looks the tenant up and fails —
+so there was no exposure. But two things were wrong anyway, and both are the kind a mock cannot show:
+
+1. **It broke the property §A exists to guarantee.** `permitted` was `true` while `offered` was
+   `false`, because a list can only offer tenants that exist. The property test quantifies over the
+   installation's real tenants and so was structurally unable to see it. Only the live probe, which
+   asked about a fabricated id, did.
+2. **It made the refusal message distinguishable** — *"User or tenant not found"* rather than
+   *"Insufficient permissions"* — so a caller could tell a real tenant id from an invented one. That
+   is precisely the enumeration leak the comment already in `SwitchToTenantAsync` says the uniform
+   message exists to prevent. The guard was contradicting its own file's stated intent.
+
+Fixed with `TenantExistsAsync` in the `All` branch; the `Membership` branch never had the hole,
+because a `TenantUsers` row implies the tenant. Red captured before the fix, one new test.
+
+**This is the pass's argument for live runs.** Eleven unit tests and five component tests were green
+against the defect. It took asking a real database an off-menu question to find it.
+
+**A6 — `sed -i '1i'` displaces a UTF-8 BOM to line 2.** The BOM is bytes, not a line, so an insert-at-1
+lands after it. `TenantSwitchService.cs` briefly had `\357\273\277` at the start of line 2 and a
+`using` at the start of line 1. Caught with `head -c 20 | od -c` and repaired before the file was
+built against. Recorded because it is silent: the file still compiles, and the corruption is only
+visible in a byte dump.
+
+**A7 — a Razor edit that removes an `@if` can leave an orphaned `else` block that still builds.**
+Deleting `@if (_availableTenants != null)` from `TenantSelector.razor` left a dangling `}` and its
+`else { …Loading organizations… }`. **The build succeeded** — Razor treated the fragment as literal
+markup — so the build was not evidence of correctness. Found by reading the block, not by compiling
+it. Worth remembering wherever a Razor conditional is removed.
+
+**A8 — two bUnit facts about `MudMenu`, each of which cost a cycle.**
+
+*Its items are not in the component's markup.* `MudMenu` renders `ChildContent` into
+`MudPopoverProvider`, so asserting on `Render<TenantSelector>().Markup` finds the activator and
+nothing else. The fixture renders the provider alongside the component and concatenates both. Same
+shape as A4's `MudDialog` finding from earlier this pass — MudBlazor's overlay components
+consistently render elsewhere.
+
+*The activator `div` has no click handler.* It carries `onkeydown` only; the click lives on the
+chevron `MudIconButton` inside it, wired to `context.ToggleAsync`. `Find(".mud-menu-activator")`
+followed by `.Click()` throws `MissingEventHandlerException` naming the keydown handler — a good
+error, but only if you read it. `Find(".mud-menu-activator button")` is the working selector.
+
+**A9 — `Testing.RunAsAdministratorAsync` cannot succeed.** Unrelated to this pass, found while
+writing the live probe. It resolves `RoleManager<IdentityRole>`, but the application registers
+`RoleManager<ApplicationRole>`; `GetService` returns `null` and the next line throws
+`NullReferenceException`. `RunAsDefaultUserAsync` is unaffected — it passes an empty roles array, so
+the null is never dereferenced — which is why nothing has caught this: **no test calls the
+administrator helper.** The probe did, and it failed immediately. It is a one-word fix
+(`IdentityRole` → `ApplicationRole`), but it is in a shared harness file and belongs to whichever
+pass first needs a role-bearing test principal, not to a scratch probe. **Left as found and recorded
+here.**

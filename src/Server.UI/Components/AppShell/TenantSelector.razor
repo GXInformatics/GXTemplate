@@ -4,8 +4,11 @@
 @using CleanArchitecture.Blazor.Application.Common.Interfaces
 @inject IStringLocalizer<TenantSelector> L
 @inject IUserProfileState UserProfileState
+@* IPermissionService is deliberately no longer injected. This component used to consult it directly
+   for Permissions.Users.SwitchTenants, which is what made the escalated permission invisible: the
+   ladder was implemented here, badly, alongside a correct copy in the service. It now asks the
+   service for the list and derives everything from that. *@
 @inject ITenantSwitchService TenantSwitchService
-@inject IPermissionService PermissionService
 @implements IDisposable
 
 
@@ -14,8 +17,28 @@
     <Logo Class="ml-4 mr-2" Style="width:32px;height32px" />
    
 
-    <MudMenu AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.BottomRight" LockScroll="true" Class="flex-grow-1"
-             Disabled="!_hasSwitchPermission">
+    @* A principal who cannot switch gets the organisation name as PLAIN CONTENT, not a disabled
+       menu. The gate removes the action, not the information: which organisation you are in is
+       something everyone needs to see, and a greyed-out control tells a user they are missing
+       something without telling them what. "Absent, never disabled" is this template's own
+       precedent - Pass 16A's Security tab, and Pass 25's deactivation gate, which kept the status
+       visible while removing the toggle. *@
+    @if (!_canSwitch)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-grow-1">
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h6">
+                    @L[ApplicationSettings.AppName]
+                </MudText>
+                <MudText Typo="Typo.subtitle2" Class="mud-secondary-text" Style="margin-top:-4px;">
+                    @(UserProfile?.Tenant?.Name ?? "No Organization")
+                </MudText>
+            </MudStack>
+        </MudStack>
+    }
+    else
+    {
+    <MudMenu AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.BottomRight" LockScroll="true" Class="flex-grow-1">
         <ActivatorContent>
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-grow-1">
                 <MudStack Spacing="0">
@@ -41,18 +64,13 @@
                     <MudDivider Class="my-2" />
                 }
 
-                @if (_availableTenants != null)
+                @* Neither an empty case nor a loading case renders here any more. An empty switchable
+                   set means the principal may not switch at all, and that is handled above by not
+                   offering the menu; the list is loaded in OnInitializedAsync before this content is
+                   ever shown, and is never null. Every tenant below is one the service will accept -
+                   the list and the check come from the same rule. *@
+                @foreach (var tenant in _switchableTenants)
                 {
-                    if (_availableTenants.Count == 0)
-                    {
-                        <MudMenuItem Disabled="true">
-                            <div class="d-flex align-center">
-                                <MudText>@L["No available organization"]</MudText>
-                            </div>
-                        </MudMenuItem>
-                    }
-                    @foreach (var tenant in _availableTenants)
-                    {
                         <MudMenuItem OnClick="() => SwitchToTenant(tenant.Id)" Disabled="@(_isSwitching)">
                             <div class="d-flex align-center">
                                 <MudStack Spacing="0">
@@ -72,33 +90,62 @@
                             </div>
                         </MudMenuItem>
                     }
-                }
-                else
-                {
-                    <MudMenuItem Disabled="true">
-                        <div class="d-flex align-center">
-                            <MudText>@L["Loading organizations..."]</MudText>
-                        </div>
-                    </MudMenuItem>
-                }
             </div>
         </ChildContent>
     </MudMenu>
+    }
 </MudStack>
 
 
 @code
 {
     private UserProfile UserProfile => UserProfileState.Value;
-    private List<TenantDto>? _availableTenants => UserProfile.AvailableTenants;
+
+    /// <summary>
+    /// The tenants this principal may switch into - from the service that also decides whether a
+    /// switch is allowed.
+    /// </summary>
+    /// <remarks>
+    /// <b>Not <c>UserProfile.AvailableTenants</c>, which this used to read.</b> That is a Mapster
+    /// projection of <c>TenantUsers</c> - membership only - so it had nothing to show a holder of
+    /// <c>Permissions.Users.SwitchToAnyTenant</c>, whose whole capability is switching into tenants
+    /// they do NOT belong to. It stays as it is, a true statement of membership; this control simply
+    /// asks a different question.
+    /// <para>
+    /// <b>And not the tenant datasource either.</b> That answers "which tenants may I SEE", bounded
+    /// by <c>AllowedTenantIds</c> and widened by <c>Users.ViewAllTenants</c>. Seeing a tenant and
+    /// being able to become it are different capabilities with different escapes, and collapsing
+    /// them would silently grant one through the other.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<TenantDto> _switchableTenants = Array.Empty<TenantDto>();
+
     private bool _isSwitching;
-    private bool _hasSwitchPermission;
+
+    /// <summary>
+    /// Whether this principal may switch at all - which is exactly "is the switchable set non-empty".
+    /// </summary>
+    /// <remarks>
+    /// <b>Derived from the list, not from a separate permission check.</b> It used to be
+    /// <c>HasPermissionAsync(SwitchTenants)</c> alone, which disabled the menu for a
+    /// <c>SwitchToAnyTenant</c> holder even though the service would have permitted them to switch
+    /// anywhere - the escalated permission had no UI at all. Asking the list means the gate and the
+    /// service cannot disagree about the ladder, because only one of them implements it.
+    /// </remarks>
+    private bool _canSwitch => _switchableTenants.Count > 0;
 
     protected override async Task OnInitializedAsync()
     {
         UserProfileState.Changed += OnUserProfileChanged;
-        _hasSwitchPermission = await PermissionService.HasPermissionAsync(Permissions.Users.SwitchTenants);
-        
+        await LoadSwitchableTenantsAsync();
+    }
+
+    private async Task LoadSwitchableTenantsAsync()
+    {
+        var userId = UserProfile?.UserId;
+        _switchableTenants = string.IsNullOrEmpty(userId)
+            ? Array.Empty<TenantDto>()
+            : await TenantSwitchService.GetSwitchableTenantsAsync(userId);
     }
 
     public void Dispose()

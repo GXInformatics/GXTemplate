@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
@@ -100,11 +101,27 @@ public class TenantSwitchAuthorizationTests
         factory.Setup(x => x.CreateAsync(It.IsAny<CancellationToken>()))
             .Returns(() => new ValueTask<IApplicationDbContext>(NewContext()));
 
-        var permissions = new Mock<IPermissionService>();
-        permissions.Setup(x => x.HasPermissionAsync(Permissions.Users.SwitchTenants))
-            .ReturnsAsync(switchTenants);
-        permissions.Setup(x => x.HasPermissionAsync(Permissions.Users.SwitchToAnyTenant))
-            .ReturnsAsync(switchToAnyTenant);
+        // IPermissionQueryService since Pass 28: the service no longer depends on
+        // IPermissionService, which resolves the principal through Blazor's
+        // AuthenticationStateProvider and therefore cannot be constructed in a non-Blazor host.
+        // Behaviourally identical for these tests - the same two permissions, held or not.
+        var permissions = new Mock<IPermissionQueryService>();
+        permissions.Setup(x => x.GetAllPermissionsByUserId(It.IsAny<string>()))
+            .ReturnsAsync(new List<PermissionModel>
+            {
+                new()
+                {
+                    ClaimType = "Permission",
+                    ClaimValue = Permissions.Users.SwitchTenants,
+                    Assigned = switchTenants
+                },
+                new()
+                {
+                    ClaimType = "Permission",
+                    ClaimValue = Permissions.Users.SwitchToAnyTenant,
+                    Assigned = switchToAnyTenant
+                }
+            });
 
         return new TenantSwitchService(
             factory.Object,

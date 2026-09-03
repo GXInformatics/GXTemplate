@@ -441,7 +441,7 @@ subsequently creates.
 | Users grid and user **export** | **Yes** — bounded by `AllowedTenantIds`, widened by `Users.ViewAllTenants` |
 | Tenant filter dropdown and `TenantSelect` | **Yes** — same bound, so a user cannot be assigned into a tenant the administrator cannot see |
 | "Superior" user search | **Yes** — the list it searches is bounded by the same rule as the grid, and it then narrows to the edited user's own tenant; empty when no tenant is supplied |
-| Tenant **switcher** (app shell) | n/a — bounded by membership, not visibility; it asks which tenants you may switch *into* |
+| Tenant **switcher** (app shell) | **Yes, on a different bound** — not visibility but the switch ladder: `SwitchTenants` offers the tenants you belong to, `SwitchToAnyTenant` offers all of them, neither offers none. The menu and the guard on the write derive from one rule in `TenantSwitchService`, so what is offered is exactly what is permitted |
 | Audit trails | No — stamped, not filtered |
 | System logs | No — stamped, not filtered |
 | Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation |
