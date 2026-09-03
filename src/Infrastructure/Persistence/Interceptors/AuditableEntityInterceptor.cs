@@ -348,6 +348,12 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
     {
         var currentUser = _userContextAccessor.Current;
         var userId = currentUser?.UserId;
+
+        // Captured here, from the SAME context object the user id comes from, and stored on the row
+        // rather than resolved later. See AuditTrail.TenantId: the tenant a change was made in and
+        // the tenant its author is in today are different facts, and only the first one is history.
+        var tenantId = currentUser?.TenantId;
+
         var now = _dateTime.UtcNow;
         var auditTrails = new List<AuditTrail>();
 
@@ -355,7 +361,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
         {
             if (IsValidAuditEntry(entry))
             {
-                var auditTrail = CreateAuditTrail(entry, userId, now);
+                var auditTrail = CreateAuditTrail(entry, userId, tenantId, now);
                 auditTrails.Add(auditTrail);
             }
         }
@@ -368,12 +374,13 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
         return entry.Entity is not AuditTrail && entry.State != EntityState.Detached && entry.State != EntityState.Unchanged;
     }
 
-    private AuditTrail CreateAuditTrail(EntityEntry entry, string userId, DateTime now)
+    private AuditTrail CreateAuditTrail(EntityEntry entry, string userId, string tenantId, DateTime now)
     {
         var auditTrail = new AuditTrail
         {
             TableName = entry.Entity.GetType().Name,
             UserId = userId,
+            TenantId = tenantId,
             DateTime = now,
             AffectedColumns = new List<string>(),
             Changes = new Dictionary<string, AuditChange>()
@@ -474,10 +481,16 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
 
         // project to new instances without PropertyEntry references so nothing keeps a change-tracker
         // entry alive once the rows are handed to the context
+        //
+        // EVERY persisted field has to be named here. This is a hand-written copy, so a property
+        // added to AuditTrail and not added below is silently dropped between being captured and
+        // being saved - the column exists, the value was computed, and the row lands null. TenantId
+        // was exactly that for the length of one test run.
         return auditTrails.Select(a => new AuditTrail
         {
             TableName = a.TableName,
             UserId = a.UserId,
+            TenantId = a.TenantId,
             DateTime = a.DateTime,
             AffectedColumns = a.AffectedColumns?.ToList(),
             Changes = a.Changes?.ToDictionary(kv => kv.Key, kv => new AuditChange { Old = kv.Value.Old, New = kv.Value.New }),

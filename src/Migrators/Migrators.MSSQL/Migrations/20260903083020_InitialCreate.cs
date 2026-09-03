@@ -52,6 +52,7 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
                     Value = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
                     Text = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
                     Description = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
+                    TenantId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
                     CreatedById = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
                     LastModifiedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
@@ -276,6 +277,7 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
                     Id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
                     UserId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
+                    TenantId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
                     AuditType = table.Column<string>(type: "nvarchar(max)", nullable: false),
                     TableName = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
                     DateTime = table.Column<DateTime>(type: "datetime2", nullable: false),
@@ -412,6 +414,11 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
                 column: "NormalizedUserName",
                 unique: true,
                 filter: "[NormalizedUserName] IS NOT NULL");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AuditTrails_TenantId",
+                table: "AuditTrails",
+                column: "TenantId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_AuditTrails_UserId",

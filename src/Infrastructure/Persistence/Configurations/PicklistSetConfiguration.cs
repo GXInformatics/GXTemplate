@@ -18,6 +18,12 @@ public class PicklistSetConfiguration : IEntityTypeConfiguration<PicklistSet>
         builder.Property(t => t.Value).HasMaxLength(50);
         builder.Property(t => t.Text).HasMaxLength(100);
         builder.Property(t => t.Description).HasMaxLength(255);
+        // Deliberately still (Name, Value) and NOT (TenantId, Name, Value), even though the entity
+        // now carries a TenantId. Widening the key would let two tenants define the same
+        // Name/Value pair, which is a behaviour change - and this pass stamps without scoping.
+        // Whoever scopes picklists has to widen this index in the same change, or the first two
+        // tenants to want the same brand name will collide on a constraint that has no business
+        // spanning them.
         builder.HasIndex(t => new { t.Name, t.Value }).IsUnique(true);
         builder.Ignore(e => e.DomainEvents);
     }

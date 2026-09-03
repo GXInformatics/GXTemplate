@@ -7,13 +7,15 @@
         <authors>GX Informatics Limited</authors>
         <description>
             A Blazor Server solution template for .NET 10, laid out in Clean Architecture layers.
-            Ships multi-tenant ASP.NET Core Identity with permission claims, deny-by-default
-            authorization on every request, transactional audit trails, structured logging into a separate
-            log database, and Documents and PicklistSets as worked examples.
+            Ships ASP.NET Core Identity with permission claims over a multi-tenant DATA MODEL,
+            deny-by-default authorization on every request, transactional audit trails, structured
+            logging into a separate log database, and Documents and PicklistSets as worked examples.
+            Tenant isolation is enforced for Documents only; the administration surfaces are
+            installation-wide. See the Tenancy section of the README before relying on it.
         </description>
         <summary>
-            Blazor Server solution template for .NET 10 in Clean Architecture layers, with
-            multi-tenant identity, deny-by-default authorization and transactional auditing.
+            Blazor Server solution template for .NET 10 in Clean Architecture layers, with a
+            multi-tenant data model, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
             1.0.0

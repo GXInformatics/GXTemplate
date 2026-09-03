@@ -187,7 +187,15 @@
                                     <MudText Typo="Typo.body2">@(!string.IsNullOrEmpty(context.Item.UserName) ? context.Item.UserName : L["Anonymous"])</MudText>
                                 </MudStack>
                                 <MudStack Row Spacing="1">
-                 
+
+                                    @* An event with no tenant is not missing data: startup, seeding and
+                                       background work genuinely belong to the installation rather than to
+                                       any tenant, so it is labelled rather than left blank. *@
+                                    <MudText Typo="Typo.caption">@L[_currentDto.GetMemberDisplayName(x => x.TenantId)]:</MudText>
+                                    <MudText Typo="Typo.body2">@(!string.IsNullOrEmpty(context.Item.TenantId) ? context.Item.TenantId : L["Installation"])</MudText>
+                                </MudStack>
+                                <MudStack Row Spacing="1">
+
                                     <MudText Typo="Typo.caption">@L[_currentDto.GetMemberDisplayName(x => x.TimeStamp)]:</MudText>
                                     <UtcToLocal UTCDateTime="@context.Item.TimeStamp"></UtcToLocal>
                                 </MudStack>

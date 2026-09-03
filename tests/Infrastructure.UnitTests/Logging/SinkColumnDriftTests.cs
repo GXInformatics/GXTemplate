@@ -73,16 +73,57 @@ public class SinkColumnDriftTests
             ? EntityProperties.Select(ToSnakeCase).ToArray()
             : EntityProperties;
 
+    /// <summary>
+    /// The columns the SQLite sink writes, as a LITERAL list rather than as "whatever the entity
+    /// has".
+    /// </summary>
+    /// <remarks>
+    /// It used to be written as <c>EntityProperties</c>, on the grounds that the fork's fixed
+    /// statement happened to match the entity - which was true when it was written and made this
+    /// provider's three comparisons circular: the sink was defined as the entity, so the entity
+    /// could never fail to match the sink. Pass 24 added <c>SystemLog.TenantId</c> and the sink went
+    /// on writing ten columns, silently, exactly as the circularity guaranteed it could.
+    /// <para>
+    /// These are the sink's own words, read out of
+    /// <c>Blazor.Serilog.Sinks.SQLite</c>: its INSERT is
+    /// <c>VALUES (@timeStamp, @level, @exception, @message, @properties, @messageTemplate,
+    /// @logEvent, @userName, @clientIP, @clientAgent)</c>, with <c>Id</c> supplied by the table.
+    /// There is no <c>AdditionalColumns</c> or writer dictionary to extend - unlike the other two
+    /// sinks, this one's column set is not configurable at all.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] SqliteSinkColumns =
+    [
+        "Id", "TimeStamp", "Level", "Exception", "Message", "Properties",
+        "MessageTemplate", "LogEvent", "UserName", "ClientIP", "ClientAgent"
+    ];
+
+    /// <summary>
+    /// Entity properties that a given provider's sink is known and accepted not to write.
+    /// </summary>
+    /// <remarks>
+    /// <b>An allow-list, so the gap is stated rather than absent.</b> The column still exists in the
+    /// DDL on every provider - it must, or EF's read of <see cref="SystemLog"/> would fail with "no
+    /// such column" on that provider - and it is still written by the SQL Server and PostgreSQL
+    /// sinks. On SQLite it is simply always null, because that sink cannot be given another column.
+    /// <para>
+    /// SQLite is the no-server development and test provider; the two providers a GX installation
+    /// actually runs on both record the tenant. That is the trade, and it is recorded here rather
+    /// than discovered later by somebody wondering why a column is empty.
+    /// </para>
+    /// </remarks>
+    private static string[] SinkCannotWrite(string provider) => provider switch
+    {
+        DbProviderKeys.SqLite => [nameof(SystemLog.TenantId)],
+        _ => []
+    };
+
     /// <summary>What that provider's sink writes.</summary>
     private static string[] SinkColumnsFor(string provider) => provider switch
     {
         DbProviderKeys.SqlServer => SqlServerSinkColumns(),
         DbProviderKeys.Npgsql => SerilogExtensions.BuildNpgsqlColumnWriters().Keys.ToArray(),
-
-        // The SQLite sink has no configurable column set - the fork writes a fixed statement whose
-        // columns Pass 7-2 extracted from the assembly and Pass 11B re-measured against a real file.
-        // It is the entity's column set, which is why this provider never had a drift problem.
-        DbProviderKeys.SqLite => EntityProperties,
+        DbProviderKeys.SqLite => SqliteSinkColumns,
         _ => throw new InvalidOperationException(provider)
     };
 
@@ -121,12 +162,36 @@ public class SinkColumnDriftTests
         // Id is the exception, on every provider and by design: the database generates it. No sink
         // writes a key it does not know, and none of them can - the PostgreSQL writer dictionary has
         // no way to express one at all, which is why the DDL had to take the job.
+        // The accepted gaps, spelled the way this provider spells columns. Anything OUTSIDE this
+        // list that the sink does not write is a defect: the column would exist, be readable, and
+        // be permanently null, which is the quietest failure in the whole log pipeline.
+        var accepted = SinkCannotWrite(provider)
+            .Select(p => provider == DbProviderKeys.Npgsql ? ToSnakeCase(p) : p)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         var missing = EntityColumnsFor(provider)
             .Where(p => !p.Equals(nameof(SystemLog.Id), StringComparison.OrdinalIgnoreCase))
+            .Where(p => !accepted.Contains(p))
             .Where(p => !sink.Contains(p))
             .ToArray();
 
         Assert.Empty(missing);
+    }
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public void TheAcceptedSinkGaps_AreRealPropertiesAndReallyUnwritten(string provider)
+    {
+        // An allow-list that has gone stale is worse than none: it would keep excusing a column the
+        // sink had since learned to write, or name a property that no longer exists. Both directions
+        // fail here.
+        foreach (var property in SinkCannotWrite(provider))
+        {
+            Assert.Contains(property, EntityProperties);
+
+            var spelled = provider == DbProviderKeys.Npgsql ? ToSnakeCase(property) : property;
+            Assert.DoesNotContain(spelled, SinkColumnsFor(provider), StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     // ------------------------------------------------------------- sink -> DDL

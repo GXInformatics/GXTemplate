@@ -41,7 +41,12 @@ public class TenantSwitchService : ITenantSwitchService
     {
         try
         {
-            // Validate permissions
+            // Enforced HERE, on the arguments actually being used, rather than trusted from the
+            // caller. The tenant selector only offers tenants the user belongs to, but that is a
+            // property of one component's rendering, not of this service: any other caller, now or
+            // later, reaches the write below through this method and must meet the same test.
+            // A refusal is the same message whether the tenant is unreachable or does not exist, so
+            // the response does not report which tenant ids are real.
             if (!await CanSwitchToTenantAsync(userId, tenantId))
                 return Result.Failure("Insufficient permissions to switch to this tenant");
 
@@ -97,23 +102,52 @@ public class TenantSwitchService : ITenantSwitchService
     }
 
     /// <summary>
-    /// Check if user can switch to specified tenant
+    /// Whether <paramref name="userId"/> may be switched to <paramref name="tenantId"/>.
     /// </summary>
+    /// <remarks>
+    /// <b>The two permissions are a ladder, not a pair.</b> Their own descriptions say so:
+    /// <c>SwitchTenants</c> is "Allows switching between AVAILABLE tenants" - the ones the user
+    /// belongs to - and <c>SwitchToAnyTenant</c> is "Allows switching to ANY tenant (admin
+    /// privilege)". "Any" contains "available", so the second implies the first and works alone.
+    /// <para>
+    /// It used to require BOTH, which made the finer-grained permission dead as written: holding
+    /// <c>SwitchTenants</c> by itself granted nothing, and an administrator revoking
+    /// <c>SwitchToAnyTenant</c> to leave someone switching only among their own tenants actually
+    /// took away all switching. Neither permission meant what its description said.
+    /// </para>
+    /// <para>
+    /// <b>And it used neither of its parameters.</b> It answered "may this principal switch tenants
+    /// at all?" while its name, its signature and its one caller all say it answers "may this
+    /// principal switch to THIS tenant?". Nothing checked membership, so any tenant id reaching
+    /// <see cref="SwitchToTenantAsync"/> was accepted and written to <c>ApplicationUser.TenantId</c>.
+    /// The exposure was contained only by the tenant selector offering legitimate tenants - and a
+    /// check whose correctness depends on its caller's UI is not a check.
+    /// </para>
+    /// <para>
+    /// Membership is read from <c>TenantUsers</c> by the <paramref name="userId"/> ARGUMENT rather
+    /// than from the ambient principal's cached context: resolving it from the ambient context would
+    /// ignore the parameter all over again, which is the defect this method exists to have fixed.
+    /// </para>
+    /// </remarks>
     public async Task<bool> CanSwitchToTenantAsync(string userId, string tenantId)
     {
         try
         {
-            // Check if user has permission to switch tenants
-            var hasSwitchPermission = await _permissionService.HasPermissionAsync(Permissions.Users.SwitchTenants);
-            if (!hasSwitchPermission)
+            if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(tenantId))
                 return false;
 
-            // Check if user has permission to switch to any tenant
-            var hasAnyTenantPermission = await _permissionService.HasPermissionAsync(Permissions.Users.SwitchToAnyTenant);
-            if (!hasAnyTenantPermission)
+            // The escalated right, checked first because it subsumes the other one. A holder may
+            // switch to a tenant they have no membership row for - that is the whole capability -
+            // so no further test applies to them.
+            if (await _permissionService.HasPermissionAsync(Permissions.Users.SwitchToAnyTenant))
+                return true;
+
+            if (!await _permissionService.HasPermissionAsync(Permissions.Users.SwitchTenants))
                 return false;
 
-            return true;
+            // Otherwise the target must be one of this user's own tenants.
+            await using var db = await _dbContextFactory.CreateAsync();
+            return await db.TenantUsers.AnyAsync(tu => tu.UserId == userId && tu.TenantId == tenantId);
         }
         catch (Exception ex)
         {

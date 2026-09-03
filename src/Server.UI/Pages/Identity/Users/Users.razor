@@ -201,8 +201,20 @@
         <PropertyColumn Property="x => x.IsActive"
                         Title="@L[_currentUserDto.GetMemberDisplayName(x => x.IsActive)]">
             <CellTemplate>
+                @* Gated on Permissions.Users.Deactivation, which until Pass 25 was granted to the
+                   administrator, listed in the role editor and checked by nothing at all: any holder
+                   of Users.View could deactivate any account, and revoking the permission that names
+                   the capability changed nothing. Activation and deactivation are the same lever, so
+                   both directions take the same right - and without it the state is still SHOWN,
+                   because seeing whether an account is active is part of viewing users. It simply
+                   stops being clickable. *@
                 <div>
-                    @if (!context.Item.IsActive || (context.Item.LockoutEnd is not null && context.Item.LockoutEnd >
+                    @if (!_accessRights.Deactivation)
+                    {
+                        <MudCheckBox T="bool" Color="@(context.Item.IsActive ? Color.Success : Color.Error)"
+                                     Value="context.Item.IsActive" ReadOnly="true" Disabled="true" />
+                    }
+                    else if (!context.Item.IsActive || (context.Item.LockoutEnd is not null && context.Item.LockoutEnd >
                                                                                 DateTime.UtcNow))
                     {
                         <MudTooltip Text="@L["Click to change status to active"]" Delay="300">
@@ -680,12 +692,42 @@
 
     private async Task ToggleUserActiveStatusAsync(ApplicationUserDto model)
     {
+        // The render gate above is what a user sees; this is what actually holds. In Blazor Server
+        // the two are closer than usual - there is no separate endpoint to post to - but a cell
+        // template is not an authorization boundary, and the callback outlives the render.
+        if (!_accessRights.Deactivation)
+        {
+            Snackbar.Add(L["You do not have permission to change a user's active status"], Severity.Error);
+            return;
+        }
+
         var user = await _userManager.FindByIdAsync(model.Id!)
         ?? throw new NotFoundException($"User not found: {model.Id}");
+
         if (user.IsActive)
+        {
+            // Deactivating the last administrator locks every door in the building: an inactive
+            // account is refused at sign-in (IdentityComponentsEndpointRouteBuilderExtensions, and
+            // Login.razor behind it), so nobody would be left who could activate anyone. It is the
+            // same failure as deleting the last administrator and takes the same guard - which was
+            // already here, injected and used by the delete path, and simply never applied to this
+            // one. ACTIVATION needs no guard: it can only increase the number of usable accounts.
+            try
+            {
+                await _administratorProtection.EnsureNotRemovingLastAdministratorAsync(user.Id, "deactivated");
+            }
+            catch (ForbiddenAccessException ex)
+            {
+                Snackbar.Add(ex.Message, Severity.Error);
+                return;
+            }
+
             await DeactivateUserAsync(user, model);
+        }
         else
+        {
             await ActivateUserAsync(user, model);
+        }
     }
 
     private async Task ActivateUserAsync(ApplicationUser user, ApplicationUserDto model)

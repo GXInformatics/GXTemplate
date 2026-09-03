@@ -2,7 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.ComponentModel.DataAnnotations;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Application.Features.Documents.Caching;
+using CleanArchitecture.Blazor.Application.Features.Documents.Specifications;
 
 namespace CleanArchitecture.Blazor.Application.Features.Documents.Commands.AddEdit;
 
@@ -26,32 +28,64 @@ public class AddEditDocumentCommandHandler : IRequestHandler<AddEditDocumentComm
 {
     private readonly IApplicationDbContextFactory _dbContextFactory;
     private readonly IObjectMapper _objectMapper;
+    private readonly IUserContextAccessor _userContextAccessor;
     private readonly IStringLocalizer<AddEditDocumentCommandHandler> _localizer;
 
     public AddEditDocumentCommandHandler(
         IApplicationDbContextFactory dbContextFactory,
         IObjectMapper objectMapper,
+        IUserContextAccessor userContextAccessor,
         IStringLocalizer<AddEditDocumentCommandHandler> localizer
     )
     {
         _dbContextFactory = dbContextFactory;
         _objectMapper = objectMapper;
+        _userContextAccessor = userContextAccessor;
         _localizer = localizer;
     }
 
     public async ValueTask<Result<int>> Handle(AddEditDocumentCommand request, CancellationToken cancellationToken)
     {
+        // Fail closed, as GetFileStreamQueryHandler does: no ambient principal, nothing to authorize.
+        var currentUser = _userContextAccessor.Current;
+        if (currentUser is null) return await Result<int>.FailureAsync(_localizer["Document Not Found!"]);
+
         await using var db = await _dbContextFactory.CreateAsync(cancellationToken);
         Document document;
         if (request.Id > 0)
         {
-            var existingDocument = await db.Documents.FindAsync(request.Id, cancellationToken);
+            // FindAsync used to resolve this by primary key alone, so holding Permissions.Documents.Edit
+            // was enough to edit any document in any tenant. The visibility rule is applied first now,
+            // and a document that exists but is not visible reports the SAME "not found" as one that
+            // does not exist - so the response cannot be used to discover which ids exist elsewhere.
+            var existingDocument = await db.Documents
+                .Where(x => x.Id == request.Id)
+                .Where(VisibleDocumentSpecification.IsVisibleTo(currentUser.UserId, currentUser.TenantId))
+                .FirstOrDefaultAsync(cancellationToken);
+
             if (existingDocument == null) return await Result<int>.FailureAsync(_localizer["Document Not Found!"]);
+
+            // The tenant a document belongs to is not editable, by anyone, through this command.
+            //
+            // The command carries a TenantId because the DTO it is mapped from does, and the mapper
+            // copies it by name - so a request could re-parent any document it could reach into any
+            // tenant it named, silently, as a side effect of an ordinary edit. The stored value is
+            // captured before the map and put back after it, which keeps the guard next to the line
+            // that would otherwise break it.
+            var tenantId = existingDocument.TenantId;
             document = _objectMapper.Map(request, existingDocument);
+            document.TenantId = tenantId;
         }
         else
         {
             document = _objectMapper.Map<Document>(request);
+
+            // Cleared so the AuditableEntityInterceptor stamps it from the ambient principal - it
+            // only fills a TenantId that is null, so a client-supplied one would win. A new document
+            // belongs to the tenant of whoever created it, which is not a claim the caller gets to
+            // make about itself. UploadDocumentCommand already relies on the same mechanism.
+            document.TenantId = null;
+
             db.Documents.Add(document);
         }
         await db.SaveChangesAsync(cancellationToken);

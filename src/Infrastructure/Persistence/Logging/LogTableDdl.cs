@@ -68,6 +68,11 @@ public static class LogTableDdl
         ("TimeStamp",       "TEXT NOT NULL"),
         ("Exception",       "TEXT NULL"),
         ("UserName",        "TEXT NULL"),
+
+        // Nullable, and null is meaningful: startup, seeding and background events have no tenant.
+        // See SystemLog.TenantId.
+        ("TenantId",        "TEXT NULL"),
+
         ("ClientIP",        "TEXT NULL"),
         ("ClientAgent",     "TEXT NULL"),
         ("Properties",      "TEXT NULL"),
@@ -87,6 +92,11 @@ public static class LogTableDdl
         // and ClientAgent with no length, so it writes them unbounded; a User-Agent header longer
         // than the column is a truncation error on a log write, which is a silly way to lose a log.
         ("UserName",        "nvarchar(max) NULL"),
+
+        // 450, matching ClientIP rather than the unbounded columns: a tenant id is a GUID string
+        // written by this application, not a value some client can make arbitrarily long.
+        ("TenantId",        "nvarchar(450) NULL"),
+
         ("ClientIP",        "nvarchar(450) NULL"),
         ("ClientAgent",     "nvarchar(max) NULL"),
 
@@ -118,6 +128,11 @@ public static class LogTableDdl
         // text rather than EF's character varying(450), for the same reason as SQL Server above:
         // Pass 11B set these three writers to NpgsqlDbType.Text, so the sink writes them unbounded.
         ("user_name",        "text NULL"),
+
+        // snake_case, like every column here - UseSnakeCaseNamingConvention turns SystemLog.TenantId
+        // into tenant_id, and the writer below is keyed by the same name.
+        ("tenant_id",        "text NULL"),
+
         ("client_ip",        "text NULL"),
         ("client_agent",     "text NULL"),
 

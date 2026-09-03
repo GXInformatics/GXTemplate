@@ -22,6 +22,16 @@ public class SystemLogDto
 
     [Display(Name = "User name")] public string? UserName { get; set; }
 
+    /// <summary>
+    /// The tenant whose activity produced the event, or <c>null</c> for an installation event.
+    /// </summary>
+    /// <remarks>
+    /// Displayed, not filtered on: the SystemLogs page still shows every tenant's events to any
+    /// holder of <c>Permissions.Logs.View</c>. Surfacing the value is what makes that visible rather
+    /// than merely true.
+    /// </remarks>
+    [Display(Name = "Tenant")] public string? TenantId { get; set; }
+
     [Display(Name = "Client IP")] public string? ClientIP { get; set; }
 
     [Display(Name = "Client Agent")] public string? ClientAgent { get; set; }

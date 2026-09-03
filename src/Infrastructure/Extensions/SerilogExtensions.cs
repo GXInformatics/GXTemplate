@@ -272,6 +272,13 @@ public static class SerilogExtensions
                 },
                 new()
                 {
+                    // AllowNull, like the rest: an event written with no ambient user context - a
+                    // startup message, a seeding message, a Hangfire heartbeat - has no tenant, and
+                    // that is the correct record rather than a defect. See SystemLog.TenantId.
+                    ColumnName = "TenantId", PropertyName = "TenantId",AllowNull=true, DataType = SqlDbType.NVarChar, DataLength = 450
+                },
+                new()
+                {
                     ColumnName = "ClientAgent", PropertyName = "ClientAgent",AllowNull=true, DataType = SqlDbType.NVarChar
                 }
             },
@@ -333,6 +340,12 @@ public static class SerilogExtensions
             { "properties", new PropertiesColumnWriter(NpgsqlDbType.Text) },
             { "log_event", new LogEventSerializedColumnWriter(NpgsqlDbType.Text) },
             { "user_name", new SinglePropertyColumnWriter("UserName", PropertyWriteMethod.Raw, NpgsqlDbType.Text) },
+
+            // Raw, matching user_name and client_ip: the enricher publishes a string already, and
+            // ToString would wrap a null in quotes rather than leaving the column null. A null
+            // tenant is the correct record for an installation event - see SystemLog.TenantId.
+            { "tenant_id", new SinglePropertyColumnWriter("TenantId", PropertyWriteMethod.Raw, NpgsqlDbType.Text) },
+
             { "client_ip", new SinglePropertyColumnWriter("ClientIP", PropertyWriteMethod.Raw, NpgsqlDbType.Text) },
             {
                 "client_agent",
@@ -449,14 +462,24 @@ public class UtcTimestampEnricher : ILogEventEnricher
 internal class UserInfoEnricher : ILogEventEnricher
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public UserInfoEnricher() : this(new HttpContextAccessor())
+    private readonly IUserContextAccessor _userContextAccessor;
+
+    public UserInfoEnricher() : this(new HttpContextAccessor(), new UserContextAccessor())
     {
     }
     //Dependency injection can be used to retrieve any service required to get a user or any data.
     //Here, I easily get data from HTTPContext
-    public UserInfoEnricher(IHttpContextAccessor httpContextAccessor)
+
+    /// <remarks>
+    /// Both accessors are ambient - each reads an <c>AsyncLocal</c> owned by its type rather than by
+    /// the instance - so constructing them here observes exactly what the request or the call chain
+    /// has set. That is why the parameterless constructor above works at all: Serilog builds
+    /// enrichers itself, and the logger is configured before the DI container exists.
+    /// </remarks>
+    public UserInfoEnricher(IHttpContextAccessor httpContextAccessor, IUserContextAccessor userContextAccessor)
     {
         _httpContextAccessor = httpContextAccessor;
+        _userContextAccessor = userContextAccessor;
     }
     public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
     {
@@ -469,7 +492,19 @@ internal class UserInfoEnricher : ILogEventEnricher
             ? headers["User-Agent"].ToString()
             : "";
 
+        // From the USER context, not the HTTP context, and that is the whole point of the choice.
+        // The three values above only exist while a request does; a tenant is knowable wherever the
+        // ambient user context has been pushed - inside a Blazor circuit, inside a hub call, inside
+        // a mediator handler running on a continuation long after the request completed.
+        //
+        // Null wherever there is no ambient context at all: startup, seeding, Hangfire heartbeats,
+        // and anything logged after a circuit has gone. Those rows belong to the installation
+        // rather than to a tenant, and recording that honestly is better than guessing. See
+        // SystemLog.TenantId.
+        var tenantId = _userContextAccessor.Current?.TenantId;
+
         logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("UserName", userName));
+        logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("TenantId", tenantId));
         logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("ClientIP", clientIp));
         logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("ClientAgent", clientAgent));
     }

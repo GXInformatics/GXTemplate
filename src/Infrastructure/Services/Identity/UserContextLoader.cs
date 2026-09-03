@@ -71,10 +71,33 @@ public class UserContextLoader : IUserContextLoader
                         ctx.Options.Duration = NotFoundCacheDuration;
                         return null;
                     }
-                    var allowedTenantIds = await userManager.Users.Where(x => x.Id == user.Id)
+                    var memberships = await userManager.Users.Where(x => x.Id == user.Id)
                         .Include(x => x.TenantUsers).ThenInclude(tu => tu.Tenant)
                         .SelectMany(x => x.TenantUsers.Where(tu => tu.Tenant != null).Select(tu => tu.Tenant!.Id))
                         .ToListAsync(ct);
+
+                    // The UNION of the membership rows and the user's own current tenant, which is
+                    // the single answer to "which tenants may this principal see?".
+                    //
+                    // It used to be the membership rows alone, and the two can legitimately differ:
+                    // TenantSwitchService lets a Permissions.Users.SwitchToAnyTenant holder move
+                    // into a tenant they hold no membership row for - that IS the capability - and
+                    // it writes ApplicationUser.TenantId directly. Membership alone would then
+                    // report a set not containing the tenant the user is actually in. Any scoping
+                    // written as AllowedTenantIds.Contains(row.TenantId) would show that principal
+                    // nothing at all, including their own current tenant.
+                    //
+                    // The same union also absorbs databases that diverged before this was fixed:
+                    // the user-edit dialog used to rewrite TenantUsers while leaving TenantId
+                    // behind, so existing rows can carry a primary tenant with no membership row.
+                    // New divergence is prevented at the source (UserFormDialog.ResolvePrimaryTenantId);
+                    // this is what keeps already-saved data readable.
+                    //
+                    // Distinct, so a tenant that is both the primary and a membership row - the
+                    // ordinary case - appears once.
+                    var allowedTenantIds = string.IsNullOrEmpty(user.TenantId)
+                        ? memberships.Distinct().ToList()
+                        : memberships.Append(user.TenantId).Distinct().ToList();
                     var roles = await userManager.GetRolesAsync(user);
 
                     return new UserContext(

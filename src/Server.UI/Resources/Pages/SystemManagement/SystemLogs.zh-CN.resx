@@ -142,6 +142,12 @@
   <data name="User name" xml:space="preserve">
     <value>用户名</value>
   </data>
+  <data name="Tenant" xml:space="preserve">
+    <value>租户</value>
+  </data>
+  <data name="Installation" xml:space="preserve">
+    <value>系统</value>
+  </data>
   <data name="Clear Logs" xml:space="preserve">
     <value>清空日志</value>
   </data>

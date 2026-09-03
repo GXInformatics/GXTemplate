@@ -1,8 +1,14 @@
 # GX Blazor Server Solution Template
 
-A Blazor Server solution template for .NET 10, laid out in Clean Architecture layers, with
-multi-tenant ASP.NET Core Identity, deny-by-default request authorization, transactional audit
-trails, and pluggable file storage.
+A Blazor Server solution template for .NET 10, laid out in Clean Architecture layers, with a
+multi-tenant **data model**, deny-by-default request authorization, transactional audit trails, and
+pluggable file storage.
+
+**Multi-tenant data, not yet multi-tenant isolation.** The distinction is deliberate and is
+described in full under [Tenancy](#tenancy): tenants, per-user tenant membership and tenant-stamped
+rows all exist, and Documents is scoped end to end — but the administration surfaces are **not**
+tenant-scoped. A holder of the relevant permission sees every tenant's users, audit trails, system
+logs, roles and picklists. Read that section before quoting this one.
 
 This README ships with the template and with every project generated from it, so parts of it are
 addressed to whoever is generating a project and parts to whoever is maintaining the generated one.
@@ -378,6 +384,61 @@ never published for a change the audit write subsequently rolled back.
 Audited entities are those implementing `IAuditable`. **Identity entities are not audited** — see
 Known limitations.
 
+### Tenancy
+
+**Contract: rows record which tenant they were written in. Only Documents is filtered by it.**
+
+Those are two different promises and only the first one holds everywhere, so they are stated
+separately rather than under one word.
+
+**What is stamped.** `Tenants` and a `TenantUsers` join table model the organisations and who belongs
+to which. `ApplicationUser` carries a current `TenantId`; `Document`, `PicklistSet`, `AuditTrail` and
+`SystemLog` each carry the tenant the row was written in. Business entities get theirs from
+`AuditableEntityInterceptor`, which fills any `IMayHaveTenant`/`IMustHaveTenant` property from the
+ambient principal on insert — so **an entity your project adds is stamped automatically the moment it
+implements one of those interfaces**, with no query changes and no per-feature code.
+
+An audit row's tenant is **stored, not derived**. Switching tenants rewrites
+`ApplicationUser.TenantId` in place, so reconstructing history by joining an audit row to its author
+would re-attribute every past change the moment somebody switched. The column exists so that cannot
+happen.
+
+**A null tenant is a real value, not a gap.** Startup logging, database seeding, the bootstrap
+administrator banner and background work all run with no ambient principal, and their rows belong to
+the installation rather than to a tenant. Any future per-tenant view has to surface that partition
+rather than quietly dropping it: a tenant administrator who cannot see that the application restarted
+is being shown an edited log.
+
+**What is actually filtered.** Only **Documents**, and there it is enforced on every entry point —
+the listing and all four of its list views, the download button, the `/files` streaming endpoint, the
+edit command and the delete command. One rule, `VisibleDocumentSpecification.IsVisibleTo`, is the
+single definition; a document's tenant is set by the interceptor on creation and cannot be changed
+through the edit command by anyone.
+
+**What is not filtered.** Everything else, and this is the sentence that matters:
+
+| Surface | Tenant-scoped? |
+|---|---|
+| Documents — list, download, edit, delete | **Yes** |
+| Users grid, user **export**, tenant pickers | No — any `Permissions.Users.View` holder sees every tenant's users, with email and phone number |
+| Audit trails | No — stamped, not filtered |
+| System logs | No — stamped, not filtered |
+| Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation |
+| Picklists | No — shared reference data by design |
+| Security settings (idle policy) | No — one row per installation, by design |
+| Presence, chat and login notifications | No — broadcast to every connected client |
+
+If you are deploying several customers into one installation, **treat the administration area as
+installation-wide** until that changes.
+
+**One provider-specific gap in the stamping.** `SystemLog.TenantId` is written by the SQL Server and
+PostgreSQL sinks and is **always null on SQLite**: that sink is a third-party package with a fixed
+INSERT statement and no way to add a column, unlike the other two. The column exists in the SQLite
+DDL regardless — EF reads the property on every provider, and a missing column would fail the read
+outright. SQLite is the no-server development and test provider; both providers a GX installation
+runs on record the tenant. `SinkColumnDriftTests` names the gap explicitly so it cannot widen
+unnoticed.
+
 ### `CacheScope`
 
 **Contract: declaring a scope guarantees that entries are separated as declared. It does not
@@ -656,6 +717,11 @@ Stated plainly, because finding these out later is worse than reading them now.
 - **Granular Create/Delete permission constants gate rendering only.** Some fine-grained permission
   constants control whether a button is shown, not whether the underlying operation is permitted.
   Treat the coarse feature permission as the real boundary.
+- **Tenant isolation is not enforced outside Documents.** Rows are tenant-stamped, and Documents is
+  filtered on every entry point, but the administration surfaces are not: users, the user export,
+  audit trails, system logs, roles and picklists are all installation-wide to whoever holds the
+  relevant permission. See [Tenancy](#tenancy) for the full table and for the one provider-specific
+  gap in the stamping.
 - **Identity entities are not audited.** `ApplicationUser`, `ApplicationRole` and their claim tables
   do not implement `IAuditable`, so user and role changes do not produce audit rows. Login events
   are recorded separately; permission and role changes are not.

@@ -1,4 +1,5 @@
 ﻿@using CleanArchitecture.Blazor.Application.Features.Identity.DTOs
+@using CleanArchitecture.Blazor.Application.Features.Tenants
 @using CleanArchitecture.Blazor.Application.Features.Tenants.DTOs
 @using CleanArchitecture.Blazor.Domain.Identity
 @using CleanArchitecture.Blazor.Domain.Common.Enums
@@ -208,10 +209,16 @@
                 existingUser.Provider = Model.Provider;
                 existingUser.UserName = Model.UserName;
                 existingUser.IsActive = Model.IsActive;
-                if (string.IsNullOrEmpty(existingUser.TenantId) && Model.Tenants.Any())
-                {
-                    existingUser.TenantId = Model.Tenants.First().Id;
-                }
+
+                // The primary tenant is re-derived on EVERY save, not only when it happens to be
+                // empty. The old condition was `if (TenantId is empty && any tenants selected)`,
+                // which meant moving a user from tenant A to tenant B rewrote their TenantUsers rows
+                // to B - unconditionally, further down - and left TenantId on A. The two sources of
+                // truth then disagreed permanently: the user went on creating documents in A, went
+                // on matching A's grid filter, and had an AllowedTenantIds of [B].
+                var previousTenantId = existingUser.TenantId;
+                existingUser.TenantId = ResolvePrimaryTenantId(existingUser.TenantId, Model.Tenants);
+
                 existingUser.SuperiorId = Model.Superior?.Id;
                 existingUser.LanguageCode = Model.LanguageCode;
                 existingUser.TimeZoneId = Model.TimeZoneId;
@@ -240,6 +247,17 @@
                 // inside it, so clearing a user's tenants to the empty set staged the removal and
                 // never persisted it - the rows survived the edit.
                 await dbContext.SaveChangesAsync(default);
+
+                // A tenancy change invalidates the cached ambient context, which is the THIRD copy
+                // of this fact. UserContextLoader caches UserContext - TenantId and AllowedTenantIds
+                // together - for an hour, so without this a user moved from A to B would go on
+                // acting as a member of A for the rest of that hour, and the two fields agreeing in
+                // the database would not help. The role-change branch below clears it for the same
+                // reason; tenancy needed its own trigger because it can change without roles doing.
+                if (!string.Equals(previousTenantId, existingUser.TenantId, StringComparison.Ordinal))
+                {
+                    _userContextLoader.ClearUserContextCache(existingUser.Id);
+                }
 
                 // Role membership is rewritten only once the profile update has succeeded. Doing
                 // it first - as this method used to - left the user with no roles at all whenever
@@ -275,7 +293,9 @@
                     Provider = Model.Provider,
                     DisplayName = Model.DisplayName,
                     UserName = Model.UserName,
-                    TenantId = Model.Tenants.FirstOrDefault()?.Id,
+                    // Same rule as the edit path, through the same method - a new user has no
+                    // previous primary, so this is simply the first selected tenant.
+                    TenantId = ResolvePrimaryTenantId(null, Model.Tenants),
                     Email = Model.Email,
                     PhoneNumber = Model.PhoneNumber,
                     SuperiorId = Model.Superior?.Id,
@@ -313,6 +333,24 @@
         }
 
     }
+
+    /// <summary>
+    /// The user's primary tenant, given the tenants selected on the form.
+    /// </summary>
+    /// <remarks>
+    /// A thin adapter over <see cref="PrimaryTenantRule"/>, which is where the rule and its reasoning
+    /// live. Both the create and the edit path go through here, so the two cannot drift - which is
+    /// exactly how the defect this replaces arose: create derived the primary from the selected set
+    /// and edit assigned it only when it was empty.
+    /// <para>
+    /// The empty case is refused by <c>ValidateTenants</c> at the form, but it is handled rather than
+    /// assumed away: the membership rewrite above deliberately persists an empty set, so if that
+    /// validator is ever bypassed the two fields still agree - both saying the user belongs to
+    /// nothing - instead of leaving a primary tenant with no membership behind it.
+    /// </para>
+    /// </remarks>
+    private static string? ResolvePrimaryTenantId(string? currentTenantId, IReadOnlyCollection<TenantDto> selected)
+        => PrimaryTenantRule.Resolve(currentTenantId, selected?.Select(t => t.Id));
 
     private void CancelDialog()
     {
