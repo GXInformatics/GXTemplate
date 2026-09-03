@@ -418,10 +418,15 @@ button, the `/files` streaming endpoint, the edit command and the delete command
 the interceptor on creation and cannot be changed through the edit command by anyone.
 
 The Users area is bounded by `UserContext.AllowedTenantIds` — the union of the principal's
-`TenantUsers` membership and their own current tenant. The grid and the export share one predicate so
-they cannot diverge, and the tenant pickers and the "superior" search are bounded by the same
-visibility. **All of it fails closed**: no ambient principal, or a principal belonging to no tenant,
-yields no rows rather than every row.
+`TenantUsers` membership and their own current tenant. **One rule,
+`UserTenantVisibility.IsVisibleTo`, is the single definition**: the grid, the export and the
+datasource behind the "superior" picker all apply it, so they cannot diverge. The tenant pickers are
+bounded by the same visibility. **All of it fails closed**: no ambient principal, or a principal
+belonging to no tenant, yields no rows rather than every row.
+
+**Bounded at the query, not at the view.** Rows a principal may not see are never loaded — they do
+not reach the circuit's memory or the cache. That matters because a list filtered only as it is drawn
+is still a list the server fetched and held.
 
 **The escape is `Permissions.Users.ViewAllTenants`**, granted to the administrator by default. It is
 deliberately *not* `SwitchToAnyTenant`: seeing across tenants and acting across them are different
@@ -435,7 +440,7 @@ subsequently creates.
 | Documents — list, download, edit, delete | **Yes** |
 | Users grid and user **export** | **Yes** — bounded by `AllowedTenantIds`, widened by `Users.ViewAllTenants` |
 | Tenant filter dropdown and `TenantSelect` | **Yes** — same bound, so a user cannot be assigned into a tenant the administrator cannot see |
-| "Superior" user search | **Yes** — confined to the edited user's tenant, and empty when no tenant is supplied |
+| "Superior" user search | **Yes** — the list it searches is bounded by the same rule as the grid, and it then narrows to the edited user's own tenant; empty when no tenant is supplied |
 | Tenant **switcher** (app shell) | n/a — bounded by membership, not visibility; it asks which tenants you may switch *into* |
 | Audit trails | No — stamped, not filtered |
 | System logs | No — stamped, not filtered |

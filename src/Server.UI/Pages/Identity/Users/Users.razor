@@ -7,6 +7,7 @@
 @using CleanArchitecture.Blazor.Server.UI.Components.Time
 @using Microsoft.AspNetCore.WebUtilities
 @using CleanArchitecture.Blazor.Domain.Identity
+@using CleanArchitecture.Blazor.Application.Features.Identity
 @using CleanArchitecture.Blazor.Application.Features.Identity.DTOs
 @using CleanArchitecture.Blazor.Application.Features.Identity.Notifications.ResetPassword
 @using CleanArchitecture.Blazor.Application.Features.Identity.Notifications.SendWelcome
@@ -350,39 +351,40 @@
     #region Data Loading and Searching
 
     /// <summary>
-    /// The rows this principal may see, narrowed by whatever they have typed or selected.
+    /// Every user this principal may see - the tenant bound, and nothing else.
     /// </summary>
     /// <remarks>
-    /// <b>The tenant bound lives HERE, and that is the point of the method.</b> The grid
-    /// (<c>LoadServerData</c>) and the export (<c>ExportUsersAsync</c>) both call this and must go on
-    /// both calling it: before Pass 27 neither was bounded, so any holder of
-    /// <c>Permissions.Users.View</c> could list - and download to a spreadsheet, with email and
-    /// phone number - every user in every tenant. A boundary implemented twice is a boundary that
-    /// will eventually be implemented once.
+    /// <b>The single entry point to user rows on this page.</b> The grid (<c>LoadServerData</c>) and
+    /// the export (<c>ExportUsersAsync</c>) both start here and must go on doing so: before Pass 27
+    /// neither was bounded, so any holder of <c>Permissions.Users.View</c> could list - and download
+    /// to a spreadsheet, with email and phone number - every user in every tenant.
+    /// <para>
+    /// Pass 27 put the bound inside <c>CreateSearchPredicate</c>. Pass 28 moved it here, into a
+    /// separate <c>Where</c>, for two reasons: the rule is now shared with
+    /// <c>UserDataSourceService</c> through <see cref="UserTenantVisibility"/>, and a shared
+    /// expression has to be composed as its own <c>Where</c> to stay translatable - a compiled
+    /// delegate invoked inside another expression tree is not something EF can turn into SQL.
+    /// </para>
     /// <para>
     /// <b>Fail closed.</b> <c>_visibleTenantIds</c> is empty when there is no ambient principal or
     /// when the principal belongs to no tenant, and an empty set matches nothing - so the failure
-    /// mode is an empty grid, never an unfiltered one. That direction is not a preference: an
-    /// isolation predicate that opens when it cannot answer is the defect it exists to prevent.
+    /// mode is an empty grid, never an unfiltered one.
     /// </para>
-    /// <para>
-    /// <b>The "ALL" item keeps its meaning</b> - everything this principal may see. It is not the
-    /// tenant bound; it is a narrowing on top of it, which is why the two clauses are separate and
-    /// both present.
-    /// </para>
-    /// <para>
-    /// A user with a null <c>TenantId</c> belongs to no tenant and is therefore visible only to a
-    /// <c>ViewAllTenants</c> holder. That follows from failing closed rather than being a separate
-    /// decision, and it is asserted so it cannot change silently.
-    /// </para>
+    /// </remarks>
+    private IQueryable<ApplicationUser> VisibleUsers() =>
+        _userManager.Users.Where(
+            UserTenantVisibility.IsVisibleTo(_accessRights.ViewAllTenants, _visibleTenantIds));
+
+    /// <summary>
+    /// What the principal has typed or selected, applied on top of <see cref="VisibleUsers"/>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Deliberately no tenant bound.</b> It moved to <see cref="VisibleUsers"/> - see there. The
+    /// "ALL" item below is not the bound: it is a narrowing the user chooses within what they may
+    /// already see, which is why it stayed here when the bound left.
     /// </remarks>
     private Expression<Func<ApplicationUser, bool>> CreateSearchPredicate()
     {
-        // Captured as locals so the expression tree carries values EF can translate rather than
-        // field accesses on the component.
-        var unbounded = _accessRights.ViewAllTenants;
-        var visibleTenantIds = _visibleTenantIds;
-
         return x =>
         (x.UserName!.Contains(_searchString) ||
         x.Email!.Contains(_searchString) ||
@@ -390,8 +392,7 @@
         x.PhoneNumber!.Contains(_searchString) ||
         x.Provider!.Contains(_searchString)) &&
         (_searchRole == null || x.UserRoles.Any(ur => ur.Role.Name == _searchRole)) &&
-        (string.IsNullOrEmpty(_selectedTenantId) || x.TenantId == _selectedTenantId) &&
-        (unbounded || visibleTenantIds.Contains(x.TenantId!));
+        (string.IsNullOrEmpty(_selectedTenantId) || x.TenantId == _selectedTenantId);
     }
 
     private async Task<GridData<ApplicationUserDto>> LoadServerData(GridState<ApplicationUserDto> state, CancellationToken
@@ -401,8 +402,8 @@
         {
             _isLoading = true;
             var predicate = CreateSearchPredicate();
-            var totalCount = await _userManager.Users.CountAsync(predicate, cancellationToken);
-            var data = await _userManager.Users.Where(predicate)
+            var totalCount = await VisibleUsers().CountAsync(predicate, cancellationToken);
+            var data = await VisibleUsers().Where(predicate)
             .Include(x => x.UserRoles).ThenInclude(ur => ur.Role)
             .Include(x => x.Superior)
             .ApplySortDefinitions(state)
@@ -525,6 +526,10 @@
                     Provider = model.Provider,
                     Superior = model.Superior,
                     Tenants = model.Tenants ?? Array.Empty<TenantDto>(),
+                    // The edited user's actual primary tenant, so the superior picker is bounded by
+                    // where they really are rather than by whichever tenant sorts first in their
+                    // set. Read-only context - see InputModel.TenantId.
+                    TenantId = model.TenantId,
                     TimeZoneId = model.TimeZoneId,
                     UserName = model.UserName,
                     ProfilePictureDataUrl = model.ProfilePictureDataUrl
@@ -882,7 +887,7 @@
         try
         {
             var predicate = CreateSearchPredicate();
-            var users = await _userManager.Users.Where(predicate)
+            var users = await VisibleUsers().Where(predicate)
             .Select(x => new ApplicationUserDto
             {
                 Id = x.Id,

@@ -70,13 +70,15 @@
                        "every tenant", which made this a cross-tenant user directory.
 
                        Resolved through the same PrimaryTenantRule the save path uses, so the list
-                       tracks the tenant selection above as it changes. The form carries a SET with
-                       no primary-tenant concept, so this is the first selected tenant - which is
-                       what the user's primary will be for a new account, and for an existing
-                       multi-tenant account is still one the user genuinely belongs to. Conservative
-                       rather than exact, and never wider than the user's own tenants. *@
+                       tracks the tenant selection above as it changes.
+
+                       Pass 28 closed Pass 27's A3: the model now carries the edited user's ACTUAL
+                       primary tenant, so an existing multi-tenant user's colleagues come from the
+                       tenant they are really in rather than from whichever of their tenants happens
+                       to sort first. The rule keeps that primary while it is still selected and
+                       moves it only when it is not - which is exactly what the save will do. *@
                     <PickSuperiorAutocomplete For="@(() => Model.Superior)" T="ApplicationUserDto"
-                                              TenantId="@PrimaryTenantRule.Resolve(null, Model.Tenants.Select(t => t.Id))"
+                                              TenantId="@PrimaryTenantRule.Resolve(Model.TenantId, Model.Tenants.Select(t => t.Id))"
                                               OwnerName="@Model.UserName"
                                               Clearable="true"
                                               Label="@L[Model.GetMemberDisplayName(x => x.Superior)]"
@@ -423,6 +425,29 @@
         public string? Provider { get; set; }
 
         public ApplicationUserDto? Superior { get; set; }
+
+        /// <summary>
+        /// The user's primary tenant as it stood when this dialog opened, or null for a new user.
+        /// </summary>
+        /// <remarks>
+        /// <b>Read-only context, never a source of truth.</b> No control binds it, the form never
+        /// writes it, and <b>the save path deliberately ignores it</b> - <c>SubmitAsync</c> re-derives
+        /// the primary from the database row it is about to update, because that value is
+        /// authoritative and this one is a snapshot that could be stale by the time the dialog is
+        /// submitted.
+        /// <para>
+        /// It exists for exactly one reason: to bound the superior picker by the tenant the edited
+        /// user is ACTUALLY in. Without it the picker fell back to the first tenant in the selected
+        /// set, which for a multi-tenant user could be a different tenant of theirs - correct enough
+        /// to be safe, wrong enough to show the wrong colleagues (Pass 27 A3).
+        /// </para>
+        /// <para>
+        /// Pass 25 removed a divergence between two records of a user's tenancy, so adding a second
+        /// copy of the primary here is done with that in mind: it is safe only because nothing
+        /// writes it and nothing persists from it. If either changes, this field has to go.
+        /// </para>
+        /// </remarks>
+        public string? TenantId { get; set; }
 
         [Display(Name = "Time Zone")]
         [Required(
