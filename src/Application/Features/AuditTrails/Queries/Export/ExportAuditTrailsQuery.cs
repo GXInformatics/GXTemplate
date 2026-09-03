@@ -1,6 +1,7 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using Mapster;
 using CleanArchitecture.Blazor.Application.Features.AuditTrails.DTOs;
 
@@ -18,18 +19,24 @@ public class ExportAuditTrailsQueryHandler :
     IRequestHandler<ExportAuditTrailsQuery, byte[]>
 {
     private readonly IApplicationDbContextFactory _dbContextFactory;
+    private readonly IPermissionQueryService _permissionQueryService;
+    private readonly IUserContextAccessor _userContextAccessor;
     private readonly TypeAdapterConfig _typeAdapterConfig;
     private readonly IExcelService _excelService;
     private readonly IStringLocalizer<ExportAuditTrailsQueryHandler> _localizer;
 
     public ExportAuditTrailsQueryHandler(
         IApplicationDbContextFactory dbContextFactory,
+        IPermissionQueryService permissionQueryService,
+        IUserContextAccessor userContextAccessor,
         TypeAdapterConfig typeAdapterConfig,
         IExcelService excelService,
         IStringLocalizer<ExportAuditTrailsQueryHandler> localizer
     )
     {
         _dbContextFactory = dbContextFactory;
+        _permissionQueryService = permissionQueryService;
+        _userContextAccessor = userContextAccessor;
         _typeAdapterConfig = typeAdapterConfig;
         _excelService = excelService;
         _localizer = localizer;
@@ -38,7 +45,12 @@ public class ExportAuditTrailsQueryHandler :
     public async ValueTask<byte[]> Handle(ExportAuditTrailsQuery request, CancellationToken cancellationToken)
     {
         await using var db = await _dbContextFactory.CreateAsync(cancellationToken);
-        var data = await db.AuditTrails.Where(x=>x.TableName != null && x.TableName.Contains(request.Keyword ?? string.Empty))
+        // Same exemption as the grid, from the same shared rule. The export is the surface where
+        // a divergence would matter most: it hands the rows to a file that leaves the system.
+        var visible = await AuditTrailTenantScope.VisibleAsync(
+            db.AuditTrails, _permissionQueryService, _userContextAccessor.Current?.UserId);
+
+        var data = await visible.Where(x=>x.TableName != null && x.TableName.Contains(request.Keyword ?? string.Empty))
             .ProjectToType<AuditTrailDto>(_typeAdapterConfig)
             .ToListAsync(cancellationToken);
         var result = await _excelService.ExportAsync(data,

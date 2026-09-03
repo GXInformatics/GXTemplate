@@ -218,10 +218,20 @@ public class Testing
 
         if (roles.Any())
         {
-            var roleManager = scope.ServiceProvider.GetService<RoleManager<IdentityRole>>();
+            // ApplicationRole, not IdentityRole. The application registers
+            // .AddRoles<ApplicationRole>(), so RoleManager<IdentityRole> was never in the
+            // container: GetService returned null and the next line threw
+            // NullReferenceException, which made this helper unusable. Nothing caught it
+            // because nothing called it - RunAsDefaultUserAsync passes an empty roles array,
+            // so the null was never dereferenced. Pass 28 A9; catalogue defect #15.
+            //
+            // GetRequiredService, not GetService: a missing registration must fail saying
+            // which service is missing, rather than null-referencing one line later. That
+            // substitution is what hid this defect, so it is corrected here too.
+            var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
             foreach (var role in roles)
             {
-                await roleManager.CreateAsync(new IdentityRole(role));
+                await roleManager.CreateAsync(new ApplicationRole(role));
             }
             await userManager.AddToRolesAsync(user, roles);
         }
@@ -288,6 +298,17 @@ public class Testing
         var context = scope.ServiceProvider.GetService<ApplicationDbContext>();
         return await context.FindAsync<TEntity>(keyValues);
     }
+
+    /// <summary>
+    /// A service scope over the harness container, for tests needing a service the
+    /// purpose-built helpers do not expose.
+    /// </summary>
+    /// <remarks>
+    /// Added by Pass 29 so <c>HarnessPrincipalTests</c> can verify the role helpers through
+    /// UserManager and RoleManager. Pass 28 reached the private scope factory by reflection
+    /// rather than modify this file for a scratch probe; a permanent test earns a real seam.
+    /// </remarks>
+    public static IServiceScope CreateScope() => _scopeFactory.CreateScope();
     public static IApplicationDbContext CreateDbContext()
     {
         var scope = _scopeFactory.CreateScope();

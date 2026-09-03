@@ -65,6 +65,13 @@ public static class AdministratorPermissionRegistry
         Permissions.AuditTrails.Search,
         Permissions.AuditTrails.Export,
 
+        // Granted, and for the same reason Users.ViewAllTenants was in Pass 27: it preserves the
+        // posture that already held. Before Pass 29 nothing filtered AuditTrails at all, so the
+        // administrator saw every tenant's audit history. The filter now scopes it by default;
+        // granting this keeps the shipped administrator seeing what they saw, while making the
+        // capability named, enforced and revocable rather than an absence of code.
+        Permissions.AuditTrails.ViewAllTenants,
+
         Permissions.Documents.View,
         Permissions.Documents.Create,
         Permissions.Documents.Edit,

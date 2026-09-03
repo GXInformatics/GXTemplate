@@ -442,16 +442,22 @@ subsequently creates.
 | Tenant filter dropdown and `TenantSelect` | **Yes** — same bound, so a user cannot be assigned into a tenant the administrator cannot see |
 | "Superior" user search | **Yes** — the list it searches is bounded by the same rule as the grid, and it then narrows to the edited user's own tenant; empty when no tenant is supplied |
 | Tenant **switcher** (app shell) | **Yes, on a different bound** — not visibility but the switch ladder: `SwitchTenants` offers the tenants you belong to, `SwitchToAnyTenant` offers all of them, neither offers none. The menu and the guard on the write derive from one rule in `TenantSwitchService`, so what is offered is exactly what is permitted |
-| Audit trails | No — stamped, not filtered |
-| System logs | No — stamped, not filtered |
+| Audit trails | **Yes — and by default.** A named global query filter on `ApplicationDbContext` scopes every read, so a query is tenant-bounded whether or not its author thought about it. Lifted only by `Permissions.AuditTrails.ViewAllTenants`, checked at the call site and then dropped by name through `AuditTrailTenantScope` |
+| System logs | No — and **not reachable by that filter**: `SystemLog` is not on `ApplicationDbContext` at all, only on `LogDbContext`. Scoping them is a separate design, not a deferred switch |
 | Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation |
 | Picklists | No — stamped, not filtered; shared reference data by design |
 | Security settings (idle policy) | No — one row per installation, by design |
 | Presence, chat and login notifications | No — broadcast to every connected client |
 
-If you are deploying several customers into one installation, **treat everything below the Users row
-as installation-wide** until that changes. In particular an audit trail and a system log are readable
-in full by any holder of their view permission, whichever tenant they belong to.
+If you are deploying several customers into one installation, **treat everything below the Audit
+trails row as installation-wide** until that changes. In particular a system log is readable in full
+by any holder of its view permission, whichever tenant they belong to.
+
+**The audit trail is the first surface scoped by default rather than by remembering.** Every other
+row above it is filtered because each of its queries was found and given a predicate; a query added
+tomorrow would be unscoped until someone noticed. The audit trail is filtered in the model, so a new
+query over it starts scoped and an exemption has to be written down. That is the property to prefer
+when you extend this - and the reason `QueryFilters.Tenant` is a constant rather than a literal.
 
 **One provider-specific gap in the stamping.** `SystemLog.TenantId` is written by the SQL Server and
 PostgreSQL sinks and is **always null on SQLite**: that sink is a third-party package with a fixed
@@ -739,9 +745,10 @@ Stated plainly, because finding these out later is worse than reading them now.
 - **Granular Create/Delete permission constants gate rendering only.** Some fine-grained permission
   constants control whether a button is shown, not whether the underlying operation is permitted.
   Treat the coarse feature permission as the real boundary.
-- **Tenant isolation covers Documents and the Users area, and nothing else yet.** Rows are
-  tenant-stamped throughout, and those two areas are filtered on every entry point — including the
-  user export, which shares its predicate with the grid. **Audit trails, system logs, roles and
+- **Tenant isolation covers Documents, the Users area and audit trails.** Rows are tenant-stamped
+  throughout. Documents and the Users area are filtered at every entry point - including the user
+  export, which shares its predicate with the grid - and audit trails are filtered in the model by a
+  global query filter, so they are scoped by default rather than per query. **System logs, roles and
   picklists remain installation-wide** to whoever holds the relevant view permission, as do presence,
   chat and login notifications. See [Tenancy](#tenancy) for the full table, the cross-tenant right,
   and the one provider-specific gap in the stamping.
