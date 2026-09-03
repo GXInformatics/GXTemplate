@@ -471,7 +471,17 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
                 Email = info.Principal.FindFirstValue(ClaimTypes.Email) ?? info.Principal.Identity?.Name,
                 DisplayName = info.Principal.FindFirstValue(ClaimTypes.Name) ?? info.Principal.Identity?.Name,
                 Provider = info.LoginProvider,
-                IsActive = true,
+                // THE SECOND SELF-REGISTRATION DOOR, AND IT GETS THE SAME POSTURE - Pass 22 §B.
+                // This endpoint creates a brand-new account for an anonymous caller whose external
+                // identity matches nothing, which is self-registration by another route: it is
+                // gated by the same AllowSelfRegistration flag and blocked by the same middleware
+                // (see SelfRegistrationMiddleware, which names both doors explicitly). Leaving this
+                // true while Register.razor creates inactive accounts would have made the policy
+                // bypassable by clicking "sign in with <provider>" instead of filling in the form.
+                //
+                // EmailConfirmed stays true: the provider has already verified the address, and
+                // confirming an address is a different assertion from approving an account.
+                IsActive = false,
                 EmailConfirmed = true,
                 CreatedAt = DateTime.UtcNow,
                 TenantUsers = new List<TenantUser> { new TenantUser { TenantId = tenantId } }

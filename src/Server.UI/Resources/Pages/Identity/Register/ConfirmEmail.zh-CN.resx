@@ -67,8 +67,8 @@
   <data name="There was an error confirming your email. Please contact support or try again. (User ID: {0})" xml:space="preserve">
     <value>确认您的邮箱时出错。请联系客服或重试。(用户ID: {0})</value>
   </data>
-  <data name="Thank you for confirming your email. Your account is now active." xml:space="preserve">
-    <value>感谢您确认邮箱。您的账户现在已激活。</value>
+  <data name="Thank you for confirming your email. Your account is awaiting approval by an administrator, and you will be able to sign in once it has been activated." xml:space="preserve">
+    <value>感谢您确认邮箱。您的账户正在等待管理员批准，激活后您即可登录。</value>
   </data>
   <data name="There was an error confirming your email. Please contact support or try again." xml:space="preserve">
     <value>确认您的邮箱时出错。请联系客服或重试。</value>

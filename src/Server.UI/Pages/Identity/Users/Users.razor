@@ -401,6 +401,15 @@
                     Email = "",
                     UserName = "",
                     AssignedRoles = Array.Empty<string>(),
+                    // AN ADMINISTRATOR CREATING AN ACCOUNT IS ITSELF THE APPROVAL - Pass 22 §B, and
+                    // the counterpart of self-registration creating an inactive one. This seeds the
+                    // form's checkbox, so it is a DEFAULT and not a rule: an administrator who
+                    // wants to prepare an account ahead of time can still untick it.
+                    //
+                    // Before this it was left to InputModel.IsActive's own default, which is false,
+                    // so every administrator-created user arrived inactive and had to be activated
+                    // in a second step that nothing prompted for.
+                    IsActive = true,
                     // The configured default, not the server's zone - see
                     // IApplicationSettings.DefaultTimeZone.
                     TimeZoneId = ApplicationSettings.DefaultTimeZone,

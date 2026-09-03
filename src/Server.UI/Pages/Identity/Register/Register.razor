@@ -142,6 +142,17 @@
 		user.Email = _formModel.Email;
 		user.UserName = _formModel.UserName;
 		user.CreatedAt = DateTime.UtcNow;
+		// SELF-REGISTRATION CREATES AN INACTIVE ACCOUNT - Pass 22 §B. Self-registration exists so
+		// people can ASK for access, not so they can grant themselves access. An administrator
+		// activates them from the Users area, and that act is the approval.
+		//
+		// Written out rather than left to the CLR default. Pass 19 §B.5 found this line missing and
+		// the value therefore false by accident: ApplicationUser.IsActive has no initialiser, no EF
+		// configuration and no database default, so the posture held only for as long as nobody
+		// added one of the three. A security default that is inherited rather than stated is a
+		// default nobody can see, and the next person to read this file should not have to check
+		// three layers to learn what it is.
+		user.IsActive = false;
 		// The seeder creates this role on first run. Self-registration used to create it when
 		// missing, which meant an anonymous request could write to AspNetRoles; a missing role is a
 		// deployment fault, so registration now fails loudly instead - and before the account is

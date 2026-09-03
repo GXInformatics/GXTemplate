@@ -67,8 +67,8 @@
   <data name="There was an error confirming your email. Please contact support or try again. (User ID: {0})" xml:space="preserve">
     <value>There was an error confirming your email. Please contact support or try again. (User ID: {0})</value>
   </data>
-  <data name="Thank you for confirming your email. Your account is now active." xml:space="preserve">
-    <value>Thank you for confirming your email. Your account is now active.</value>
+  <data name="Thank you for confirming your email. Your account is awaiting approval by an administrator, and you will be able to sign in once it has been activated." xml:space="preserve">
+    <value>Thank you for confirming your email. Your account is awaiting approval by an administrator, and you will be able to sign in once it has been activated.</value>
   </data>
   <data name="There was an error confirming your email. Please contact support or try again." xml:space="preserve">
     <value>There was an error confirming your email. Please contact support or try again.</value>

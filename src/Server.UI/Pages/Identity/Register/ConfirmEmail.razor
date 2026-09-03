@@ -55,12 +55,25 @@
 					new Dictionary<string, object?> { ["returnUrl"] = "/" });
 
 				await Mediator.Publish(new SendWelcomeNotification(callbackUrl, user.Email!, user.UserName!));
-				Logger.LogInformation("{UserName} Activated Successfully!", user.Email);
-				user.IsActive = true;
-				await _userManager.UpdateAsync(user);
+				// CONFIRMING AN ADDRESS NO LONGER ACTIVATES THE ACCOUNT - Pass 22 §B. This used to
+				// set user.IsActive = true here, which meant a self-registered visitor activated
+				// their own account by clicking their own confirmation link: the "inactive pending
+				// approval" posture existed in Register.razor and was undone one email later, so no
+				// administrator was ever involved and the policy was decorative.
+				//
+				// Confirming an address and approving an account are two different assertions.
+				// The first says "this mailbox is reachable and belongs to whoever asked"; only the
+				// second says "this person may use the system", and only an administrator can make
+				// it - from the Users area, which activates and clears any lockout in one action.
+				Logger.LogInformation("{UserName} confirmed their email address.", user.Email);
 			}
 
-			_statusMessage = result.Succeeded ? L["Thank you for confirming your email. Your account is now active."] : L["There was an error confirming your email. Please contact support or try again."];
+			// Deliberately does NOT say the account is active: after Pass 22 §B it is not, and a
+			// self-registered user who was told otherwise here would meet a refusal at sign-in with
+			// no idea why. This page is the only place in the flow that can tell them, because the
+			// login page will not - it discloses the inactive state only behind a correct password,
+			// and says nothing at all before it (Pass 21 §D).
+			_statusMessage = result.Succeeded ? L["Thank you for confirming your email. Your account is awaiting approval by an administrator, and you will be able to sign in once it has been activated."] : L["There was an error confirming your email. Please contact support or try again."];
 			_hasError = !result.Succeeded;
 		}
 	}

@@ -36,6 +36,15 @@ public class ResetPasswordNotificationHandler : INotificationHandler<ResetPasswo
         // swallows anything it throws - so a failure that is not logged now is not recorded at all.
         if (result.Succeeded)
         {
+            // THE ADDRESS IS DELIBERATELY LOGGED. Considered in Pass 22 §D and kept, so it is not
+            // removed later as an apparent enumeration leak by someone who has not seen this
+            // decision. It looks like one and is not: this line records mail this system actually
+            // SENT, which is an operational record every mail-sending component should keep, and it
+            // is written only on the path where a message really went out. Forgot.razor is where
+            // the enumeration risk lived, and it no longer logs the address an anonymous stranger
+            // typed - the two are different acts and only one of them is attacker-controlled.
+            // Reading this requires Permissions.Logs.View, and a holder of that is already trusted
+            // with far more than the list of addresses that were sent a reset.
             _logger.LogInformation("Password reset email sent to {Email}.", notification.Email);
         }
         else

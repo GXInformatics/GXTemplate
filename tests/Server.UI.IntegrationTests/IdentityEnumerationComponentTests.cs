@@ -42,9 +42,14 @@ namespace CleanArchitecture.Blazor.Server.UI.IntegrationTests;
 /// answer.
 /// </para>
 /// <para>
-/// The unconfirmed case is unchanged in BEHAVIOUR - it still receives no reset link. Only the
-/// response is now identical. Whether it should be able to recover at all is a policy question,
-/// deliberately left to Pass 22.
+/// Pass 22 §A then answered the policy question Pass 21 left open: an unconfirmed address MAY reset,
+/// and a completed reset confirms it. The behaviour now matches the response, and the only case that
+/// receives nothing is an address with no account behind it.
+/// </para>
+/// <para>
+/// The indistinguishability assertions are deliberately unchanged by that. A policy change made
+/// BEHIND those responses must not make the responses start differing again, and re-running these
+/// untouched across the change is the check that proves it did not.
 /// </para>
 /// </remarks>
 [TestFixture]
@@ -300,21 +305,34 @@ public class IdentityEnumerationComponentTests
         answers[0].Should().NotContain("locked");
     }
 
+    /// <summary>
+    /// Pass 22 §A: every account that exists receives a reset link, confirmed or not; an address
+    /// with no account still receives nothing.
+    /// </summary>
+    /// <remarks>
+    /// This is the behavioural counterpart to the indistinguishability tests, and it exists because
+    /// they cannot tell the difference: a "fix" that simply stopped sending anything to anybody
+    /// would satisfy every assertion above. Before Pass 22 this asserted the opposite for the
+    /// unconfirmed case - that it received nothing - which was the behaviour Pass 21 preserved while
+    /// it neutralised the response.
+    /// </remarks>
     [Test]
-    public void OnlyTheConfirmedAccount_ActuallyReceivesAReset()
+    public void EveryExistingAccount_ReceivesAReset_ConfirmedOrNot()
     {
-        // The RESPONSE is identical; the BEHAVIOUR is not, and must not be. Without this, a fix
-        // that simply stopped sending anything would pass every assertion above.
         Submit(Unknown);
         _published.Should().BeEmpty("there is nobody to send to");
 
         Submit(Unconfirmed);
-        _published.Should().BeEmpty(
-            "an unconfirmed address still receives no reset link - unchanged behaviour, and a "
-            + "policy question left to Pass 22");
+        _published.Should().ContainSingle(
+            "an unconfirmed address may now recover - the link proves mailbox control exactly as a "
+            + "confirmation link does, and refusing it left the user no route back (Pass 22 §A)");
+        _published[0].Email.Should().Be(Unconfirmed);
+        _published[0].RequestUrl.Should().Contain("/account/reset-password").And.Contain("token=");
+
+        _published.Clear();
 
         Submit(Confirmed);
-        _published.Should().ContainSingle("the real flow must still work");
+        _published.Should().ContainSingle("the confirmed flow must still work, unchanged");
         _published[0].RequestUrl.Should().Contain("/account/reset-password").And.Contain("token=");
         _published[0].Email.Should().Be(Confirmed);
     }

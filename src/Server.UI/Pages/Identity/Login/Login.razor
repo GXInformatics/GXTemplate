@@ -156,8 +156,12 @@
 			return;
 		}
 
-		// Whether an inactive account should be able to sign in at all is a policy question left
-		// untouched here - this changes only WHEN the user is told, never the refusal itself.
+		// The refusal is RATIFIED, not merely inherited - Pass 22 §B. Pass 21 moved this message
+		// behind a correct password and left the refusal itself as an open policy question; the
+		// answer is that an inactive account may not sign in, because self-registration now creates
+		// inactive accounts on purpose and an administrator activating one is the approval step.
+		// This is the enforcement point for that, and its placement is unchanged: after the
+		// password, so a stranger learns nothing.
 		if (!user!.IsActive)
 		{
 			_errorMessage = L["Your account is inactive. Please contact support for assistance."];

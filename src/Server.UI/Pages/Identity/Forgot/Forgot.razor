@@ -72,11 +72,20 @@
 
 		var user = await _userManager.FindByEmailAsync(_formModel.Email);
 
-		// Both refusals are unchanged in BEHAVIOUR - an unknown address gets no mail, and an
-		// unconfirmed one still gets no reset link. Only the response is now identical. Whether an
-		// unconfirmed address SHOULD be able to recover is a policy question, not a defect, and it
-		// is deliberately left alone here.
-		if (user is not null && await _userManager.IsEmailConfirmedAsync(user))
+		// AN UNCONFIRMED ADDRESS MAY RESET - ratified in Pass 22 §A. Pass 21 made the three
+		// responses identical but deliberately left the behaviour alone; this is the policy answer
+		// it was waiting for, and the behaviour now matches the response.
+		//
+		// A reset link proves mailbox control exactly as a confirmation link does: it is delivered
+		// to that mailbox and nowhere else. Refusing it buys nothing and costs the user their only
+		// route back except an administrator - and after Pass 21 they get the same silence as
+		// everyone else, so they cannot even discover why. A completed reset therefore also CONFIRMS
+		// the address (see ResetPassword.HandleValidSubmitAsync), which is standard practice and
+		// strictly reduces the number of stranded accounts.
+		//
+		// An unknown address remains the one case that sends nothing, because there is nobody to
+		// send to.
+		if (user is not null)
 		{
 			var code = await _userManager.GeneratePasswordResetTokenAsync(user);
 			code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
@@ -87,10 +96,12 @@
 		}
 
 		// KNOWN RESIDUAL, accepted rather than fixed: the branch above does measurably more work
-		// than the branches that skip it - a token generation and a notification enqueue - so the
-		// three cases remain distinguishable by response time to an attacker who can measure it.
-		// Closing that means not doing the work on the request path at all, which changes what
-		// happens when mail fails. Out of scope here; see the Pass 21 report.
+		// than skipping it - a token generation and a notification enqueue - so an attacker who can
+		// measure response time can still separate "this address has an account" from "it does
+		// not". Pass 22 §A narrowed this from three timing buckets to two, since an unconfirmed
+		// address now does the same work as a confirmed one, but it does not close it. Closing it
+		// means not doing the work on the request path at all, which changes what happens when mail
+		// fails. Out of scope here; see the Pass 21 report.
 
 		// No query parameters, and the same destination whatever the address was. The callback URL
 		// above goes to the mail handler and nowhere else; it used to be appended here as well,

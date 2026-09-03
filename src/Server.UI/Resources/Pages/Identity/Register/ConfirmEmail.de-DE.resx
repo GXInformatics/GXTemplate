@@ -67,8 +67,8 @@
   <data name="There was an error confirming your email. Please contact support or try again. (User ID: {0})" xml:space="preserve">
     <value>Beim Bestätigen Ihrer E-Mail ist ein Fehler aufgetreten. Bitte wenden Sie sich an den Support oder versuchen Sie es erneut. (Benutzer-ID: {0})</value>
   </data>
-  <data name="Thank you for confirming your email. Your account is now active." xml:space="preserve">
-    <value>Vielen Dank für die Bestätigung Ihrer E-Mail. Ihr Konto ist jetzt aktiv.</value>
+  <data name="Thank you for confirming your email. Your account is awaiting approval by an administrator, and you will be able to sign in once it has been activated." xml:space="preserve">
+    <value>Vielen Dank für die Bestätigung Ihrer E-Mail. Ihr Konto wartet auf die Freigabe durch einen Administrator; sobald es aktiviert wurde, können Sie sich anmelden.</value>
   </data>
   <data name="There was an error confirming your email. Please contact support or try again." xml:space="preserve">
     <value>Beim Bestätigen Ihrer E-Mail ist ein Fehler aufgetreten. Bitte wenden Sie sich an den Support oder versuchen Sie es erneut.</value>
