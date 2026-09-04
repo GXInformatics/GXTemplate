@@ -22,11 +22,23 @@ namespace CleanArchitecture.Blazor.Application.Common.Constants;
 public static class QueryFilters
 {
     /// <summary>
-    /// Restricts an entity to the ambient tenant. Registered on <c>AuditTrail</c> since Pass 29.
+    /// Restricts an entity to the ambient tenant. Registered on <c>AuditTrail</c> since Pass 29 and
+    /// on <c>PicklistSet</c> since Pass 31.
     /// </summary>
     /// <remarks>
-    /// Exempted only by <c>AuditTrailTenantScope.VisibleAsync</c>, which checks
-    /// <c>Permissions.AuditTrails.ViewAllTenants</c> first.
+    /// <b>One name, two predicates, because a null tenant means opposite things for the two
+    /// entities.</b> An audit row with no tenant is an installation-level EVENT belonging to nobody,
+    /// so its filter is strict equality. A picklist row with no tenant is SHARED REFERENCE DATA
+    /// belonging to everyone, so its filter is <c>TenantId == null || TenantId == current</c>. The
+    /// predicates live beside their entities in <c>ApplicationDbContext.OnModelCreating</c>; this
+    /// name is what both are registered under.
+    /// <para>
+    /// The name is shared on purpose rather than split in two: it is what an exemption names, and an
+    /// exemption means the same thing for either entity - "read across tenants, having checked a
+    /// right". Today the only one is <c>AuditTrailTenantScope.VisibleAsync</c>, which checks
+    /// <c>Permissions.AuditTrails.ViewAllTenants</c> first. <b>Picklists have no exemption and no
+    /// cross-tenant right</b>, by decision rather than omission - see the README's Tenancy section.
+    /// </para>
     /// </remarks>
     public const string Tenant = "Tenant";
 

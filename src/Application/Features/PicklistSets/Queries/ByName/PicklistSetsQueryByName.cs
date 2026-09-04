@@ -19,8 +19,15 @@ public class PicklistSetsQueryByName : ICacheableRequest<IEnumerable<PicklistSet
     public string CacheKey => PicklistSetCacheKey.GetCacheKey(Name.ToString());
     public IEnumerable<string>? Tags => PicklistSetCacheKey.Tags;
     
-    /// <summary>reference data, identical for every caller.</summary>
-    public CacheScope Scope => CacheScope.Global;
+    /// <summary>
+    /// <see cref="CacheScope.PerTenant"/> - shared reference data plus this tenant's own additions.
+    /// </summary>
+    /// <remarks>
+    /// Global until Pass 31. Same reasoning as <c>GetAllPicklistSetsQuery</c>: the handler filters
+    /// by picklist name only, and the tenant bound arrives from the global query filter on
+    /// <c>PicklistSet</c> - so the result varies by tenant even though nothing here says so.
+    /// </remarks>
+    public CacheScope Scope => CacheScope.PerTenant;
 }
 
 public class PicklistSetsQueryByNameHandler : IRequestHandler<PicklistSetsQueryByName, IEnumerable<PicklistSetDto>>

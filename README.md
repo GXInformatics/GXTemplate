@@ -6,11 +6,11 @@ pluggable file storage.
 
 **Multi-tenant data, and isolation on two areas of it.** The distinction is deliberate and is
 described in full under [Tenancy](#tenancy): tenants, per-user tenant membership and tenant-stamped
-rows all exist; **Documents, the Users area, audit trails and online presence are scoped end to
-end**, the first three with a named, revocable cross-tenant right and presence deliberately with
-none; and the remaining administration surfaces are **not** — a holder of the relevant permission
-still sees every tenant's system logs, roles and picklists. Read that section before quoting this
-one.
+rows all exist; **Documents, the Users area, audit trails, online presence and picklists are scoped
+end to end**, the first three with a named, revocable cross-tenant right and the last two
+deliberately with none; and the remaining administration surfaces are **not** — a holder of the
+relevant permission still sees every tenant's system logs and roles. Read that section before quoting
+this one.
 
 This README ships with the template and with every project generated from it, so parts of it are
 addressed to whoever is generating a project and parts to whoever is maintaining the generated one.
@@ -388,8 +388,8 @@ Known limitations.
 
 ### Tenancy
 
-**Contract: rows record which tenant they were written in. Four surfaces are filtered by it —
-Documents, the Users area, audit trails and online presence. The rest are not.**
+**Contract: rows record which tenant they were written in. Five surfaces are filtered by it —
+Documents, the Users area, audit trails, online presence and picklists. The rest are not.**
 
 Those are two different promises and only the first one holds everywhere, so they are stated
 separately rather than under one word.
@@ -458,17 +458,47 @@ subsequently creates.
 | Tenant **switcher** (app shell) | **Yes, on a different bound** — not visibility but the switch ladder: `SwitchTenants` offers the tenants you belong to, `SwitchToAnyTenant` offers all of them, neither offers none. The menu and the guard on the write derive from one rule in `TenantSwitchService`, so what is offered is exactly what is permitted |
 | Audit trails | **Yes — and by default.** A named global query filter on `ApplicationDbContext` scopes every read, so a query is tenant-bounded whether or not its author thought about it. Lifted only by `Permissions.AuditTrails.ViewAllTenants`, checked at the call site and then dropped by name through `AuditTrailTenantScope` |
 | Online presence and login notifications | **Yes — and with no escape.** `ServerHub` puts each connection into its own tenant's SignalR group in `OnConnectedAsync`, from the server-resolved `UserContext`, and both the sign-in/sign-out broadcasts and the `GetOnlineUsers` snapshot are bounded by it. `Users.ViewOnlineStatus` decides *whether* a user sees presence, never *whose*: there is no cross-tenant right here, deliberately — see below. Chat was deleted rather than scoped |
+| Picklists | **Yes, on a different shape** — SHARED plus per-tenant additions. A named global query filter admits `TenantId == null || TenantId == current`, so every value the installation ships stays visible to every tenant while a tenant's own additions stay private to it. No cross-tenant escape, deliberately |
 | System logs | No — and **not reachable by that filter**: `SystemLog` is not on `ApplicationDbContext` at all, only on `LogDbContext`. Scoping them is a separate design, not a deferred switch |
 | Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation |
-| Picklists | No — stamped, not filtered; shared reference data by design |
 | Security settings (idle policy) | No — one row per installation, by design |
 
-If you are deploying several customers into one installation, **treat everything below the Online
-presence row as installation-wide** until that changes. In particular a system log is readable in
-full by any holder of its view permission, whichever tenant they belong to.
+If you are deploying several customers into one installation, **treat everything below the Picklists
+row as installation-wide** until that changes. In particular a system log is readable in full by any
+holder of its view permission, whichever tenant they belong to.
 
-**Presence is the one scoped surface with no cross-tenant escape, and that is a decision rather than
-an omission.** Every other bound above can be lifted by a named right, because the thing being
+**Picklists are the one surface where a null tenant means "everyone's" rather than "nobody's", and
+that difference is worth understanding before you extend it.** An audit row with no tenant is an
+installation-level *event* belonging to nobody, so its filter is strict equality. A picklist row with
+no tenant is shared *reference data* belonging to everyone, so its filter admits it alongside the
+caller's own rows. Both are registered under the same filter name, `QueryFilters.Tenant`, with two
+different predicates — a single shared predicate could only have served one of them.
+
+Three consequences follow, and none of them is obvious from the table:
+
+- **Shared rows come from seeding.** The initializer runs with no ambient principal, so the values it
+  writes carry no tenant and every tenant sees them. A picklist created through the admin page by a
+  signed-in administrator is stamped with *their* tenant and is private to it. There is no way to
+  create a shared row through the UI.
+- **The import's duplicate check is now per-tenant.** Two tenants may import the same picklist name
+  and value without the second silently losing its rows to the first — which is what it should
+  always have been. Neither may shadow a value the installation already ships, because a shared row
+  is visible to both and still counts as a duplicate.
+- **A shared row is editable by any principal holding the picklist Edit permission**, and editing one
+  changes it for every tenant. The filter admits shared rows for reading, and the edit and delete
+  commands address rows by id through that same filter. If that matters for your deployment, gate it
+  before you rely on multi-tenant picklists.
+
+**Presence and picklists have no cross-tenant escape, and in both cases that is a decision rather
+than an omission.** For picklists the reason is simply that no administrative task needs one: an
+installation operator managing shared reference data works with the null-tenant rows, which everyone
+already sees, and a tenant's private additions are that tenant's own business. No extension point was
+added "for later" — if one is ever needed it should follow the `Users.ViewAllTenants` pattern, and
+`PicklistDataSourceService.Scope` must become `PerUser` in the same change, because a per-principal
+escape would invalidate the per-tenant cache partition.
+
+For presence the reason is stronger. Every other bound above can be lifted by a named right, because
+the thing being
 widened is a query: an administrator asks for records, the request is authorised, and the answer
 leaves a trace. Presence is not a query. A permanent feed of another tenant's staff signing in and
 out is continuous observation of people with no request to authorise and nothing to audit
@@ -476,11 +506,21 @@ afterwards, and it supports no administrative task that asking the person would 
 installation genuinely needs one, the extension point is `ServerHub.GroupFor` together with
 `GetOnlineUsers` — they must change together or the roster and the events will disagree.
 
-**The audit trail is the first surface scoped by default rather than by remembering.** Every other
-row above it is filtered because each of its queries was found and given a predicate; a query added
-tomorrow would be unscoped until someone noticed. The audit trail is filtered in the model, so a new
-query over it starts scoped and an exemption has to be written down. That is the property to prefer
-when you extend this - and the reason `QueryFilters.Tenant` is a constant rather than a literal.
+**Audit trails and picklists are scoped by default rather than by remembering; the rest are not.**
+Documents, the Users area and the pickers above them are filtered because each of their queries was
+found and given a predicate — a query added tomorrow would be unscoped until someone noticed. Audit
+trails and picklists are filtered in the model, so a new query over either starts scoped and an
+exemption has to be written down. That is the property to prefer when you extend this — and the
+reason `QueryFilters.Tenant` is a constant rather than a literal.
+
+**A filtered query behind a shared cache key is a leak no query test can see, so the two always move
+together.** Every cached response declares a `CacheScope`, and scoping a query invalidates whatever
+that declaration claimed: picklists went `Global → PerTenant` in the same change that filtered them,
+and the paginated picklist query went `PerUser → PerUserAndTenant`, because one principal can occupy
+two tenants over time and a `u:{userId}` key would have served them the list they cached before
+switching. **If you filter a query in a project generated from this template, re-derive its scope in
+the same commit** — the failure mode is that the first tenant to warm an entry serves it to the rest,
+intermittently and without reproducing.
 
 **One provider-specific gap in the stamping.** `SystemLog.TenantId` is written by the SQL Server and
 PostgreSQL sinks and is **always null on SQLite**: that sink is a third-party package with a fixed
@@ -768,14 +808,20 @@ Stated plainly, because finding these out later is worse than reading them now.
 - **Granular Create/Delete permission constants gate rendering only.** Some fine-grained permission
   constants control whether a button is shown, not whether the underlying operation is permitted.
   Treat the coarse feature permission as the real boundary.
-- **Tenant isolation covers Documents, the Users area, audit trails and online presence.** Rows are
-  tenant-stamped throughout. Documents and the Users area are filtered at every entry point -
-  including the user export, which shares its predicate with the grid - audit trails are filtered in
-  the model by a global query filter, so they are scoped by default rather than per query, and
-  presence is bounded at the SignalR connection by a per-tenant group. **System logs, roles and
-  picklists remain installation-wide** to whoever holds the relevant view permission. See
-  [Tenancy](#tenancy) for the full table, the cross-tenant right, why presence deliberately has none,
-  and the one provider-specific gap in the stamping.
+- **Tenant isolation covers Documents, the Users area, audit trails, online presence and picklists.**
+  Rows are tenant-stamped throughout. Documents and the Users area are filtered at every entry point -
+  including the user export, which shares its predicate with the grid - audit trails and picklists are
+  filtered in the model by a global query filter, so they are scoped by default rather than per query,
+  and presence is bounded at the SignalR connection by a per-tenant group. **System logs and roles
+  remain installation-wide** to whoever holds the relevant view permission. See [Tenancy](#tenancy)
+  for the full table, the cross-tenant right, why presence and picklists deliberately have none, and
+  the one provider-specific gap in the stamping.
+- **A shared picklist value is editable by any tenant's administrator.** Picklists are shared plus
+  per-tenant: the values the installation seeds carry no tenant and are visible to everyone, and the
+  filter admits them for reading, so the edit and delete commands - which address rows by id through
+  that same filter - reach them too. Editing one changes it for every tenant. Nothing in the admin
+  page distinguishes a shared row from a private one today, and `PicklistSetDto` carries no
+  `TenantId` for it to distinguish them by. Gate it before you rely on multi-tenant picklists.
 - **There is no chat.** The hub's `SendMessage`, `SendPrivateMessage` and `SendNotification` methods
   and their client wiring were removed: nothing had called them since the AI chatbot was taken out,
   and one of them accepted a client-supplied recipient with no check. If you want chat, add it

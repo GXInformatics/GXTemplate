@@ -121,9 +121,33 @@ public class ApplicationDbContext : IdentityDbContext<
         //
         // So the list is written out, and adding to it is a deliberate act rather than a side
         // effect of implementing an interface.
+        //
+        // ONE FILTER NAME, TWO PREDICATES - and that is correct, not an oversight.
+        //
+        // There is no shared expression to reuse here: HasQueryFilter takes a lambda per entity, so
+        // each entry below states its own rule. That matters because a null TenantId means opposite
+        // things for the two entities on the list, and a single shared predicate would have forced
+        // one of them to be wrong.
+        //
+        //   AuditTrail    - a row is an EVENT that happened in exactly one tenant. A null tenant is
+        //                   an installation-level event (seeding, bootstrap, background work) and
+        //                   belongs to nobody, so strict equality is right: a tenant sees its own
+        //                   events and a context with no principal sees the installation's.
+        //   PicklistSet   - a row is REFERENCE DATA. A null tenant means "everyone's", so the
+        //                   predicate admits it alongside the caller's own rows. Shared plus
+        //                   per-tenant additions: every shipped picklist stays visible to every
+        //                   tenant with no per-tenant seeding path, and a tenant's own additions
+        //                   stay private to it.
+        //
+        // The NAME is shared deliberately: QueryFilters.Tenant is what an exemption names, and an
+        // exemption means the same thing for both - "read across tenants, having checked a right".
         builder.Entity<AuditTrail>().HasQueryFilter(
             QueryFilters.Tenant,
             (AuditTrail a) => a.TenantId == CurrentTenantId);
+
+        builder.Entity<PicklistSet>().HasQueryFilter(
+            QueryFilters.Tenant,
+            (PicklistSet p) => p.TenantId == null || p.TenantId == CurrentTenantId);
 
         // LAST, and after ApplyConfigurationsFromAssembly: the GX naming standard yields to an
         // explicit ToTable, so the configurations have to have been applied before it runs. It maps

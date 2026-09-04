@@ -361,6 +361,27 @@ public class ApplicationDbContextInitializer
         await _context.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Seeds the shipped picklist values, once, as SHARED rows visible to every tenant.
+    /// </summary>
+    /// <remarks>
+    /// <b>Both the guard and the rows depend on there being no ambient principal here, and that is
+    /// what makes this correct rather than lucky.</b> Since Pass 31 <c>PicklistSet</c> carries a
+    /// global tenant filter, <c>TenantId == null || TenantId == current</c>. Seeding runs from
+    /// <c>HostExtensions</c> at startup with nothing ambient, so <c>CurrentTenantId</c> is null and
+    /// EF's null semantics reduce the filter to <c>TenantId IS NULL</c>.
+    /// <para>
+    /// So the guard below asks the right question - "have the SHARED picklists been seeded?" - and
+    /// not "does any tenant have a picklist?", which would let one tenant's private addition
+    /// suppress the installation's reference data forever. And the rows written carry no tenant,
+    /// because <c>AuditableEntityInterceptor</c> stamps from the same absent principal, so a fresh
+    /// seed produces rows every tenant can see rather than rows nobody can.
+    /// </para>
+    /// <para>
+    /// The corollary is worth stating: a picklist created through the UI by a signed-in
+    /// administrator is stamped with THEIR tenant and is private to it. Shared rows come from here.
+    /// </para>
+    /// </remarks>
     private async Task SeedPicklistsAsync()
     {
         if (await _context.PicklistSets.AnyAsync()) return;

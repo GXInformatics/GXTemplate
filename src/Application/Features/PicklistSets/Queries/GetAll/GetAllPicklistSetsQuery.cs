@@ -14,8 +14,17 @@ public class GetAllPicklistSetsQuery : ICacheableRequest<IEnumerable<PicklistSet
     public string CacheKey => PicklistSetCacheKey.GetAllCacheKey;
     public IEnumerable<string>? Tags => PicklistSetCacheKey.Tags;
     
-    /// <summary>reference data, identical for every caller.</summary>
-    public CacheScope Scope => CacheScope.Global;
+    /// <summary>
+    /// <see cref="CacheScope.PerTenant"/> - shared reference data plus this tenant's own additions.
+    /// </summary>
+    /// <remarks>
+    /// <b>Global until Pass 31, and the global query filter is what made that wrong.</b> The handler
+    /// below never mentions a tenant and does not need to - the filter on <c>PicklistSet</c> scopes
+    /// it - which is precisely why the scope had to be revisited by hand: nothing in this file
+    /// changed, and its correct answer did. A filtered query behind a process-wide key serves the
+    /// first tenant's list to every other one.
+    /// </remarks>
+    public CacheScope Scope => CacheScope.PerTenant;
 }
 
 public class GetAllPicklistSetsQueryHandler : IRequestHandler<GetAllPicklistSetsQuery, IEnumerable<PicklistSetDto>>

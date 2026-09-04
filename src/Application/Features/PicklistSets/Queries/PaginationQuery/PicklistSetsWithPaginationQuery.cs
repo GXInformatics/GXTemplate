@@ -15,8 +15,23 @@ public class PicklistSetsWithPaginationQuery : PicklistSetAdvancedFilter, ICache
     public string CacheKey => $"{nameof(PicklistSetsWithPaginationQuery)},{this}";
     public IEnumerable<string>? Tags => PicklistSetCacheKey.Tags;
     
-    /// <summary>the specification filters the date window by the caller's local time offset.</summary>
-    public CacheScope Scope => CacheScope.PerUser;
+    /// <summary>
+    /// <see cref="CacheScope.PerUserAndTenant"/> - the date window is per user, the rows are per
+    /// tenant, and both have to be in the key.
+    /// </summary>
+    /// <remarks>
+    /// <b>PerUser until Pass 31, and PerUser alone is not enough once the rows are filtered.</b> The
+    /// specification narrows the date window by the caller's local time offset, which is why the
+    /// user was in the key; the global query filter on <c>PicklistSet</c> now also narrows the rows
+    /// by tenant, which the user id does not capture. One principal can occupy two tenants over
+    /// time - that is exactly what the tenant switcher does - and under a <c>u:{userId}</c> key
+    /// alone they would be served, after switching, the list they cached before it.
+    /// <para>
+    /// This is the failure mode the tenant switch makes reachable and a circuit reload does NOT fix:
+    /// the FusionCache entry is process-wide and outlives the circuit.
+    /// </para>
+    /// </remarks>
+    public CacheScope Scope => CacheScope.PerUserAndTenant;
 
     public override string ToString()
     {

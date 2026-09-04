@@ -76,6 +76,17 @@ public class ImportPicklistSetsCommandHandler :
                     cancellationToken);
                 if (validationResult.IsValid)
                 {
+                    // PER-TENANT SINCE PASS 31, and it takes no code here to be so: the global query
+                    // filter on PicklistSet bounds this AnyAsync like any other read, so "does this
+                    // already exist" now means "does this already exist WHERE I CAN SEE IT" - my
+                    // tenant's rows plus the installation's shared ones.
+                    //
+                    // That is what it should always have been, and both halves matter. Two tenants
+                    // may now import the same picklist name and value without the second one
+                    // silently losing its rows to the first. And neither may shadow a value the
+                    // installation already ships, because a shared row is visible to both and still
+                    // counts as a duplicate - which is right: a shadowing row would appear twice in
+                    // the same dropdown.
                     var exist = await db.PicklistSets.AnyAsync(x => x.Name == item.Name && x.Value == item.Value,
                         cancellationToken);
                     if (exist) continue;
