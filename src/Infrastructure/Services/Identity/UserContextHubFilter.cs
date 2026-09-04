@@ -13,7 +13,9 @@ public class UserContextHubFilter : IHubFilter
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IUserContextAccessor _userContextAccessor;
     private readonly IClientInfoAccessor _clientInfoAccessor;
-    private const string UserContextKey = "__user_ctx";
+    // Owned by HubUserContext so that a hub can read the same key rather than repeating the
+    // literal - see the remarks there for why a drifted duplicate would fail silently.
+    private const string UserContextKey = HubUserContext.ItemsKey;
     private const string ClientInfoKey = "__client_info";
 
     /// <summary>

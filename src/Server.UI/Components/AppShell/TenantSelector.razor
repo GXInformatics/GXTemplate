@@ -179,7 +179,17 @@
 
                 // Refresh user state
                 await UserProfileState.RefreshAsync();
-                // Navigate to home page
+
+                // Navigate to home page.
+                //
+                // forceLoad: true is LOAD-BEARING for presence isolation and must not become a soft
+                // navigation. ServerHub puts a connection into its tenant's SignalR group in
+                // OnConnectedAsync, and a group is keyed by connection id - so the only way a
+                // switched user leaves the previous tenant's presence group is for the connection to
+                // be rebuilt. A full page load tears down the Blazor circuit, which disposes the
+                // scoped HubClient and reconnects; a soft navigation would keep the circuit, keep
+                // the connection, and leave the user watching their old tenant's colleagues sign in
+                // and out with nothing failing. TenantSelectorComponentTests pins this.
                 Navigation.NavigateTo("/", true);
             }
             else

@@ -6,10 +6,11 @@ pluggable file storage.
 
 **Multi-tenant data, and isolation on two areas of it.** The distinction is deliberate and is
 described in full under [Tenancy](#tenancy): tenants, per-user tenant membership and tenant-stamped
-rows all exist; **Documents and the Users area are scoped end to end**, with a named, revocable
-cross-tenant right; and the remaining administration surfaces are **not** — a holder of the relevant
-permission still sees every tenant's audit trails, system logs, roles and picklists. Read that
-section before quoting this one.
+rows all exist; **Documents, the Users area, audit trails and online presence are scoped end to
+end**, the first three with a named, revocable cross-tenant right and presence deliberately with
+none; and the remaining administration surfaces are **not** — a holder of the relevant permission
+still sees every tenant's system logs, roles and picklists. Read that section before quoting this
+one.
 
 This README ships with the template and with every project generated from it, so parts of it are
 addressed to whoever is generating a project and parts to whoever is maintaining the generated one.
@@ -387,7 +388,8 @@ Known limitations.
 
 ### Tenancy
 
-**Contract: rows record which tenant they were written in. Only Documents is filtered by it.**
+**Contract: rows record which tenant they were written in. Four surfaces are filtered by it —
+Documents, the Users area, audit trails and online presence. The rest are not.**
 
 Those are two different promises and only the first one holds everywhere, so they are stated
 separately rather than under one word.
@@ -410,7 +412,8 @@ the installation rather than to a tenant. Any future per-tenant view has to surf
 rather than quietly dropping it: a tenant administrator who cannot see that the application restarted
 is being shown an edited log.
 
-**What is actually filtered.** **Documents** and the **Users** area.
+**What is actually filtered.** **Documents**, the **Users** area, **audit trails** and **online
+presence**.
 
 Documents is enforced on every entry point — the listing and all four of its list views, the download
 button, the `/files` streaming endpoint, the edit command and the delete command. One rule,
@@ -428,6 +431,17 @@ belonging to no tenant, yields no rows rather than every row.
 not reach the circuit's memory or the cache. That matters because a list filtered only as it is drawn
 is still a list the server fetched and held.
 
+**Presence is bounded at the connection, for the same reason.** `ServerHub` is a SignalR hub, so its
+isolation primitive is a group rather than a predicate: a connection joins its own tenant's group in
+`OnConnectedAsync`, and every broadcast addresses that group. Two properties make it hold. The group
+is derived from the `UserContext` the hub filter resolved from the **database**, never from a hub
+method parameter (a client speaks to the hub directly and can send anything) and never from the
+principal's tenant claim (which is absent for a user who has never switched tenant and stale for one
+whose cookie predates their last switch). And membership is re-established on **every** connect,
+which is what makes reconnection and tenant switching correct — a group is keyed by connection id
+and does not survive either. The snapshot method `GetOnlineUsers` needs its own bound on top of
+that, because no group membership constrains what a method returns.
+
 **The escape is `Permissions.Users.ViewAllTenants`**, granted to the administrator by default. It is
 deliberately *not* `SwitchToAnyTenant`: seeing across tenants and acting across them are different
 capabilities, and switching is a persistent write that re-parents everything the principal
@@ -443,15 +457,24 @@ subsequently creates.
 | "Superior" user search | **Yes** — the list it searches is bounded by the same rule as the grid, and it then narrows to the edited user's own tenant; empty when no tenant is supplied |
 | Tenant **switcher** (app shell) | **Yes, on a different bound** — not visibility but the switch ladder: `SwitchTenants` offers the tenants you belong to, `SwitchToAnyTenant` offers all of them, neither offers none. The menu and the guard on the write derive from one rule in `TenantSwitchService`, so what is offered is exactly what is permitted |
 | Audit trails | **Yes — and by default.** A named global query filter on `ApplicationDbContext` scopes every read, so a query is tenant-bounded whether or not its author thought about it. Lifted only by `Permissions.AuditTrails.ViewAllTenants`, checked at the call site and then dropped by name through `AuditTrailTenantScope` |
+| Online presence and login notifications | **Yes — and with no escape.** `ServerHub` puts each connection into its own tenant's SignalR group in `OnConnectedAsync`, from the server-resolved `UserContext`, and both the sign-in/sign-out broadcasts and the `GetOnlineUsers` snapshot are bounded by it. `Users.ViewOnlineStatus` decides *whether* a user sees presence, never *whose*: there is no cross-tenant right here, deliberately — see below. Chat was deleted rather than scoped |
 | System logs | No — and **not reachable by that filter**: `SystemLog` is not on `ApplicationDbContext` at all, only on `LogDbContext`. Scoping them is a separate design, not a deferred switch |
 | Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation |
 | Picklists | No — stamped, not filtered; shared reference data by design |
 | Security settings (idle policy) | No — one row per installation, by design |
-| Presence, chat and login notifications | No — broadcast to every connected client |
 
-If you are deploying several customers into one installation, **treat everything below the Audit
-trails row as installation-wide** until that changes. In particular a system log is readable in full
-by any holder of its view permission, whichever tenant they belong to.
+If you are deploying several customers into one installation, **treat everything below the Online
+presence row as installation-wide** until that changes. In particular a system log is readable in
+full by any holder of its view permission, whichever tenant they belong to.
+
+**Presence is the one scoped surface with no cross-tenant escape, and that is a decision rather than
+an omission.** Every other bound above can be lifted by a named right, because the thing being
+widened is a query: an administrator asks for records, the request is authorised, and the answer
+leaves a trace. Presence is not a query. A permanent feed of another tenant's staff signing in and
+out is continuous observation of people with no request to authorise and nothing to audit
+afterwards, and it supports no administrative task that asking the person would not. If your
+installation genuinely needs one, the extension point is `ServerHub.GroupFor` together with
+`GetOnlineUsers` — they must change together or the roster and the events will disagree.
 
 **The audit trail is the first surface scoped by default rather than by remembering.** Every other
 row above it is filtered because each of its queries was found and given a predicate; a query added
@@ -745,13 +768,18 @@ Stated plainly, because finding these out later is worse than reading them now.
 - **Granular Create/Delete permission constants gate rendering only.** Some fine-grained permission
   constants control whether a button is shown, not whether the underlying operation is permitted.
   Treat the coarse feature permission as the real boundary.
-- **Tenant isolation covers Documents, the Users area and audit trails.** Rows are tenant-stamped
-  throughout. Documents and the Users area are filtered at every entry point - including the user
-  export, which shares its predicate with the grid - and audit trails are filtered in the model by a
-  global query filter, so they are scoped by default rather than per query. **System logs, roles and
-  picklists remain installation-wide** to whoever holds the relevant view permission, as do presence,
-  chat and login notifications. See [Tenancy](#tenancy) for the full table, the cross-tenant right,
+- **Tenant isolation covers Documents, the Users area, audit trails and online presence.** Rows are
+  tenant-stamped throughout. Documents and the Users area are filtered at every entry point -
+  including the user export, which shares its predicate with the grid - audit trails are filtered in
+  the model by a global query filter, so they are scoped by default rather than per query, and
+  presence is bounded at the SignalR connection by a per-tenant group. **System logs, roles and
+  picklists remain installation-wide** to whoever holds the relevant view permission. See
+  [Tenancy](#tenancy) for the full table, the cross-tenant right, why presence deliberately has none,
   and the one provider-specific gap in the stamping.
+- **There is no chat.** The hub's `SendMessage`, `SendPrivateMessage` and `SendNotification` methods
+  and their client wiring were removed: nothing had called them since the AI chatbot was taken out,
+  and one of them accepted a client-supplied recipient with no check. If you want chat, add it
+  deliberately and scope it as you add it - `ServerHub` shows the shape.
 - **Identity entities are not audited.** `ApplicationUser`, `ApplicationRole` and their claim tables
   do not implement `IAuditable`, so user and role changes do not produce audit rows. Login events
   are recorded separately; permission and role changes are not.

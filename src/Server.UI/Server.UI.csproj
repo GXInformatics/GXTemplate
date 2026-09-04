@@ -19,6 +19,10 @@
              IdentityComponentsEndpointRouteBuilderExtensions.ResolveLocalReturnUrl without widening
              the assembly's public surface just to make a rule testable. -->
         <InternalsVisibleTo Include="CleanArchitecture.Blazor.Application.UnitTests" />
+        <!-- Pass 30: so ServerHubTenantIsolationTests can call ServerHub.GroupFor, the single
+             definition of "same presence audience". Making it public instead would put it on a
+             Hub subclass, where public members read as client-invocable hub methods. -->
+        <InternalsVisibleTo Include="CleanArchitecture.Blazor.Server.UI.IntegrationTests" />
     </ItemGroup>
  
 

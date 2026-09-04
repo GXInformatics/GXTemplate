@@ -5,7 +5,24 @@
 @inject IUserContextAccessor UserContextAccessor
 @implements IAsyncDisposable
 
-@if (_onlineUsers.Any())
+@*
+    The roster of who is online, rendered in the theme drawer.
+
+    Two bounds apply and they are independent of each other:
+
+      * WHOSE presence - decided on the server. ServerHub broadcasts to the caller's tenant group
+        and scopes GetOnlineUsers to it. This component applies no tenant filter and must not: the
+        hub is invocable directly over the WebSocket, so a filter here would constrain the display
+        and not the disclosure.
+
+      * WHETHER presence at all - Permissions.Users.ViewOnlineStatus, checked below. Pass 30 added
+        it. UserLoginState has always gated its sign-in toasts on this permission while this
+        component - the more revealing of the two, showing avatars and user names - checked nothing,
+        so every authenticated user saw the roster. That asymmetry was the bug; the permission's
+        own description ("Allows viewing users' online status") is exactly this surface.
+*@
+
+@if (_canViewOnlineStatus && _onlineUsers.Any())
 {
     <div class="d-flex flex-row gap-2 my-3 gap-2 my-3">
         @foreach (var user in _onlineUsers.OrderBy(u => !string.Equals(u.UserId, currentUserId, StringComparison.Ordinal)))
@@ -32,11 +49,22 @@
     private readonly Dictionary<string, CleanArchitecture.Blazor.Application.Common.Interfaces.Identity.UserContext> _usersById = new(StringComparer.Ordinal);
     private IEnumerable<CleanArchitecture.Blazor.Application.Common.Interfaces.Identity.UserContext> _onlineUsers => _usersById.Values;
     private string? currentUserId;
+    private bool _canViewOnlineStatus;
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = default!;
 
     protected override async Task OnInitializedAsync()
     {
+        var state = await AuthState;
+        _canViewOnlineStatus = (await AuthService.AuthorizeAsync(state.User, Permissions.Users.ViewOnlineStatus)).Succeeded;
+
         var currentUser = UserContextAccessor.Current;
         currentUserId = currentUser?.UserId;
+
+        // Without the permission there is nothing to show, so no connection is started and no
+        // snapshot is pulled. Subscribing and then discarding would still put the data on the wire.
+        if (!_canViewOnlineStatus) return;
 
         Client.LoginEvent += OnLogin;
         Client.LogoutEvent += OnLogout;
