@@ -175,9 +175,9 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Name", "Value")
+                    b.HasIndex("TenantId", "Name", "Value")
                         .IsUnique()
-                        .HasFilter("[Value] IS NOT NULL");
+                        .HasFilter("[TenantId] IS NOT NULL AND [Value] IS NOT NULL");
 
                     b.ToTable("PicklistSets", (string)null);
                 });

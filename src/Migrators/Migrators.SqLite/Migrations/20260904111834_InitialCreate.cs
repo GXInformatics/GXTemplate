@@ -444,9 +444,9 @@ namespace CleanArchitecture.Blazor.Migrators.SqLite.Migrations
                 column: "TenantId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_PicklistSets_Name_Value",
+                name: "IX_PicklistSets_TenantId_Name_Value",
                 table: "PicklistSets",
-                columns: new[] { "Name", "Value" },
+                columns: new[] { "TenantId", "Name", "Value" },
                 unique: true);
 
             migrationBuilder.CreateIndex(

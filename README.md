@@ -458,7 +458,7 @@ subsequently creates.
 | Tenant **switcher** (app shell) | **Yes, on a different bound** — not visibility but the switch ladder: `SwitchTenants` offers the tenants you belong to, `SwitchToAnyTenant` offers all of them, neither offers none. The menu and the guard on the write derive from one rule in `TenantSwitchService`, so what is offered is exactly what is permitted |
 | Audit trails | **Yes — and by default.** A named global query filter on `ApplicationDbContext` scopes every read, so a query is tenant-bounded whether or not its author thought about it. Lifted only by `Permissions.AuditTrails.ViewAllTenants`, checked at the call site and then dropped by name through `AuditTrailTenantScope` |
 | Online presence and login notifications | **Yes — and with no escape.** `ServerHub` puts each connection into its own tenant's SignalR group in `OnConnectedAsync`, from the server-resolved `UserContext`, and both the sign-in/sign-out broadcasts and the `GetOnlineUsers` snapshot are bounded by it. `Users.ViewOnlineStatus` decides *whether* a user sees presence, never *whose*: there is no cross-tenant right here, deliberately — see below. Chat was deleted rather than scoped |
-| Picklists | **Yes, on a different shape** — SHARED plus per-tenant additions. A named global query filter admits `TenantId == null || TenantId == current`, so every value the installation ships stays visible to every tenant while a tenant's own additions stay private to it. No cross-tenant escape, deliberately |
+| Picklists | **Yes, on a different shape** — SHARED plus per-tenant additions. A named global query filter admits `TenantId == null || TenantId == current`, so every value the installation ships stays visible to every tenant while a tenant's own additions stay private to it. No cross-tenant READ escape, deliberately; WRITING a shared value needs `PicklistSets.ManageShared` |
 | System logs | No — and **not reachable by that filter**: `SystemLog` is not on `ApplicationDbContext` at all, only on `LogDbContext`. Scoping them is a separate design, not a deferred switch |
 | Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation |
 | Security settings (idle policy) | No — one row per installation, by design |
@@ -480,22 +480,40 @@ Three consequences follow, and none of them is obvious from the table:
   writes carry no tenant and every tenant sees them. A picklist created through the admin page by a
   signed-in administrator is stamped with *their* tenant and is private to it. There is no way to
   create a shared row through the UI.
+- **The unique index is `(TenantId, Name, Value)`.** Scoping the *reads* did not scope the
+  *constraint*: a query filter narrows what a query sees, a unique index constrains what the table
+  holds, and until Pass 32 the index still spanned tenants — so the duplicate check below said "not a
+  duplicate" and the insert then failed. One known gap remains: SQLite and PostgreSQL treat NULLs as
+  distinct in a unique index, so the *shared* partition is not protected from holding the same value
+  twice (SQL Server is, because it treats NULLs as equal). Closing it portably needs a partial unique
+  index whose filter SQL differs per provider; `PicklistTenantUniquenessTests` names the gap.
 - **The import's duplicate check is now per-tenant.** Two tenants may import the same picklist name
   and value without the second silently losing its rows to the first — which is what it should
   always have been. Neither may shadow a value the installation already ships, because a shared row
   is visible to both and still counts as a duplicate.
-- **A shared row is editable by any principal holding the picklist Edit permission**, and editing one
-  changes it for every tenant. The filter admits shared rows for reading, and the edit and delete
-  commands address rows by id through that same filter. If that matters for your deployment, gate it
-  before you rely on multi-tenant picklists.
+- **Writing a shared row needs `Permissions.PicklistSets.ManageShared`**, granted to the
+  administrator by default. Reading one needs nothing: shared values are visible to every tenant, and
+  that is unchanged. What the right gates is creating, editing and deleting them — the operations
+  that change what every other tenant sees. A tenant administrator without it still creates, edits
+  and deletes their own tenant's values freely; revoke it in a multi-tenant installation where one
+  customer's administrator should not be able to redefine the installation's reference data.
+  <br>It is a *write* right over data nothing hides, not a cross-tenant *read* escape — a holder
+  gains no sight of another tenant's private picklists, and the query filter still stops them.
 
-**Presence and picklists have no cross-tenant escape, and in both cases that is a decision rather
-than an omission.** For picklists the reason is simply that no administrative task needs one: an
-installation operator managing shared reference data works with the null-tenant rows, which everyone
-already sees, and a tenant's private additions are that tenant's own business. No extension point was
-added "for later" — if one is ever needed it should follow the `Users.ViewAllTenants` pattern, and
-`PicklistDataSourceService.Scope` must become `PerUser` in the same change, because a per-principal
-escape would invalidate the per-tenant cache partition.
+**Presence and picklists have no cross-tenant READ escape, and in both cases that is a decision
+rather than an omission.** For picklists the reason is simply that no administrative task needs one:
+an installation operator managing shared reference data works with the null-tenant rows, which
+everyone already sees, and a tenant's private additions are that tenant's own business. No extension
+point was added "for later" — if one is ever needed it should follow the `Users.ViewAllTenants`
+pattern, and `PicklistDataSourceService.Scope` must become `PerUser` in the same change, because a
+per-principal escape would invalidate the per-tenant cache partition.
+
+**`PicklistSets.ManageShared` is not that escape, and the distinction is worth holding onto.** It
+grants no sight of anything: shared rows are already visible to everyone, and a holder still cannot
+see another tenant's private values. What it grants is the right to *change* installation-wide data.
+Reading across tenants and writing installation-wide data are different capabilities, and this
+template keeps them as different rights — the same separation Pass 27 drew between
+`Users.ViewAllTenants` and `Users.SwitchToAnyTenant`.
 
 For presence the reason is stronger. Every other bound above can be lifted by a named right, because
 the thing being

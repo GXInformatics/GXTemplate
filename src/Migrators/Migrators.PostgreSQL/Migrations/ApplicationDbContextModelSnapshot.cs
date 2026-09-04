@@ -176,7 +176,7 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Name", "Value")
+                    b.HasIndex("TenantId", "Name", "Value")
                         .IsUnique();
 
                     b.ToTable("PicklistSets", (string)null);

@@ -1,4 +1,5 @@
 ﻿@page "/system/picklistset"
+@using CleanArchitecture.Blazor.Application.Features.PicklistSets
 @using CleanArchitecture.Blazor.Application.Features.PicklistSets.DTOs
 @using CleanArchitecture.Blazor.Application.Features.PicklistSets.Queries.Export
 @using CleanArchitecture.Blazor.Application.Features.PicklistSets.Queries.PaginationQuery
@@ -102,21 +103,82 @@
         </MudStack>
     </ToolBarContent>
     <Columns>
+        @* Shared rows are marked and rendered read-only for a principal without ManageShared.
+           SECOND LINE, NOT THE GUARD: both commands go through Mediator and are reachable by any
+           caller, so the rule that decides is SharedPicklistWrite inside the handlers. What this
+           does is stop offering an edit that would be refused, and say why - a control that looks
+           editable and then fails on commit is worse than one that does not offer. *@
+        @* The marker lives in the EditTemplate, not the CellTemplate, and that is not a stylistic
+           choice: this grid is EditMode="DataGridEditMode.Cell" with ReadOnly="false", so every cell
+           renders its EditTemplate permanently and the CellTemplate is never reached. A marker put
+           in the CellTemplate compiles, reads correctly, and is invisible. *@
         <PropertyColumn Property="x => x.Name" Title="@L[SelectedItem.GetMemberDisplayName(x => x.Name)]">
             <EditTemplate>
-                <MudEnumSelect @bind-Value="@context.Item.Name" TEnum="Picklist" Placeholder="@L["Select picklist name"]" Required="true">
-                </MudEnumSelect>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    @if (CanWrite(context.Item))
+                    {
+                        <MudEnumSelect @bind-Value="@context.Item.Name" TEnum="Picklist" Placeholder="@L["Select picklist name"]" Required="true">
+                        </MudEnumSelect>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2">@context.Item.Name</MudText>
+                    }
+                    @if (context.Item.IsShared)
+                    {
+                        <MudTooltip Text="@L["Shared with every organisation. Changing it affects all of them."]">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="@(CanWrite(context.Item) ? Color.Info : Color.Default)"
+                                     Icon="@Icons.Material.Outlined.Public">
+                                @L["Shared"]
+                            </MudChip>
+                        </MudTooltip>
+                    }
+                </MudStack>
             </EditTemplate>
         </PropertyColumn>
-        <PropertyColumn Property="x => x.Value" Title="@L[SelectedItem.GetMemberDisplayName(x => x.Value)]" />
-        <PropertyColumn Property="x => x.Text" Title="@L[SelectedItem.GetMemberDisplayName(x => x.Text)]" />
-        <PropertyColumn Property="x => x.Description" Title="@L[SelectedItem.GetMemberDisplayName(x => x.Description)]" />
+        <PropertyColumn Property="x => x.Value" Title="@L[SelectedItem.GetMemberDisplayName(x => x.Value)]">
+            <EditTemplate>
+                @if (CanWrite(context.Item))
+                {
+                    <MudTextField @bind-Value="@context.Item.Value" Margin="Margin.Dense" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2">@context.Item.Value</MudText>
+                }
+            </EditTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.Text" Title="@L[SelectedItem.GetMemberDisplayName(x => x.Text)]">
+            <EditTemplate>
+                @if (CanWrite(context.Item))
+                {
+                    <MudTextField @bind-Value="@context.Item.Text" Margin="Margin.Dense" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2">@context.Item.Text</MudText>
+                }
+            </EditTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.Description" Title="@L[SelectedItem.GetMemberDisplayName(x => x.Description)]">
+            <EditTemplate>
+                @if (CanWrite(context.Item))
+                {
+                    <MudTextField @bind-Value="@context.Item.Description" Margin="Margin.Dense" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2">@context.Item.Description</MudText>
+                }
+            </EditTemplate>
+        </PropertyColumn>
         <TemplateColumn HeaderStyle="width:60px" Title="@AppStrings.Delete" Sortable="false">
             <CellTemplate>
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Variant="Variant.Outlined" Color="Color.Error" aria-label="@AppStrings.Delete" Disabled="@(!_accessRights.Delete)" Size="Size.Small" OnClick="@(() => DeleteItem(context.Item))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Variant="Variant.Outlined" Color="Color.Error" aria-label="@AppStrings.Delete" Disabled="@(!_accessRights.Delete || !CanWrite(context.Item))" Size="Size.Small" OnClick="@(() => DeleteItem(context.Item))" />
             </CellTemplate>
             <EditTemplate>
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Variant="Variant.Outlined" Color="Color.Error" aria-label="@AppStrings.Delete" Disabled="@(!_accessRights.Delete)" Size="Size.Small" OnClick="@(() => DeleteItem(context.Item))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Variant="Variant.Outlined" Color="Color.Error" aria-label="@AppStrings.Delete" Disabled="@(!_accessRights.Delete || !CanWrite(context.Item))" Size="Size.Small" OnClick="@(() => DeleteItem(context.Item))" />
             </EditTemplate>
         </TemplateColumn>
     </Columns>
@@ -225,10 +287,37 @@
 
     #region Edit & Commit Changes
 
-     
+    /// <summary>
+    /// Whether this principal may change <paramref name="item"/> - false only for a shared row
+    /// without <c>PicklistSets.ManageShared</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>An affordance, not a boundary.</b> The decision that counts is
+    /// <c>SharedPicklistWrite.IsAllowedAsync</c> inside the two command handlers, which read the
+    /// row's STORED tenant - a DTO round-trips through the browser, so <c>IsShared</c> here is a
+    /// claim about what the server last sent. This method decides what to offer; the handler decides
+    /// what to do.
+    /// <para>
+    /// A private row is always writable by this test: whether the principal may edit their own
+    /// tenant's rows at all is already decided by <c>_accessRights.Edit</c> and
+    /// <c>_accessRights.Delete</c>, and folding the two together here would silently make the shared
+    /// rule look like the only one.
+    /// </para>
+    /// </remarks>
+    private bool CanWrite(PicklistSetDto item) => !item.IsShared || _accessRights.ManageShared;
 
     private Task<DataGridEditFormAction> CommittedItemChanges(PicklistSetDto item)
     {
+        // The read-only editors above mean this is not normally reachable for a shared row, but a
+        // grid's commit path is not a place to rely on "not normally": refusing here keeps a
+        // mis-rendered or future-edited template from sending a write that the handler will reject
+        // anyway, and reports it in the same way the handler would.
+        if (!CanWrite(item))
+        {
+            Snackbar.Add(SharedPicklistWrite.Refused, Severity.Error);
+            return Task.FromResult(DataGridEditFormAction.KeepOpen);
+        }
+
         InvokeAsync(async () =>
         {
             var command = ObjectMapper.Map<AddEditPicklistSetCommand>(item);

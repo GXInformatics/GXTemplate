@@ -99,6 +99,17 @@ public static class AdministratorPermissionRegistry
         Permissions.PicklistSets.Export,
         Permissions.PicklistSets.Import,
 
+        // Granted, and for the same reason AuditTrails.ViewAllTenants was in Pass 29: it preserves
+        // the posture that already held. Before Pass 32 every principal with PicklistSets.Edit could
+        // change a shared value; the guard now requires this right, and granting it keeps the
+        // shipped administrator able to do what it could do, while making the capability named and
+        // revocable rather than an absence of code.
+        //
+        // It also keeps the SINGLE-TENANT deployment working out of the box, which is the case a
+        // blanket read-only rule would have broken: the sole administrator is tenant-scoped, so
+        // without this right the seeded picklist values would be uneditable by anyone, forever.
+        Permissions.PicklistSets.ManageShared,
+
         Permissions.Roles.View,
         Permissions.Roles.Create,
         Permissions.Roles.Edit,
