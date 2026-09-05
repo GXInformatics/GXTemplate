@@ -4,6 +4,7 @@ using CleanArchitecture.Blazor.Application.Common.ExceptionHandlers;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Application.Common.Security;
+using CleanArchitecture.Blazor.Application.Features.Identity;
 using CleanArchitecture.Blazor.Domain.Identity;
 using Microsoft.AspNetCore.Identity;
 
@@ -72,6 +73,11 @@ public class PermissionAssignmentService
                    ?? throw new NotFoundException($"Role not found: {roleId}");
 
         _administratorProtection.EnsureRolePermissionsCanBeModified(role.Name);
+        // Re-permissioning a role is DEFINING it: roles are installation-wide, so removing a claim
+        // here takes the capability from every ordinary user in every tenant at once. A different
+        // guarantee from the line above, which keeps the installation administrable - both run.
+        await RoleDefinitionWrite.EnsureAllowedAsync(
+            _permissionQueryService, _userContextAccessor.Current?.UserId);
         var actor = await GetActorAsync(scope);
         EnsureNotTargetingAHeldRole(actor, role.Name);
         EnsureActorHolds(actor, model);
@@ -135,6 +141,10 @@ public class PermissionAssignmentService
                    ?? throw new NotFoundException($"Role not found: {roleId}");
 
         _administratorProtection.EnsureRolePermissionsCanBeModified(role.Name);
+        // See AssignRoleAsync. Checked once for the batch and before any claim is written, so a
+        // refused bulk grant leaves the role exactly as it was rather than half-applied.
+        await RoleDefinitionWrite.EnsureAllowedAsync(
+            _permissionQueryService, _userContextAccessor.Current?.UserId);
         // Resolved once for the batch - see AssignUserBulkAsync.
         var actor = await GetActorAsync(scope);
         EnsureNotTargetingAHeldRole(actor, role.Name);

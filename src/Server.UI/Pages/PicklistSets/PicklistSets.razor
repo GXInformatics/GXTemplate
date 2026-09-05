@@ -352,6 +352,7 @@
             para =>
             {
                 para.Add(x => x._model, command);
+                para.Add(x => x.CanManageShared, _accessRights.ManageShared);
             });
          
     }

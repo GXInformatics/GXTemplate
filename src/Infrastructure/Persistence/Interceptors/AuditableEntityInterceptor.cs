@@ -325,8 +325,38 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
         entity.CreatedById = userId;
         entity.CreatedAt = now;
         if (entity is IMustHaveTenant mustTenant && mustTenant.TenantId==null) mustTenant.TenantId = tenantId;
-        if (entity is IMayHaveTenant mayTenant && mayTenant.TenantId==null) mayTenant.TenantId = tenantId;
+        if (entity is IMayHaveTenant mayTenant && mayTenant.TenantId==null && !IsDeliberatelyShared(entity))
+            mayTenant.TenantId = tenantId;
     }
+
+    /// <summary>
+    /// Whether a null tenant on this row is a DECISION rather than an omission.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The problem this solves.</b> The line above stamps when <c>TenantId</c> is null, so null
+    /// is the sentinel for "not set yet" - and it is also the value that means "installation-wide".
+    /// A tenant-scoped principal therefore had no way to create a shared row, however many rights
+    /// they held; Pass 32 §2.5 found exactly that and left it.
+    /// </para>
+    /// <para>
+    /// <b>Why this is not a general escape.</b> It is opt-in by TYPE - only
+    /// <see cref="IMayBeShared"/> implementers, today just <c>PicklistSet</c> - per INSTANCE, with no
+    /// ambient switch to flip, and the flag is <c>[NotMapped]</c> so it cannot arrive from a client
+    /// or from the database. <c>IMustHaveTenant</c> is untouched above and stays unconditional:
+    /// "may have no tenant" and "must have one" are different contracts, and only the first has a
+    /// shared partition to opt into. See <see cref="IMayBeShared"/> for the full reasoning.
+    /// </para>
+    /// <para>
+    /// <b>It authorises nothing.</b> The flag says what the row IS, not who may write it. The
+    /// handler still asks <c>SharedPicklistWrite.IsAllowedAsync</c> over the tenant the row will
+    /// carry, and refuses before the entity is ever added - so a caller who sets this without the
+    /// right never reaches this method. That the two must agree is why
+    /// <c>SharedPicklistCreationTests</c> runs the real interceptor rather than asserting the rule.
+    /// </para>
+    /// </remarks>
+    private static bool IsDeliberatelyShared(IAuditableEntity entity) =>
+        entity is IMayBeShared shared && shared.CreateAsShared;
 
     private static void SetModificationAuditInfo(IAuditableEntity entity, string userId, DateTime now)
     {

@@ -7,6 +7,7 @@
 @using CleanArchitecture.Blazor.Application.Common.Constants
 @using CleanArchitecture.Blazor.Application.Common.Security
 @using CleanArchitecture.Blazor.Infrastructure.Services.Identity
+@using CleanArchitecture.Blazor.Application.Features.Identity
 
 @attribute [Authorize(Policy = Permissions.Roles.View)]
 @inherits OwningComponentBase
@@ -17,6 +18,17 @@
 
 
 <PageTitle>@Title</PageTitle>
+
+@* Says WHY the affordances are missing. Without it a principal holding Roles.Edit sees a grid of
+   roles and no way to edit any of them, which reads as a bug rather than as a decision - and the
+   thing they CAN still do (assign users to these roles, on the Users page) is the part they would
+   otherwise go looking for in the wrong place. *@
+@if (!_accessRights.ManageDefinitions)
+{
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.Lock">
+        @_localizer["Roles are shared by every tenant in this installation. Defining them - creating, renaming, deleting, re-permissioning and importing - requires the 'manage role definitions' permission. Assigning users to these roles does not, and is done from the Users page."]
+    </MudAlert>
+}
 
 <MudDataGrid T="ApplicationRoleDto" @ref="_dataGrid"
              FixedHeader="true"
@@ -43,14 +55,20 @@
                                StartIcon="@Icons.Material.Outlined.Refresh">
                         @AppStrings.Refresh
                     </MudButton>
-                    @if (_accessRights.Create)
+                    @* Every affordance below is gated on ManageDefinitions as well as on its own
+                       right. This is the SECOND line, not the guard: the real refusals live in
+                       RoleFormDialog.Submit, OnDelete, OnDeleteChecked, ProcessImportedRolesAsync
+                       and PermissionAssignmentService, because a rule enforced only by what a page
+                       renders is not a rule. What this does is avoid offering an action that is
+                       known to be refused. *@
+                    @if (_accessRights.Create && _accessRights.ManageDefinitions)
                     {
                         <MudButton StartIcon="@Icons.Material.Outlined.Add"
                                    OnClick="OnCreate">
                             @AppStrings.New
                         </MudButton>
                     }
-					@if (_accessRights.Delete)
+					@if (_accessRights.Delete && _accessRights.ManageDefinitions)
 					{
 						<MudButton Disabled="@(!_selectedRoles.Any())" OnClick="OnDeleteChecked" StartIcon="@Icons.Material.Outlined.DeleteOutline">
 							@AppStrings.Delete
@@ -64,7 +82,9 @@
                                 @AppStrings.Export
                             </MudMenuItem>
                         }
-                        @if (_accessRights.Import)
+                        @* Export is NOT gated: reading the installation's roles is not defining
+                           them, and the grid already lists every one of them. *@
+                        @if (_accessRights.Import && _accessRights.ManageDefinitions)
                         {
                             <MudMenuItem>
                                 <MudFileUpload T="IBrowserFile" FilesChanged="OnImportData" Accept=".xlsx">
@@ -95,7 +115,12 @@
         <SelectColumn ShowInFooter="false" />
         <TemplateColumn HeaderStyle="width:60px" Title="@AppStrings.Actions" Sortable="false">
             <CellTemplate>
-                @if (_accessRights.Edit || _accessRights.Delete || _accessRights.ManagePermissions)
+                @* This grid is NOT in DataGridEditMode.Cell, so its CellTemplate IS reached - Pass
+                   32 A3's trap, where an EditTemplate rendered permanently and the CellTemplate was
+                   unreachable, applies to the picklist grid and not to this one. Checked by
+                   rendering rather than assumed. *@
+                @if ((_accessRights.Edit || _accessRights.Delete || _accessRights.ManagePermissions)
+                     && _accessRights.ManageDefinitions)
                 {
                     <MudMenu Icon="@Icons.Material.Filled.Edit" Variant="Variant.Outlined" Size="Size.Small"
                              Dense="true" EndIcon="@Icons.Material.Filled.KeyboardArrowDown"
@@ -175,6 +200,8 @@
     private bool _isExporting;
     private PermissionAssignmentService _permissionAssignmentService = null!;
     private AdministratorProtectionService _administratorProtection = null!;
+    private IPermissionQueryService _permissionQueryService = null!;
+    private IUserContextAccessor _userContextAccessor = null!;
     private RolesAccessRights _accessRights = new();
 
     #endregion
@@ -192,7 +219,23 @@
         _roleManager = ScopedServices.GetRequiredService<RoleManager<ApplicationRole>>();
         _permissionAssignmentService = ScopedServices.GetRequiredService<PermissionAssignmentService>();
         _administratorProtection = ScopedServices.GetRequiredService<AdministratorProtectionService>();
+        _permissionQueryService = ScopedServices.GetRequiredService<IPermissionQueryService>();
+        _userContextAccessor = ScopedServices.GetRequiredService<IUserContextAccessor>();
     }
+
+    /// <summary>
+    /// The role-definition guard, in the shape the surrounding refusals already take: throws
+    /// <see cref="ForbiddenAccessException"/>, which every caller here catches and surfaces.
+    /// </summary>
+    /// <remarks>
+    /// Called at each write path rather than once, because role administration bypasses Mediator
+    /// and there is no chokepoint - the same reason AdministratorProtectionService's rules are
+    /// called per call site. It sits BESIDE those calls, not inside them: they are a different
+    /// guarantee (the installation stays administrable) and bind the holder of this right too.
+    /// </remarks>
+    private Task EnsureMayDefineRolesAsync() =>
+        RoleDefinitionWrite.EnsureAllowedAsync(
+            _permissionQueryService, _userContextAccessor.Current?.UserId);
 
     #endregion
 
@@ -366,6 +409,7 @@
         // agreeing to a deletion that cannot happen.
         try
         {
+            await EnsureMayDefineRolesAsync();
             _administratorProtection.EnsureRoleCanBeDeleted(dto.Name);
         }
         catch (ForbiddenAccessException ex)
@@ -399,6 +443,10 @@
     {
         try
         {
+            // All or nothing, and checked before the prompt: one protected role in the selection
+            // refuses the whole command, so the caller is never left working out which rows
+            // survived. The definition guard is asked once - it does not vary per row.
+            await EnsureMayDefineRolesAsync();
             foreach (var selected in _selectedRoles)
             {
                 _administratorProtection.EnsureRoleCanBeDeleted(selected.Name);
@@ -509,6 +557,12 @@
                 }
             }
         }
+        catch (ForbiddenAccessException ex)
+        {
+            // Caught ahead of the general handler so the refusal reads as a refusal rather than as
+            // "Import failed: <reason>", which would suggest a malformed file.
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
         catch (Exception ex)
         {
             Snackbar.Add($"{AppStrings.ImportFail}: {ex.Message}", Severity.Error);
@@ -533,6 +587,11 @@
     // Helper method to process the imported roles.
     private async Task<int> ProcessImportedRolesAsync(IEnumerable<ApplicationRole> importedRoles)
     {
+        // The guard is on the WRITE path, not on the file picker: an import creates roles every
+        // tenant will then share, and it is the only path that creates several at once. Checked
+        // before the plan is built, so a refused import reads nothing and writes nothing.
+        await EnsureMayDefineRolesAsync();
+
         var importedRoleList = importedRoles.ToList();
         var normalizedNames = importedRoleList
             .Select(role => role.Name)

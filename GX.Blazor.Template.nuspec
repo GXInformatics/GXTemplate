@@ -12,9 +12,10 @@
             logging into a separate log database, and Documents and PicklistSets as worked examples.
             Tenant isolation is enforced for Documents, the Users area, audit trails, online presence
             and picklists - the first three with a named cross-tenant right, presence and picklists
-            deliberately with none; system logs and roles remain installation-wide. Picklists are
-            shared reference data plus per-tenant additions. See the Tenancy section of the README
-            before relying on it.
+            deliberately with none; system logs remain installation-wide. Roles stay installation-wide
+            by design, but DEFINING one needs a named, revocable right. Picklists are shared reference
+            data plus per-tenant additions, and creating a shared value needs a named right too. See
+            the Tenancy section of the README before relying on it.
         </description>
         <summary>
             Blazor Server solution template for .NET 10 in Clean Architecture layers, with a

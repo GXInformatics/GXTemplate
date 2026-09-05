@@ -161,10 +161,36 @@ public class PermissionAssignmentGuardTests
         }
     }
 
+    /// <summary>
+    /// Grants every caller <c>Roles.ManageDefinitions</c> and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <b>Pass 33 made this stub load-bearing, and it had been returning nothing.</b>
+    /// <c>AssignRoleAsync</c> and <c>AssignRoleBulkAsync</c> now ask
+    /// <c>RoleDefinitionWrite.EnsureAllowedAsync</c> - through this service - whether the actor may
+    /// define roles at all, which is a coarser gate than anything this fixture is about. Returning
+    /// an empty list refused both role tests below on the new right before they could reach the
+    /// rule they exist to test, so the right is granted here and the guard itself is proved in
+    /// <c>RoleDefinitionRightTests</c>, where the actor's holding of it is the variable.
+    /// <para>
+    /// Granting exactly one permission rather than all of them is deliberate: <c>EnsureActorHolds</c>
+    /// reads the actor's CLAIMS PRINCIPAL, not this service, so a blanket grant here would not have
+    /// weakened grant-what-you-hold - but it would have made that independence invisible.
+    /// </para>
+    /// </remarks>
     private sealed class StubPermissionQueryService : IPermissionQueryService
     {
         public Task<IList<PermissionModel>> GetAllPermissionsByUserId(string userId) =>
-            Task.FromResult<IList<PermissionModel>>(new List<PermissionModel>());
+            Task.FromResult<IList<PermissionModel>>(new List<PermissionModel>
+            {
+                new()
+                {
+                    ClaimType = ApplicationClaimTypes.Permission,
+                    ClaimValue = Permissions.Roles.ManageDefinitions,
+                    Assigned = true,
+                    UserId = userId
+                }
+            });
         public Task<IList<PermissionModel>> GetAllPermissionsByRoleId(string roleId) =>
             Task.FromResult<IList<PermissionModel>>(new List<PermissionModel>());
     }

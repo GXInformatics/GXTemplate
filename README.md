@@ -460,12 +460,35 @@ subsequently creates.
 | Online presence and login notifications | **Yes — and with no escape.** `ServerHub` puts each connection into its own tenant's SignalR group in `OnConnectedAsync`, from the server-resolved `UserContext`, and both the sign-in/sign-out broadcasts and the `GetOnlineUsers` snapshot are bounded by it. `Users.ViewOnlineStatus` decides *whether* a user sees presence, never *whose*: there is no cross-tenant right here, deliberately — see below. Chat was deleted rather than scoped |
 | Picklists | **Yes, on a different shape** — SHARED plus per-tenant additions. A named global query filter admits `TenantId == null || TenantId == current`, so every value the installation ships stays visible to every tenant while a tenant's own additions stay private to it. No cross-tenant READ escape, deliberately; WRITING a shared value needs `PicklistSets.ManageShared` |
 | System logs | No — and **not reachable by that filter**: `SystemLog` is not on `ApplicationDbContext` at all, only on `LogDbContext`. Scoping them is a separate design, not a deferred switch |
-| Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation |
+| Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation. Reading them is unrestricted; **DEFINING one — create, rename, delete, re-permission, import — needs `Roles.ManageDefinitions`**. Assigning a user to an existing role does not: that stays on `Users.*` |
 | Security settings (idle policy) | No — one row per installation, by design |
 
 If you are deploying several customers into one installation, **treat everything below the Picklists
 row as installation-wide** until that changes. In particular a system log is readable in full by any
 holder of its view permission, whichever tenant they belong to.
+
+**Roles are installation-wide, and that is now a named right rather than an absence of code.**
+Every tenant's users sit in the same role rows — `ApplicationRole` carries no tenant, and ASP.NET
+Core Identity's own `RoleNameIndex` is unique across the installation — so renaming a role, deleting
+it, or revoking a permission from it reaches every tenant at once. Until Pass 33 nothing prevented
+any of the three: `Roles.Edit`, `Roles.Delete` and `Roles.ManagePermissions` each did it on their
+own. `Permissions.Roles.ManageDefinitions` now gates all five write paths — the create/rename dialog,
+the single and bulk deletes, the import, and `PermissionAssignmentService`'s role grants — and is
+**granted to the administrator by default**, so a single-tenant installation works out of the box.
+Revoke it in a multi-tenant one where a customer's administrator should not redefine roles the whole
+installation shares.
+
+What such an administrator keeps is **assigning users to existing roles**, which is the operation
+their job actually requires and which is an operation on the *user*, gated by `Users.ManageRoles` as
+before. That split is the whole point of the right: a guard that also blocked assignment would have
+been easier to write and would have taken away the wrong thing.
+
+Roles were deliberately **not** made per-tenant. That would mean replacing Identity's own
+`RoleNameIndex` and every `FindByNameAsync`/`RoleExistsAsync` lookup — those have no tenant term and
+live inside the framework — plus provisioning a role set per tenant at tenant-creation time, a path
+that does not exist. The permission is a pure authorization change: no column, no migration, no
+seeding change, and `RoleDataSourceService.Scope` stays `Global` because who may *write* a role does
+not enter a read's cache key.
 
 **Picklists are the one surface where a null tenant means "everyone's" rather than "nobody's", and
 that difference is worth understanding before you extend it.** An audit row with no tenant is an
@@ -476,10 +499,17 @@ different predicates — a single shared predicate could only have served one of
 
 Three consequences follow, and none of them is obvious from the table:
 
-- **Shared rows come from seeding.** The initializer runs with no ambient principal, so the values it
-  writes carry no tenant and every tenant sees them. A picklist created through the admin page by a
-  signed-in administrator is stamped with *their* tenant and is private to it. There is no way to
-  create a shared row through the UI.
+- **Shared rows come from seeding, or from a `ManageShared` holder who asks for one.** The
+  initializer runs with no ambient principal, so the values it writes carry no tenant and every
+  tenant sees them. A picklist created through the admin page is stamped with the caller's *own*
+  tenant and private to it **unless** the create dialog's "share with every tenant" switch is set —
+  which is offered only to a holder of `PicklistSets.ManageShared`, and refused by the handler for
+  anyone else. Editing never moves a row between the two partitions.
+  <br>The mechanism is `IMayBeShared.CreateAsShared`, a `[NotMapped]` per-instance flag that
+  `AuditableEntityInterceptor` honours. It is deliberately narrow: null is the interceptor's sentinel
+  for "tenant not set yet" *and* the value that means "shared", so this flag is only the distinction
+  between the two. It is opt-in by type (today `PicklistSet` alone), never persisted, and grants
+  nothing — the right is still checked in the handler, over the tenant the row will carry.
 - **The unique index is `(TenantId, Name, Value)`.** Scoping the *reads* did not scope the
   *constraint*: a query filter narrows what a query sees, a unique index constrains what the table
   holds, and until Pass 32 the index still spanned tenants — so the duplicate check below said "not a
@@ -747,6 +777,21 @@ convention yields to, on schema as well as name.
 `GxTableNamingTests` and `TemplateTablesStayOutOfCoreTests` assert all of the above, including the
 acronym handling (`UomConversion` → `TBL_UOM_CONVERSION`, not `TBL_U_OM_CONVERSION`) and that a
 second `dotnet ef migrations add` produces an *empty* migration.
+
+**`ModelMatchesMigrationsTests` now asserts that emptiness for all three providers, on every test
+run, without a database.** `HasPendingModelChanges()` compares the context's model with the snapshot
+compiled into each migrations assembly; both are in-memory, so the check costs about a second and
+needs no server. If you change an entity or an `IEntityTypeConfiguration` and do not regenerate,
+these fail and the message names the provider and prints the exact command. Every other test would
+have stayed green — they build their schema from the *model* — and only a real `dotnet ef database
+update` would have found it, at deployment time.
+
+One thing to know if you ever construct an `ApplicationDbContext` from a bare
+`DbContextOptionsBuilder` and expect the application's model: **you will not get it.**
+`IdentityDbContext` maps `AspNetUserPasskeys` only when `IdentityOptions.Stores.SchemaVersion` is
+Version 3 or later, and it reads that from the options' *application* service provider. That is why
+`DependencyInjection.ConfigureIdentityOptions` is a named public method and why the test calls
+`UseApplicationServiceProvider`.
 
 Four consequences, because they are not obvious and they bite late:
 

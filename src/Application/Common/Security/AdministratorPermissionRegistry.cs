@@ -119,6 +119,21 @@ public static class AdministratorPermissionRegistry
         Permissions.Roles.Import,
         Permissions.Roles.ManagePermissions,
 
+        // Granted, for the reason PicklistSets.ManageShared above is granted: it PRESERVES the
+        // posture that already held. Before Pass 33 any principal with Roles.Edit could rename a
+        // role every tenant shares, Roles.Delete could remove it and Roles.ManagePermissions could
+        // strip a capability from every ordinary user in every tenant at once. Requiring this right
+        // keeps the shipped administrator able to do what it could do, while making the capability
+        // named and revocable rather than an absence of code.
+        //
+        // It also keeps the SINGLE-TENANT deployment working out of the box, which is the case a
+        // blanket "roles are read-only to a tenant-scoped principal" rule would have broken:
+        // EnsureAdministratorAsync assigns the bootstrap administrator Tenants.First(), so the sole
+        // administrator IS tenant-scoped and would have been left unable to manage the
+        // installation's only roles. The trap to avoid is a blanket prohibition, not a
+        // default-granted right.
+        Permissions.Roles.ManageDefinitions,
+
         // The five other Roles.* rights are EXCLUDED rather than granted - see below. They name a
         // role-administration surface this template does not have.
 

@@ -414,15 +414,39 @@ public static class DependencyInjection
     #endregion
 
     #region Identity and Security
+
+    /// <summary>
+    /// The application's Identity options, in one named place because <b>one of them changes the
+    /// database model</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Stores.SchemaVersion = Version3</c> is what maps <c>IdentityUserPasskey</c>, so the
+    /// schema carries <c>AspNetUserPasskeys</c>. That mapping happens inside
+    /// <c>IdentityDbContext.OnModelCreating</c>, which reads <c>IOptions&lt;IdentityOptions&gt;</c>
+    /// from the DbContext options' APPLICATION SERVICE PROVIDER - so a context built from a bare
+    /// <c>DbContextOptionsBuilder</c> silently produces a DIFFERENT model from the running
+    /// application's, missing that table.
+    /// </para>
+    /// <para>
+    /// This method exists so <c>ModelMatchesMigrationsTests</c> can build the application's model
+    /// without restating the value. A second copy of a model-affecting setting would make that test
+    /// green while the application and its migrations disagreed - which is the exact failure the
+    /// test exists to catch, reintroduced inside the test itself.
+    /// </para>
+    /// </remarks>
+    public static void ConfigureIdentityOptions(IdentityOptions options)
+    {
+        options.SignIn.RequireConfirmedAccount = true;
+        options.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
+    }
+
     private static IServiceCollection AddIdentityAndSecurity(this IServiceCollection services,
         IConfiguration configuration)
     {
 
 
-        services.AddIdentityCore<ApplicationUser>(options => {
-            options.SignIn.RequireConfirmedAccount = true;
-            options.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
-        })
+        services.AddIdentityCore<ApplicationUser>(ConfigureIdentityOptions)
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>()
             .AddSignInManager()

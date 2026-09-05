@@ -3,6 +3,7 @@
 
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using CleanArchitecture.Blazor.Domain.Common.Entities;
 
 namespace CleanArchitecture.Blazor.Domain.Entities;
@@ -32,7 +33,7 @@ namespace CleanArchitecture.Blazor.Domain.Entities;
 /// marker - see <c>ApplicationDbContext.OnModelCreating</c> for why the interface is the wrong key.
 /// </para>
 /// </remarks>
-public class PicklistSet : BaseAuditableEntity, IMayHaveTenant, IAuditable
+public class PicklistSet : BaseAuditableEntity, IMayBeShared, IAuditable
 {
     public Picklist Name { get; set; } = Picklist.Brand;
     public string? Value { get; set; }
@@ -41,6 +42,21 @@ public class PicklistSet : BaseAuditableEntity, IMayHaveTenant, IAuditable
 
     /// <inheritdoc cref="PicklistSet" />
     public string? TenantId { get; set; }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <b><see cref="NotMappedAttribute"/> is load-bearing, not tidiness.</b> It is what keeps this
+    /// out of the schema, so the flag cannot be set by a client, cannot survive a round-trip through
+    /// <c>PicklistSetDto</c>, and is never true on a row read back from the database. If it were
+    /// mapped, "is this row shared" would have two answers stored side by side.
+    /// <para>
+    /// <c>ModelMatchesMigrationsTests</c> is what checks that claim rather than the attribute being
+    /// trusted: had the attribute been forgotten, all three providers would report a pending
+    /// <c>AddColumn</c> the moment this compiled.
+    /// </para>
+    /// </remarks>
+    [NotMapped]
+    public bool CreateAsShared { get; set; }
 }
 
 public enum Picklist

@@ -37,6 +37,21 @@
                     </MudTextField>
                 </MudItem>
 
+                @* Offered only to a holder, because the handler refuses it from anyone else - a
+                   toggle that produces a refusal on Save is worse than no toggle. It is the second
+                   line, not the guard: SharedPicklistWrite runs in the handler whatever this
+                   renders. *@
+                @if (CanManageShared)
+                {
+                    <MudItem xs="12">
+                        <MudSwitch T="bool" @bind-Value="_model.IsShared" Color="Color.Primary"
+                                   Label="@L["Share this value with every tenant"]" />
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @L["A shared value is visible to every tenant in this installation and can be changed only by a holder of the 'manage shared picklists' permission. Leave this off to create the value for your own tenant only."]
+                        </MudText>
+                    </MudItem>
+                }
+
             </MudGrid>
         </MudForm>
     </DialogContent>
@@ -52,6 +67,13 @@
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
 
     [EditorRequired][Parameter] public AddEditPicklistSetCommand _model { get; set; } = default!;
+
+    /// <summary>
+    /// Whether the caller holds <c>Permissions.PicklistSets.ManageShared</c>, passed in by the page
+    /// rather than resolved here - the page has already asked for its access rights, and asking
+    /// twice would be two answers free to differ.
+    /// </summary>
+    [Parameter] public bool CanManageShared { get; set; }
 
     private MudForm _form = new();
     private bool _saving;
