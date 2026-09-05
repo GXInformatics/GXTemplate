@@ -459,13 +459,74 @@ subsequently creates.
 | Audit trails | **Yes — and by default.** A named global query filter on `ApplicationDbContext` scopes every read, so a query is tenant-bounded whether or not its author thought about it. Lifted only by `Permissions.AuditTrails.ViewAllTenants`, checked at the call site and then dropped by name through `AuditTrailTenantScope` |
 | Online presence and login notifications | **Yes — and with no escape.** `ServerHub` puts each connection into its own tenant's SignalR group in `OnConnectedAsync`, from the server-resolved `UserContext`, and both the sign-in/sign-out broadcasts and the `GetOnlineUsers` snapshot are bounded by it. `Users.ViewOnlineStatus` decides *whether* a user sees presence, never *whose*: there is no cross-tenant right here, deliberately — see below. Chat was deleted rather than scoped |
 | Picklists | **Yes, on a different shape** — SHARED plus per-tenant additions. A named global query filter admits `TenantId == null || TenantId == current`, so every value the installation ships stays visible to every tenant while a tenant's own additions stay private to it. No cross-tenant READ escape, deliberately; WRITING a shared value needs `PicklistSets.ManageShared` |
-| System logs | No — and **not reachable by that filter**: `SystemLog` is not on `ApplicationDbContext` at all, only on `LogDbContext`. Scoping them is a separate design, not a deferred switch |
+| System logs | **No, and deliberately not — `Logs.*` is an operator right, not a tenant one.** `SystemLog` lives on `LogDbContext` in a separate database, so the global filter cannot reach it; but the reason it is not scoped is not mechanical. Most log rows carry no tenant and never can. See [What a `Logs.View` holder can see](#what-a-logsview-holder-can-see) before granting it to anyone |
 | Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation. Reading them is unrestricted; **DEFINING one — create, rename, delete, re-permission, import — needs `Roles.ManageDefinitions`**. Assigning a user to an existing role does not: that stays on `Users.*` |
 | Security settings (idle policy) | No — one row per installation, by design |
 
 If you are deploying several customers into one installation, **treat everything below the Picklists
-row as installation-wide** until that changes. In particular a system log is readable in full by any
-holder of its view permission, whichever tenant they belong to.
+row as installation-wide** until that changes.
+
+### What a `Logs.View` holder can see
+
+**The system log is installation-wide, it will not be tenant-scoped, and the boundary is the
+permission rather than a filter.** This is the one row in the table above where the honest answer is a
+grant decision rather than a query predicate, so it is worth the paragraphs.
+
+**Everything in the log, for every tenant.** A holder of `Permissions.Logs.View` reads
+`/system/logs`, which is the whole table. Concretely, the rows carry:
+
+- the **username, client IP address and user agent** of whoever produced the event — for every
+  tenant's users, including on the sign-in path;
+- the **recipient email address** of every message the application sent: fourteen log statements
+  across the mail pipeline record one, and `ResetPasswordCommand`'s does so deliberately, as an
+  operational record of mail that actually went out;
+- **document storage keys**, picklist and entity ids, passkey credential ids, and request paths;
+- **full exception detail including stack traces** — thirty-one call sites pass the exception object,
+  and a stack trace can quote entity names, ids and values from whichever tenant's request faulted;
+- and, in the `Properties` and `LogEvent` columns, **the complete serialized event twice over** —
+  every structured parameter the call site passed plus every enricher property (`SourceContext`,
+  `RequestPath`, `RequestId`, `ConnectionId`, `UserName`, `TenantId`, `ClientIP`, `ClientAgent`,
+  `TraceId`, `SpanId`). Whatever the rendered message shows, these two columns hold the rest.
+
+Two disclosure defects have already been found and fixed here, which is the best evidence that this
+surface deserves the care: `CustomError.razor` used to write a live password-reset token into the log
+when an exception was raised on `/account/reset-password?userId=…&token=…`, and `Forgot.razor` used to
+log the address an anonymous visitor typed, making the log a second account-enumeration oracle.
+
+**Build the customer-administrator role without `Logs.View`, `Logs.Search` and `Logs.Purge`.** This is
+the actionable instruction, and the trap it avoids is specific: the shipped `Admin` role holds all
+three, and `Admin` is the role a customer's administrator is most likely to be given. Copy it,
+remove the three log rights, and grant that instead. `Logs.Purge` deserves its own thought — it
+erases every tenant's rows at once, permanently, with no export to fall back on.
+
+**It is not scoped because most rows have no tenant to scope by.** The ambient tenant is populated
+only inside a Blazor circuit — one SignalR hub filter pushes it and nothing else does — so startup,
+seeding, every sign-in and sign-out, every password reset, every mail send and every HTTP-level
+exception are recorded with no tenant at all. Around two-thirds of the application's log statements
+cannot carry one even in principle, and a measured run of the real application produced **zero**
+tenanted rows. A per-tenant log view would therefore not be a smaller log; it would be an *edited*
+one — a tenant administrator who cannot see that the application restarted, or that one of their
+users failed to sign in, is being shown something worse than nothing.
+
+**The menu entry is gated by role, not by this permission.** The navigation menu filters on role
+names, and the whole `MANAGEMENT` section is gated on `Admin`. So a customer administrator built by
+copying `Admin` and removing the log rights will still *see* the Logs link and be refused at the
+page. That is cosmetic, not a leak — the page, both queries and the purge each check the permission —
+but it is the first thing you will notice after following the instruction above.
+
+**`./log/log-*.txt` carries the same content with no gate at all.** Every event that reaches the
+database also reaches a rolling file sink, which drops only the one-off bootstrap password. There is
+no tenant column there, no permission, and no filter. **Filesystem access to the deployment is
+therefore equivalent to `Logs.View`, and more**, so treat the log directory as you would the database
+backups. This is also why filtering the database view would be a boundary that only half held.
+
+**On SQLite the `TenantId` column is always null.** That sink is a third-party package with a fixed
+`INSERT` statement and no configurable columns, unlike the SQL Server and PostgreSQL sinks, which
+both record it. The column exists in the SQLite DDL regardless, because EF reads the property on
+every provider. SQLite is the no-server development and test provider; both providers a GX
+installation runs on record the tenant — but, per the paragraph above, on most rows there is no
+tenant to record. `SinkColumnDriftTests` and `LogTenantStampingTests` name the gap so it cannot widen
+unnoticed.
 
 **Roles are installation-wide, and that is now a named right rather than an absence of code.**
 Every tenant's users sit in the same role rows — `ApplicationRole` carries no tenant, and ASP.NET
@@ -577,6 +638,10 @@ DDL regardless — EF reads the property on every provider, and a missing column
 outright. SQLite is the no-server development and test provider; both providers a GX installation
 runs on record the tenant. `SinkColumnDriftTests` names the gap explicitly so it cannot widen
 unnoticed.
+
+That gap matters less than it looks, and the reason is worth knowing before you plan around it: on
+**every** provider most log rows carry no tenant anyway, because the ambient tenant exists only
+inside a Blazor circuit. See [What a `Logs.View` holder can see](#what-a-logsview-holder-can-see).
 
 ### `CacheScope`
 
@@ -876,15 +941,24 @@ Stated plainly, because finding these out later is worse than reading them now.
   including the user export, which shares its predicate with the grid - audit trails and picklists are
   filtered in the model by a global query filter, so they are scoped by default rather than per query,
   and presence is bounded at the SignalR connection by a per-tenant group. **System logs and roles
-  remain installation-wide** to whoever holds the relevant view permission. See [Tenancy](#tenancy)
-  for the full table, the cross-tenant right, why presence and picklists deliberately have none, and
-  the one provider-specific gap in the stamping.
-- **A shared picklist value is editable by any tenant's administrator.** Picklists are shared plus
-  per-tenant: the values the installation seeds carry no tenant and are visible to everyone, and the
-  filter admits them for reading, so the edit and delete commands - which address rows by id through
-  that same filter - reach them too. Editing one changes it for every tenant. Nothing in the admin
-  page distinguishes a shared row from a private one today, and `PicklistSetDto` carries no
-  `TenantId` for it to distinguish them by. Gate it before you rely on multi-tenant picklists.
+  remain installation-wide**, and for roles that is now a named right (`Roles.ManageDefinitions`)
+  rather than an absence of code. See [Tenancy](#tenancy) for the full table, the cross-tenant right,
+  why presence and picklists deliberately have none, and the one provider-specific gap in the
+  stamping.
+- **The system log is installation-wide and always will be, so `Logs.*` is an operator right.** A
+  holder of `Permissions.Logs.View` reads every tenant's usernames, client addresses, mail recipient
+  addresses, document storage keys and full exception stack traces — and the same content is written
+  to `./log/log-*.txt` with no permission gate at all. Build a customer-administrator role **without**
+  `Logs.View`, `Logs.Search` and `Logs.Purge`; the shipped `Admin` role holds all three. See
+  [What a `Logs.View` holder can see](#what-a-logsview-holder-can-see).
+- **A shared picklist value reaches every tenant, and writing one needs `PicklistSets.ManageShared`.**
+  Picklists are shared plus per-tenant: the values the installation seeds carry no tenant and are
+  visible to everyone, and the filter admits them for reading, so the edit and delete commands —
+  which address rows by id through that same filter — reach them too. Changing one changes it for
+  every tenant, which is why the write is gated: the two command handlers refuse it without the
+  right, and the admin grid marks shared rows and renders them read-only without it. The right is
+  granted to `Admin` by default; revoke it in a multi-tenant installation where one customer's
+  administrator should not redefine the installation's reference data.
 - **There is no chat.** The hub's `SendMessage`, `SendPrivateMessage` and `SendNotification` methods
   and their client wiring were removed: nothing had called them since the AI chatbot was taken out,
   and one of them accepted a client-supplied recipient with no check. If you want chat, add it
