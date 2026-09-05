@@ -1,6 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
+using CleanArchitecture.Blazor.Application.Features.SecuritySettings;
+
 namespace CleanArchitecture.Blazor.Application.Features.SecuritySettings.Commands;
 
 /// <summary>
@@ -22,17 +25,37 @@ public class UpdateSecurityPolicyCommandHandler : IRequestHandler<UpdateSecurity
 {
     private readonly IApplicationDbContextFactory _dbContextFactory;
     private readonly IIdleTimeoutPolicyProvider _provider;
+    private readonly IPermissionQueryService _permissionQueryService;
+    private readonly IUserContextAccessor _userContextAccessor;
 
     public UpdateSecurityPolicyCommandHandler(
-        IApplicationDbContextFactory dbContextFactory, IIdleTimeoutPolicyProvider provider)
+        IApplicationDbContextFactory dbContextFactory,
+        IIdleTimeoutPolicyProvider provider,
+        IPermissionQueryService permissionQueryService,
+        IUserContextAccessor userContextAccessor)
     {
         _dbContextFactory = dbContextFactory;
         _provider = provider;
+        _permissionQueryService = permissionQueryService;
+        _userContextAccessor = userContextAccessor;
     }
 
     public async ValueTask<Result<int>> Handle(
         UpdateSecurityPolicyCommand request, CancellationToken cancellationToken)
     {
+        // Checked BEFORE the row is read or created, so a refused save leaves the table exactly as
+        // it was - including on the fresh-database path below, where the alternative would be a
+        // refusal that had nonetheless seeded a row.
+        //
+        // Here rather than only on the screen: this command goes through Mediator and is reachable
+        // by any caller, whatever the page renders. SecuritySettings.Edit alone is no longer enough
+        // because the row it edits is in force for every tenant at once.
+        if (!await InstallationPolicyWrite.IsAllowedAsync(
+                _permissionQueryService, _userContextAccessor.Current?.UserId))
+        {
+            return await Result<int>.FailureAsync(InstallationPolicyWrite.Refused);
+        }
+
         await using var db = await _dbContextFactory.CreateAsync(cancellationToken);
 
         var policy = await db.SecurityPolicies

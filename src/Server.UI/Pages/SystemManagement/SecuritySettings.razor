@@ -38,12 +38,27 @@
                         @string.Format(AppStrings.IdleTimeoutEffectiveFormat, _model.IdleTimeoutMinutes)
                     </MudAlert>
 
+                    @* READ-ONLY, never a control that refuses on save. This template's own precedent:
+                       a surface a principal may not use is absent or inert, and the idle-policy
+                       screens already follow it - the whole page 404s when the feature is off and
+                       the profile's Security tab is omitted rather than disabled. Presenting an
+                       editable field that produces an error on Save would be the one shape ruled
+                       out. Viewing is deliberately unaffected: the values are what an administrator
+                       needs to answer "why was I signed out?", whoever may change them. *@
+                    @if (!MayEdit)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4" Icon="@Icons.Material.Filled.Lock">
+                            @L["This policy is installation-wide: it applies to every organisation at once. Changing it needs the 'manage installation policy' permission, which this account does not hold. The values below are shown read-only."]
+                        </MudAlert>
+                    }
+
                     <MudNumericField T="int"
                                      @bind-Value="_model.IdleTimeoutMinutes"
                                      Label="@AppStrings.IdleTimeoutMinutesLabel"
                                      HelperText="@string.Format(AppStrings.IdleTimeoutBoundsFormat, _model.MinIdleTimeoutMinutes, _model.MaxIdleTimeoutMinutes)"
                                      Min="_model.MinIdleTimeoutMinutes"
                                      Max="_model.MaxIdleTimeoutMinutes"
+                                     ReadOnly="@(!MayEdit)"
                                      Immediate="true"
                                      Class="mb-4" />
 
@@ -52,6 +67,7 @@
                                      Label="@AppStrings.CountdownSecondsLabel"
                                      Min="10"
                                      Max="600"
+                                     ReadOnly="@(!MayEdit)"
                                      Immediate="true"
                                      Class="mb-4" />
 
@@ -63,20 +79,24 @@
         </MudCardContent>
 
         <MudCardActions>
-            <AuthorizeView Policy="@Permissions.SecuritySettings.Edit">
-                <Authorized>
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               Disabled="@(_saving || _model is null || !_model.Enabled)"
-                               OnClick="SaveAsync">
-                        @if (_saving)
-                        {
-                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                        }
-                        @AppStrings.Save
-                    </MudButton>
-                </Authorized>
-            </AuthorizeView>
+            @* Was an AuthorizeView on SecuritySettings.Edit alone. Two rights now govern this one
+               affordance - Edit is the feature right, ManageInstallationPolicy the scope right - and
+               expressing both through the access-rights object keeps them in one place and lets the
+               fields above react to the same answer. Nesting a second AuthorizeView would have put
+               the same decision in two shapes. *@
+            @if (MayEdit)
+            {
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           Disabled="@(_saving || _model is null || !_model.Enabled)"
+                           OnClick="SaveAsync">
+                    @if (_saving)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    @AppStrings.Save
+                </MudButton>
+            }
         </MudCardActions>
     </MudCard>
 </MudContainer>
@@ -89,9 +109,19 @@
     private SecurityPolicyDto? _model;
     private MudForm? _form;
     private bool _saving;
+    private SecuritySettingsAccessRights _accessRights = new();
+
+    /// <summary>
+    /// Both rights, because the write needs both: <c>Edit</c> says this account administers the
+    /// security policy at all, <c>ManageInstallationPolicy</c> says it may set one that binds every
+    /// tenant. The handler checks the second itself - this is the second line, not the boundary.
+    /// </summary>
+    private bool MayEdit => _accessRights.Edit && _accessRights.ManageInstallationPolicy;
 
     protected override async Task OnInitializedAsync()
     {
+        _accessRights = await PermissionService.GetAccessRightsAsync<SecuritySettingsAccessRights>();
+
         var result = await Mediator.Send(new GetSecurityPolicyQuery());
         result.Match(
             dto => _model = dto,

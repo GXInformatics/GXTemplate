@@ -32,10 +32,39 @@ namespace CleanArchitecture.Blazor.Infrastructure.Services.Security;
 public sealed class IdleTimeoutPolicyProvider : IIdleTimeoutPolicyProvider
 {
     /// <summary>
-    /// One key, because there is one row. A multi-tenant deployment keys this by tenant and changes
-    /// nothing else - which is why every reader goes through this type rather than querying the
-    /// table.
+    /// One key, because there is one row - and the row is installation-wide deliberately, not
+    /// pending a redesign. See <see cref="SecurityPolicy"/> for why the authentication cookie makes
+    /// the outer bound irreducibly installation-wide.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This used to say "a multi-tenant deployment keys this by tenant and changes nothing
+    /// else".</b> Pass 36 costed that and it was optimistic: the key stops being a constant, so
+    /// <see cref="Invalidate"/> must become a TAG flush (<c>RemoveByTagsAsync</c>, as
+    /// <c>CacheInvalidationBehaviour</c> already does) or every tenant inheriting the installation
+    /// default keeps a stale copy for the twelve-hour backstop. That is on top of the migration and
+    /// the signature change catalogued on the entity.
+    /// </para>
+    /// <para>
+    /// <b>The condition under which per-tenant policy becomes right</b>, written down so a future
+    /// reader recognises it rather than re-deriving it: a customer requires an idle window
+    /// materially different from another customer's <i>inside the operator's configured band</i>,
+    /// and says so. Until then the band is the operator's decision and one row expresses it.
+    /// </para>
+    /// <para>
+    /// <b>And if it is ever built: query by an explicitly passed tenant, NEVER by ambient query
+    /// filter.</b> The filter is this template's house pattern for tenancy (Pass 29 for audit
+    /// trails, Pass 31 for picklists) and it would fail here, silently, in the only path that
+    /// matters. <c>IdleSessionEnforcer</c> runs inside the cookie handler's principal validation,
+    /// where <c>IUserContextAccessor.Current</c> is <b>null</b> - the sole place that pushes it is a
+    /// SignalR hub-method filter. A picklist-shaped filter (<c>TenantId == null || TenantId ==
+    /// current</c>) would therefore return only the INSTALLATION row to the enforcer, for every user
+    /// of every tenant, while returning the correct row to every screen: enforcement and display
+    /// would disagree and nothing would fail. The tenant must be resolved explicitly - Pass 36 §3.3
+    /// found <c>IUserContextLoader</c> already does it from a <c>ClaimsPrincipal</c>, cached and
+    /// already invalidated on tenant switch.
+    /// </para>
+    /// </remarks>
     public const string CacheKey = "security-policy:idle-timeout";
 
     /// <summary>Per-user preference cache key.</summary>

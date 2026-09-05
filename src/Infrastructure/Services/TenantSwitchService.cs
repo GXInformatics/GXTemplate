@@ -270,8 +270,32 @@ public class TenantSwitchService : ITenantSwitchService
      
 
     /// <summary>
-    /// Refresh user claims after tenant switch
+    /// Rewrites the persisted tenant claims after a switch.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It swallows its own failure, and that is deliberate rather than overlooked - but it is
+    /// also not free.</b> By the time this runs the switch has ALREADY been persisted:
+    /// <c>userManager.UpdateAsync</c> wrote the new <c>TenantId</c> several lines above. Letting an
+    /// exception out would be caught by <c>SwitchToTenantAsync</c>'s own handler and turned into
+    /// <c>Result.Failure("Failed to switch tenant")</c> - reporting a failure for a switch that
+    /// succeeded, and inviting the caller to retry an operation that has already happened. That is a
+    /// worse outcome than stale claims, which is why the catch stays.
+    /// </para>
+    /// <para>
+    /// <b>What it costs when it does fail</b>, stated so the log line is readable without this file:
+    /// the user is in the new tenant, every ambient path agrees (the <c>UserContext</c> cache was
+    /// cleared just above and reloads from <c>ApplicationUser.TenantId</c>), and only the persisted
+    /// CLAIM is stale. Pass 36 established that the claim is not a usable tenant source anyway -
+    /// absent entirely for any user who has never switched - so nothing should be reading it for a
+    /// security decision. <b>One place still does</b>: <c>FileEndpoints</c>' visibility check, which
+    /// is a separate defect recorded in Pass 37's report and not repaired here.
+    /// </para>
+    /// <para>
+    /// Making this propagate would need the switch to become transactional across the user row and
+    /// the claim rows, which is its own decision and its own pass.
+    /// </para>
+    /// </remarks>
     private async Task RefreshUserClaimsAsync(ApplicationUser user, UserManager<ApplicationUser> userManager)
     {
         try
@@ -300,7 +324,14 @@ public class TenantSwitchService : ITenantSwitchService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to refresh claims for user {UserId}", user.Id);
+            // Names the CONSEQUENCE, not just the failure: the switch itself stands, so an operator
+            // reading this must not undo anything - see the remarks above.
+            _logger.LogError(ex,
+                "Failed to refresh tenant claims for user {UserId} after switching to tenant " +
+                "{TenantId}. The switch itself succeeded and was reported as success; only the " +
+                "persisted TenantId/TenantName claims are stale. They are rewritten by the next " +
+                "successful switch.",
+                user.Id, user.TenantId ?? "null");
         }
     }
 

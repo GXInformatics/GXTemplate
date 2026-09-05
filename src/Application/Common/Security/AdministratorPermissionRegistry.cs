@@ -140,6 +140,19 @@ public static class AdministratorPermissionRegistry
         Permissions.SecuritySettings.View,
         Permissions.SecuritySettings.Edit,
 
+        // Granted, for the third time and the same reason as PicklistSets.ManageShared and
+        // Roles.ManageDefinitions: it PRESERVES the posture that already held. Before Pass 37 any
+        // holder of SecuritySettings.Edit set the idle window for every tenant at once; requiring
+        // this right keeps the shipped administrator able to do what it could do, while making the
+        // capability named and revocable rather than an absence of code.
+        //
+        // And it keeps the SINGLE-TENANT deployment working, which is the case a blanket "a
+        // tenant-scoped principal may not edit the installation policy" rule would have broken:
+        // EnsureAdministratorAsync assigns the bootstrap administrator Tenants.First(), so the sole
+        // administrator IS tenant-scoped and would have been left unable to change its own idle
+        // timeout for the life of the installation.
+        Permissions.SecuritySettings.ManageInstallationPolicy,
+
         Permissions.Tenants.View,
         Permissions.Tenants.Create,
         Permissions.Tenants.Edit,

@@ -461,7 +461,7 @@ subsequently creates.
 | Picklists | **Yes, on a different shape** — SHARED plus per-tenant additions. A named global query filter admits `TenantId == null || TenantId == current`, so every value the installation ships stays visible to every tenant while a tenant's own additions stay private to it. No cross-tenant READ escape, deliberately; WRITING a shared value needs `PicklistSets.ManageShared` |
 | System logs | **No, and deliberately not — `Logs.*` is an operator right, not a tenant one.** `SystemLog` lives on `LogDbContext` in a separate database, so the global filter cannot reach it; but the reason it is not scoped is not mechanical. Most log rows carry no tenant and never can. See [What a `Logs.View` holder can see](#what-a-logsview-holder-can-see) before granting it to anyone |
 | Roles | No — `ApplicationRole` has no tenant at all, and role names are unique across the installation. Reading them is unrestricted; **DEFINING one — create, rename, delete, re-permission, import — needs `Roles.ManageDefinitions`**. Assigning a user to an existing role does not: that stays on `Users.*` |
-| Security settings (idle policy) | No — one row per installation, by design |
+| Security settings (idle policy) | **No, and deliberately not — the authentication cookie makes it installation-wide.** `CookieLifetime` derives from `MaxIdleTimeoutMinutes` and the cookie is issued at sign-in, before any tenant is known, so the outer bound cannot be per-tenant. One row, in force everywhere; **changing it needs `SecuritySettings.ManageInstallationPolicy`**, granted to the administrator by default. `SecuritySettings.View` is unaffected, and the per-user preference is untouched — it is per-user and tighten-only |
 
 If you are deploying several customers into one installation, **treat everything below the Picklists
 row as installation-wide** until that changes.
@@ -718,12 +718,38 @@ the same 404-not-403 reasoning the self-registration surface uses), its navigati
 and `Profile.razor` omits the Security tab panel entirely. `AllowUserOverride: false` removes that
 tab too. Absent, never disabled: an empty tab invites a support call asking what belongs in it.
 
-**The policy is installation-wide, not per-tenant.** `SecurityPolicies` holds a single row and the
-cache key is a constant, so every tenant in a multi-tenant deployment shares one idle window. This is
-a deliberate starting point rather than an oversight — every reader goes through
-`IIdleTimeoutPolicyProvider` precisely so that adding a tenant column and keying the cache by tenant
-is a migration plus one cache key, not a redesign — but today one tenant's administrator sets the
-policy for all of them.
+**The policy is installation-wide, not per-tenant, and the reason is the authentication cookie.**
+`SecurityPolicies` holds a single row and the cache key is a constant, so every tenant in a
+multi-tenant deployment shares one idle window. That is a decision, not a stage on the way to
+something else: `IdleTimeoutSettings.CookieLifetime` derives from `MaxIdleTimeoutMinutes`, and the
+cookie is issued once at sign-in — **before any tenant is known** — and cannot be shortened
+afterwards. The outer bound is therefore irreducibly installation-wide, and per-tenant rows could
+only ever let a customer pick a point inside a band the operator has already fixed in configuration.
+
+**One administrator does set the window for every tenant, and since Pass 37 that is a named,
+revocable capability rather than a side effect.** Saving the policy requires
+**`Permissions.SecuritySettings.ManageInstallationPolicy`** in addition to `SecuritySettings.Edit` —
+`Edit` says an account administers the security policy at all, the new right says it may set one that
+binds every tenant. It is **granted to the administrator by default**, because
+`EnsureAdministratorAsync` assigns the bootstrap administrator `Tenants.First()`: the sole
+administrator of a single-tenant installation is itself tenant-scoped, so a right that defaulted to
+ungranted would leave that installation permanently unable to change its own idle timeout. **Revoke
+it** in a multi-tenant installation where one customer's administrator should not set every
+customer's session policy; they keep `SecuritySettings.View`, and the screen then shows the values
+read-only with a line saying why.
+
+**Reading is untouched, and so is the per-user preference.** `SecuritySettings.View` shows the
+policy to anyone who could see it before — an administrator needs to know the window to answer "why
+was I signed out?", whoever may change it — and a user's own tighten-only preference is per-user and
+unaffected by any of this.
+
+**What would change the decision**, so it can be recognised rather than re-derived: a customer
+requiring an idle window materially different from another customer's *inside the operator's
+configured band*, and saying so. The costs are catalogued on `SecurityPolicy` and
+`IdleTimeoutPolicyProvider` — and note in particular that per-tenant policy must resolve the tenant
+explicitly, never through a global query filter, because the enforcer runs in the cookie pipeline
+where the ambient tenant is null and a filter would silently serve it the installation row for every
+user of every tenant.
 
 **The row is seeded lazily, on first read.** A freshly provisioned database has an **empty**
 `SecurityPolicies` table until something asks for the policy; until then the configured

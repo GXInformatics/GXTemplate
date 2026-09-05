@@ -6,6 +6,7 @@ using CleanArchitecture.Blazor.Application.Common.Security;
 using CleanArchitecture.Blazor.Application.Features.Documents.Specifications;
 using CleanArchitecture.Blazor.Domain.Common.Enums;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
+using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using IResult = Microsoft.AspNetCore.Http.IResult;
@@ -42,9 +43,11 @@ public static class FileEndpoints
         StorageSettings settings,
         IApplicationDbContextFactory dbContextFactory,
         IAuthorizationService authorizationService,
+        IUserContextLoader userContextLoader,
         CancellationToken cancellationToken)
     {
-        if (!await IsPermittedAsync(key, httpContext.User, dbContextFactory, authorizationService, cancellationToken))
+        if (!await IsPermittedAsync(
+                key, httpContext.User, dbContextFactory, authorizationService, userContextLoader, cancellationToken))
         {
             // Refused and missing are reported identically, so keys cannot be probed by comparing
             // the two responses.
@@ -90,6 +93,7 @@ public static class FileEndpoints
         ClaimsPrincipal user,
         IApplicationDbContextFactory dbContextFactory,
         IAuthorizationService authorizationService,
+        IUserContextLoader userContextLoader,
         CancellationToken cancellationToken)
     {
         var firstSegment = key.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
@@ -110,10 +114,46 @@ public static class FileEndpoints
             return false;
         }
 
+        // FROM THE USER ROW, NOT THE CLAIM - and this line is the whole of Pass 38.
+        //
+        // It used to read `user.GetTenantId() ?? string.Empty`, and the TenantId CLAIM is written by
+        // exactly one place in the codebase, TenantSwitchService.RefreshUserClaimsAsync, reachable
+        // only from SwitchToTenantAsync. So a user who has never switched tenant carries no claim at
+        // all - Pass 36 measured AspNetUserClaims as EMPTY in a freshly seeded installation while the
+        // administrator carried a real tenant on their user row. The empty string then selected
+        // VisibleDocumentSpecification's no-tenant branch, which drops the tenant clause entirely,
+        // and this endpoint served every PUBLIC document in the installation - which is nearly all of
+        // them, since UploadDocumentCommand sets IsPublic = true - to any Documents.Download holder.
+        //
+        // The other four consumers of that specification pass currentUser.TenantId from the ambient
+        // UserContext and were always correct; they run in circuits through Mediator, where the hub
+        // filter has pushed it. This is the only HTTP path, and on an HTTP request the ambient
+        // context is null - so it needed a third source, and IUserContextLoader is it: it takes the
+        // principal, reads the tenant from the USER ROW, caches per user for an hour, and is already
+        // invalidated on tenant switch by TenantSwitchService.
+        var context = await userContextLoader.LoadAsync(user, cancellationToken);
+
+        // FAIL CLOSED on an unresolvable principal. A null here means the loader could not turn this
+        // principal into a user at all - deleted account, unreachable database, a token that no
+        // longer resolves - and the established posture for that in this template is to serve
+        // nothing (Pass 27 §B, Pass 29's filter, AuthorizationBehaviour's deny-by-default). The only
+        // alternative would be to fall back to ownership-and-publicity, which is precisely the
+        // behaviour being repaired here. The caller reports this identically to a missing key, so
+        // failing closed discloses nothing new, and UserContextLoader caches a negative result for
+        // one minute rather than an hour, so a transient failure recovers quickly.
+        if (context is null)
+        {
+            return false;
+        }
+
+        // A genuinely TENANTLESS principal is a different thing from an unresolvable one, and keeps
+        // the specification's documented behaviour: confined by ownership and publicity alone. That
+        // branch is sound - it is written for exactly this case - so the specification is left
+        // untouched, as the other four consumers require.
         await using var db = await dbContextFactory.CreateAsync(cancellationToken);
         return await db.Documents
             .Where(x => x.StorageKey == key)
-            .WithSpecification(new VisibleDocumentSpecification(userId, user.GetTenantId() ?? string.Empty))
+            .WithSpecification(new VisibleDocumentSpecification(userId, context.TenantId ?? string.Empty))
             .AnyAsync(cancellationToken);
     }
 }
