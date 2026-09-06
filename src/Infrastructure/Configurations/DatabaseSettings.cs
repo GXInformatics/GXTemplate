@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using System.Reflection;
 using CleanArchitecture.Blazor.Application.Common.Constants;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Configurations;
@@ -48,15 +47,18 @@ public class DatabaseSettings : IValidatableObject
     public string LogConnectionString { get; set; } = string.Empty;
 
     /// <summary>
-    ///     The provider keys this application can actually build a DbContext for, read straight off
-    ///     <see cref="DbProviderKeys"/> so the set cannot drift from the switch in
-    ///     <c>DependencyInjection.UseDatabase</c> that consumes it.
+    ///     The provider keys this application can actually build a DbContext for: the keys of the
+    ///     dispatch table <c>DependencyInjection.UseDatabase</c> resolves an arm from, so a value
+    ///     accepted here is by construction a value that dispatches there.
     /// </summary>
-    private static readonly string[] SupportedProviders = typeof(DbProviderKeys)
-        .GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)
-        .Where(f => f.IsLiteral && !f.IsInitOnly && f.FieldType == typeof(string))
-        .Select(f => (string)f.GetRawConstantValue()!)
-        .ToArray();
+    /// <remarks>
+    ///     It used to be read off <see cref="DbProviderKeys"/> by reflection, which is the set of
+    ///     provider names that EXIST rather than the set that is wired. Pass 42 §6.1 showed the
+    ///     difference is a real hole and not a stylistic one: a fourth constant on that type made
+    ///     its key pass validation here and then throw in <c>UseDatabase</c>'s default arm - the
+    ///     failure this check exists to pre-empt, permitted by the check itself.
+    /// </remarks>
+    private static readonly string[] SupportedProviders = DependencyInjection.SupportedDatabaseProviders.ToArray();
 
     /// <summary>
     ///     Validates the entered configuration

@@ -145,24 +145,30 @@ public class DatabaseSettingsValidationTests
     }
 
     [Test]
-    public void TheSupportedSetIsReadFromDbProviderKeys_NotAHandWrittenList()
+    public void TheSupportedSetIsExactlyTheThreeProvidersUseDatabaseCanDispatch()
     {
-        // Guards the reflection: if a fourth key is added to DbProviderKeys the validator picks it up
-        // automatically, and this test says so rather than the set silently drifting.
+        // A hand-written list, deliberately. The validator now reads its set from the dispatch table
+        // DependencyInjection.UseDatabase resolves an arm from, so a test that read that same table
+        // would move with it and prove nothing - which is exactly what this test used to do against
+        // DbProviderKeys. Pass 42 §4.1 settled it by mutation: a fourth key was added to
+        // DbProviderKeys and all ten tests here stayed green, while "oracle" started passing
+        // validation for a provider UseDatabase would have thrown on.
+        //
+        // Naming the three here makes this the second, independent source. Adding or removing a
+        // provider arm reddens it, and that is the prompt to check the two provider switches
+        // validation does NOT see - UseExceptionProcessor, and SerilogExtensions' sink selection.
         var settings = new DatabaseSettings { ConnectionString = "x", DBProvider = "definitely-not-a-provider" };
 
         var message = settings.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(settings))
             .Single().ErrorMessage!;
 
-        var declared = typeof(DbProviderKeys)
-            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
-            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
-            .Select(f => (string)f.GetRawConstantValue()!);
+        const string preamble = "supported providers are: ";
+        var listed = message[(message.IndexOf(preamble, StringComparison.Ordinal) + preamble.Length)..]
+            .Split(", ");
 
-        foreach (var key in declared)
-        {
-            message.Should().Contain(key);
-        }
+        listed.Should().BeEquivalentTo(new[] { "postgresql", "mssql", "sqlite" },
+            "the validator accepts exactly the providers UseDatabase has an arm for, and this list " +
+            "is the only place that says which three those are without reading the same source");
     }
 }
 #nullable restore

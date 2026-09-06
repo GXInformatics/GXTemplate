@@ -213,46 +213,87 @@ public static class DependencyInjection
     private static DbContextOptionsBuilder UseDatabase(this DbContextOptionsBuilder builder, string dbProvider,
         string connectionString, bool snakeCaseNaming = false)
     {
-        switch (dbProvider.ToLowerInvariant())
-        {
-            case DbProviderKeys.Npgsql:
-                // No AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior") here, and none
-                // anywhere else - Pass 14B deleted it rather than moving it, because under
-                // timestamptz there is nothing to set. Npgsql's DEFAULT mapping for DateTime is
-                // "timestamp with time zone"; the legacy switch is what used to override that into
-                // "timestamp without time zone", and it exists so that schemas predating Npgsql 6
-                // keep working. This template creates its schema fresh, so it has nothing to
-                // preserve - and every persisted DateTime here is already UTC.
-                //
-                // Reintroducing it would be worse than merely wrong. This options lambda runs
-                // LAZILY, at first DbContext creation, while Npgsql caches its type handlers the
-                // first time anything writes - which on this application can be the Serilog
-                // PostgreSQL sink, before any DbContext exists. Setting the switch after that point
-                // changes EF's column mapping and NOT the converters, so EF and the driver disagree
-                // and writes fail at runtime only. Pass 14 measured that split brain end to end.
-                //
-                // TimestamptzModelInvariantTests fails if the switch returns by any route, and
-                // ProcessWideStateTests asserts it is unset after a real boot.
-                var npgsql = builder.UseNpgsql(connectionString,
-                    e => e.MigrationsAssembly(POSTGRESQL_MIGRATIONS_ASSEMBLY));
+        if (!DatabaseProviders.TryGetValue(dbProvider.ToLowerInvariant(), out var configure))
+            throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.");
 
-                // Opt-in, and only the log context opts in - see the parameter's remarks. Applying
-                // it here unconditionally, as this template did before the GX naming standard
-                // landed, snake_cases the business schema AND EF's own __EFMigrationsHistory.
-                return snakeCaseNaming ? npgsql.UseSnakeCaseNamingConvention() : npgsql;
-
-            case DbProviderKeys.SqlServer:
-                return builder.UseSqlServer(connectionString,
-                    e => e.MigrationsAssembly(MSSQL_MIGRATIONS_ASSEMBLY));
-
-            case DbProviderKeys.SqLite:
-                return builder.UseSqlite(connectionString,
-                    e => e.MigrationsAssembly(SQLITE_MIGRATIONS_ASSEMBLY));
-
-            default:
-                throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.");
-        }
+        return configure(builder, connectionString, snakeCaseNaming);
     }
+
+    /// <summary>
+    /// The provider dispatch table <see cref="UseDatabase"/> resolves an arm from: one entry per
+    /// provider this application can actually build a DbContext for. <b>It is the single definition
+    /// of "supported".</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A table rather than a <c>switch</c> because <see cref="DatabaseSettings.Validate"/> has to
+    /// reject a provider the application cannot build, and a switch offers nothing to read. Pass 42
+    /// §6.1 measured what the two-source arrangement cost: the validator derived its supported set
+    /// from the names declared on <see cref="DbProviderKeys"/> - the set of keys that EXIST, not the
+    /// set that is wired - so a fourth constant made that value pass validation and then throw in
+    /// this method's default arm, which is the exact failure the validator exists to pre-empt.
+    /// Reading the keys off this table makes that unrepresentable: <b>a provider cannot be
+    /// validatable without being dispatchable, because being dispatchable is what "supported"
+    /// now means.</b>
+    /// </para>
+    /// <para>
+    /// Keys are the lower-case constants from <see cref="DbProviderKeys"/>, matched against
+    /// <c>dbProvider.ToLowerInvariant()</c>, so configuration stays case-insensitive.
+    /// </para>
+    /// <para>
+    /// <b>It does not govern the other two provider switches</b> - <see cref="UseExceptionProcessor"/>
+    /// below, and the sink selection in <c>SerilogExtensions</c>. A fourth provider would need an arm
+    /// in both; neither is consulted by validation, so neither can produce the "validates, then
+    /// throws at first use" shape this table closes.
+    /// </para>
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, Func<DbContextOptionsBuilder, string, bool, DbContextOptionsBuilder>>
+        DatabaseProviders =
+            new Dictionary<string, Func<DbContextOptionsBuilder, string, bool, DbContextOptionsBuilder>>(StringComparer.Ordinal)
+            {
+                [DbProviderKeys.Npgsql] = (builder, connectionString, snakeCaseNaming) =>
+                {
+                    // No AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior") here, and none
+                    // anywhere else - Pass 14B deleted it rather than moving it, because under
+                    // timestamptz there is nothing to set. Npgsql's DEFAULT mapping for DateTime is
+                    // "timestamp with time zone"; the legacy switch is what used to override that into
+                    // "timestamp without time zone", and it exists so that schemas predating Npgsql 6
+                    // keep working. This template creates its schema fresh, so it has nothing to
+                    // preserve - and every persisted DateTime here is already UTC.
+                    //
+                    // Reintroducing it would be worse than merely wrong. This options lambda runs
+                    // LAZILY, at first DbContext creation, while Npgsql caches its type handlers the
+                    // first time anything writes - which on this application can be the Serilog
+                    // PostgreSQL sink, before any DbContext exists. Setting the switch after that point
+                    // changes EF's column mapping and NOT the converters, so EF and the driver disagree
+                    // and writes fail at runtime only. Pass 14 measured that split brain end to end.
+                    //
+                    // TimestamptzModelInvariantTests fails if the switch returns by any route, and
+                    // ProcessWideStateTests asserts it is unset after a real boot.
+                    var npgsql = builder.UseNpgsql(connectionString,
+                        e => e.MigrationsAssembly(POSTGRESQL_MIGRATIONS_ASSEMBLY));
+
+                    // Opt-in, and only the log context opts in - see UseDatabase's snakeCaseNaming
+                    // remarks. Applying it here unconditionally, as this template did before the GX
+                    // naming standard landed, snake_cases the business schema AND EF's own
+                    // __EFMigrationsHistory.
+                    return snakeCaseNaming ? npgsql.UseSnakeCaseNamingConvention() : npgsql;
+                },
+
+                [DbProviderKeys.SqlServer] = (builder, connectionString, _) =>
+                    builder.UseSqlServer(connectionString,
+                        e => e.MigrationsAssembly(MSSQL_MIGRATIONS_ASSEMBLY)),
+
+                [DbProviderKeys.SqLite] = (builder, connectionString, _) =>
+                    builder.UseSqlite(connectionString,
+                        e => e.MigrationsAssembly(SQLITE_MIGRATIONS_ASSEMBLY)),
+            };
+
+    /// <summary>
+    /// The provider keys <see cref="UseDatabase"/> has an arm for. <see cref="DatabaseSettings"/>
+    /// validates <c>DBProvider</c> against exactly this set, which is what ties the two together.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> SupportedDatabaseProviders = DatabaseProviders.Keys.ToArray();
 
     private static DbContextOptionsBuilder UseExceptionProcessor(this DbContextOptionsBuilder builder, string dbProvider)
     {

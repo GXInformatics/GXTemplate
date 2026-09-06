@@ -1,5 +1,14 @@
-﻿<!-- ReconnectModal.razor -->
-<!-- HTML and CSS remain unchanged, directly replace the Script below -->
+﻿@* ReconnectModal.razor - the dialog Blazor drives when the circuit goes down.
+
+   Blazor finds this by its id and toggles CSS classes on it; gxReconnect.js reads those classes
+   and decides what to do. THE DECISIONS ARE NOT HERE, deliberately: an inline <script> cannot be
+   executed by any test in this repository, and the behaviour this markup used to carry was
+   destroying users' work in every browser. See wwwroot/js/gxReconnect.js for what replaced it and
+   why, and ReconnectUiTests for the properties that now hold.
+
+   The three buttons are hidden until a TERMINAL state needs them. A transient drop shows the
+   dialog and nothing else, so a reconnection that Blazor completes on its own leaves the page -
+   and anything typed into it - exactly as it was. *@
 
 <dialog id="components-reconnect-modal" data-nosnippet>
 	<div class="glass-panel">
@@ -12,11 +21,16 @@
 		</div>
 
 		<div class="content-area">
-			<h3 class="status-title" id="reconnect-title">Connection Lost</h3>
+			<h3 class="status-title" id="reconnect-title">Connection lost</h3>
 			<p class="status-desc" id="reconnect-desc">
-				Waiting for server connection...<br />
-				<span class="sub-text">The page will reload automatically.</span>
+				Reconnecting...
 			</p>
+		</div>
+
+		<div class="button-row">
+			<button type="button" id="reconnect-retry" class="rc-button rc-button-primary" style="display:none">Retry</button>
+			<button type="button" id="reconnect-resume" class="rc-button rc-button-primary" style="display:none">Resume</button>
+			<button type="button" id="reconnect-reload" class="rc-button" style="display:none">Reload</button>
 		</div>
 
 		<div class="progress-container">
@@ -25,101 +39,7 @@
 	</div>
 </dialog>
 
-<script>
-	(function() {
-		if (window.reconnectModalInitialized) return;
-		window.reconnectModalInitialized = true;
-
-		let serverReallyDown = false;
-		let checkInterval = null;
-
-		async function checkServerStatus() {
-			try {
-				// Add timestamp to prevent browser caching
-				const probeUrl = `/_framework/blazor.web.js?t=${new Date().getTime()}`;
-				console.log(`[Reconnect] Probing: ${probeUrl}`);
-
-				const response = await fetch(probeUrl, {
-					method: 'HEAD',
-					cache: 'no-store'
-				});
-
-				console.log('[Reconnect] Response status:', response.status);
-
-				// === Core fix starts ===
-				// Only reload when status code is 200 (OK).
-				// Nginx usually returns 502/503/504 during container restart, fetch won't throw an exception,
-				// so must manually check response.ok or response.status
-				if (response.ok) {
-					console.log('[Reconnect] Server is ready (200 OK). Reloading...');
-					window.location.reload();
-				} else {
-					// If it's 500, 502, 503, 504, 404, etc., it means the service hasn't fully recovered
-					// Throw an error to enter the catch block, keep the modal and wait for the next probe
-					throw new Error(`Server returned status ${response.status} (Not Ready)`);
-				}
-				// === Core fix ends ===
-
-			} catch (error) {
-				// Only when reaching here, it's truly "network unreachable" or "service not ready"
-				console.warn('[Reconnect] Probe failed or server not ready:', error);
-
-				if (!serverReallyDown) {
-					serverReallyDown = true;
-					// Update the text to tell the user the server is restarting
-					updateStatus("Server Restarting", "Waiting for the application to start...");
-
-					// Lock the modal
-					const modal = document.getElementById('components-reconnect-modal');
-					if (modal && !modal.open) modal.showModal();
-				}
-			}
-		}
-
-		function updateStatus(title, desc) {
-			const titleEl = document.getElementById('reconnect-title');
-			const descEl = document.getElementById('reconnect-desc');
-			if (titleEl) titleEl.innerText = title;
-			if (descEl) descEl.innerHTML = desc;
-		}
-
-		function init() {
-			const modal = document.getElementById('components-reconnect-modal');
-			if (!modal) { setTimeout(init, 50); return; }
-
-			const observer = new MutationObserver((mutations) => {
-				const activeClasses = ['components-reconnect-show', 'components-reconnect-failed', 'components-reconnect-rejected'];
-				const hasClass = activeClasses.some(c => modal.classList.contains(c));
-
-				if (hasClass) {
-					// Blazor reports disconnection
-					if (!modal.open) {
-						modal.showModal();
-						// Suggest slightly extending the probe interval to avoid excessive pressure on the server during restart
-						if (!checkInterval) checkInterval = setInterval(checkServerStatus, 2000);
-						checkServerStatus(); // Probe once immediately
-					}
-				} else {
-					// Blazor reports recovery
-					if (serverReallyDown) {
-						// If previously confirmed server was down, absolutely do not allow closing, wait for checkServerStatus to trigger reload
-						console.log('[Reconnect] Ignored fake reconnection signal. Waiting for reload.');
-						if (!modal.open) modal.showModal();
-					} else {
-						// Minor network fluctuation, allow closing
-						if (modal.open) modal.close();
-						if (checkInterval) { clearInterval(checkInterval); checkInterval = null; }
-					}
-				}
-			});
-
-			observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
-		}
-
-		if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-		else init();
-	})();
-</script>
+<script src="@Assets["js/gxReconnect.js"]"></script>
 
 <style>
 
@@ -263,6 +183,37 @@
 		background: var(--rc-primary);
 		transform-origin: left;
 		animation: indeterminate 1.5s infinite cubic-bezier(0.65, 0.815, 0.735, 0.395);
+	}
+
+	/* Hidden until a terminal state needs them - see gxReconnect.js. A transient drop must show no
+	   action at all, because there is nothing for the user to do and Blazor is already doing it. */
+	.button-row {
+		display: flex;
+		gap: 10px;
+		margin-top: 24px;
+	}
+
+	.rc-button {
+		font-family: var(--rc-font);
+		font-size: 0.9rem;
+		font-weight: 600;
+		padding: 9px 20px;
+		border-radius: 10px;
+		border: 1px solid var(--rc-border);
+		background: transparent;
+		color: var(--rc-text);
+		cursor: pointer;
+		transition: opacity 0.2s ease;
+	}
+
+		.rc-button:hover {
+			opacity: 0.75;
+		}
+
+	.rc-button-primary {
+		background: var(--rc-primary);
+		border-color: var(--rc-primary);
+		color: #fff;
 	}
 
 	@@keyframes fadeIn {

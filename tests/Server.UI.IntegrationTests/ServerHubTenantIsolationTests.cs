@@ -158,6 +158,14 @@ public class ServerHubTenantIsolationTests
             "tenant's presence group");
     }
 
+    /// <summary>
+    /// The structural tripwire. It is fast and it fails on the obvious mistake, but it checks
+    /// PARAMETER SPELLING - so a method taking <c>string organisationId</c> and grouping by it
+    /// passes, and a rename that preserves the property reddens it. <b>The property itself is
+    /// carried by <see cref="NoClientSuppliedArgumentMovesAConnectionIntoAnotherTenantsAudience"/>,
+    /// below.</b> Keep both: this one names the rule in a form a reader can act on, that one is
+    /// what actually holds it. Pass 42 §4.5 recorded the wrong sensitivity in both directions.
+    /// </summary>
     [Test]
     public void NoHubMethodTakesATenantFromTheClient()
     {
@@ -170,6 +178,58 @@ public class ServerHubTenantIsolationTests
 
         parameters.Where(p => p.Contains("tenant", StringComparison.OrdinalIgnoreCase))
             .Should().BeEmpty("group membership is established from the server's view of the principal");
+    }
+
+    /// <summary>
+    /// The behavioural sibling: <b>whatever a client passes, the audience is the one the server
+    /// resolved.</b> Both halves of Pass 30B's distinction are asserted - the group this connection
+    /// is IN, and the group any broadcast is addressed TO - plus the snapshot's contents, which
+    /// groups do not reach at all.
+    /// </summary>
+    /// <remarks>
+    /// Every public method the hub declares is driven, with every string argument set to the OTHER
+    /// tenant's id. Today that is <c>GetOnlineUsers()</c>, which takes none, so the loop supplies
+    /// nothing and the test asserts the connect-time audience is unchanged - the point is that it
+    /// does not stay that way: a method added tomorrow with a client-supplied scope argument is
+    /// driven with tenant B's id the moment it exists, without this test being edited. That is the
+    /// scenario the structural test above is blind to unless the parameter happens to be spelled
+    /// "tenant".
+    /// </remarks>
+    [Test]
+    public async Task NoClientSuppliedArgumentMovesAConnectionIntoAnotherTenantsAudience()
+    {
+        await ConnectAsync("u3", "carol", TenantB);
+        var alice = await ConnectAsync("u1", "alice", TenantA);
+
+        foreach (var method in typeof(ServerHub)
+                     .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+        {
+            var arguments = method.GetParameters()
+                .Select(p => p.ParameterType == typeof(string)
+                    ? (object?)TenantB
+                    : p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null)
+                .ToArray();
+
+            if (method.Invoke(alice.Hub, arguments) is not Task task) continue;
+            await task;
+
+            var returned = task.GetType().IsGenericType
+                ? task.GetType().GetProperty("Result")!.GetValue(task)
+                : null;
+
+            if (returned is IEnumerable<UserContext> snapshot)
+            {
+                snapshot.Select(u => u.UserName).Should().NotContain("carol",
+                    $"{method.Name} returned another tenant's roster when asked for it by argument - " +
+                    "groups do not bound a return value, so this is the only thing that does");
+            }
+        }
+
+        alice.GroupsJoined.Should().AllBe(GroupA,
+            "a client-supplied argument must not be able to add the connection to another tenant's group");
+        alice.GroupsAddressed.Should().AllBe(GroupA,
+            "nor to make the hub address one - a send to a group this connection is not in is still " +
+            "a delivery to everyone who IS in it");
     }
 
     // ------------------------------------------------------------------ the send sites
@@ -441,6 +501,7 @@ public class ServerHubTenantIsolationTests
     private sealed class Connection
     {
         private readonly Dictionary<string, Mock<ISignalRHub>> _groups = new(StringComparer.Ordinal);
+        private readonly List<string> _addressed = new();
         private readonly Mock<IHubCallerClients<ISignalRHub>> _clients = new(MockBehavior.Strict);
         private bool _disconnected;
 
@@ -455,7 +516,11 @@ public class ServerHubTenantIsolationTests
             // Strict, so any recipient set the hub reaches for that is not set up here - Clients.All
             // above all - fails the test rather than quietly returning null.
             _clients.Setup(c => c.Group(It.IsAny<string>()))
-                .Returns((string name) => GroupMock(name).Object);
+                .Returns((string name) =>
+                {
+                    _addressed.Add(name);
+                    return GroupMock(name).Object;
+                });
 
             Hub = new ServerHub(scopeFactory)
             {
@@ -464,6 +529,17 @@ public class ServerHubTenantIsolationTests
                 Groups = Groups.Object
             };
         }
+
+        /// <summary>
+        /// Every group name the hub asked <c>Clients.Group</c> for, in order - including any it asked
+        /// for and then sent nothing to, which <see cref="Sent"/> cannot distinguish.
+        /// </summary>
+        public IReadOnlyList<string> GroupsAddressed => _addressed;
+
+        /// <summary>Every group this connection was actually put into.</summary>
+        public IEnumerable<string> GroupsJoined => Groups.Invocations
+            .Where(i => i.Method.Name == nameof(IGroupManager.AddToGroupAsync))
+            .Select(i => (string)i.Arguments[1]!);
 
         /// <summary>The recording double for whatever was addressed to <paramref name="group"/>.</summary>
         public Mock<ISignalRHub> Sent(string group) => GroupMock(group);

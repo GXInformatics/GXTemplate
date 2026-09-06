@@ -29,7 +29,9 @@ namespace CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 /// ambient <c>AsyncLocal</c> in <c>InvokeMethodAsync</c> - but is <b>null in
 /// <c>OnConnectedAsync</c> and <c>OnDisconnectedAsync</c></b>, which is exactly where group
 /// membership is established. The filter's lifetime callbacks write <c>Context.Items</c> and nothing
-/// else, so <c>Context.Items</c> is the one source that works in both places.
+/// else, so <c>Context.Items</c> is the one source that works in both places. The general form of
+/// this - where the ambient context IS and is not populated, and what to use instead - is now on
+/// <c>IUserContextAccessor.Current</c> itself, so that a caller outside a hub meets it too.
 /// </item>
 /// </list>
 /// <para>

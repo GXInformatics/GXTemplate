@@ -25,6 +25,19 @@
              components in-process, which is the only way to see that decision. -->
         <PackageReference Include="bunit" Version="2.9.0" />
         <PackageReference Include="Moq" Version="4.20.72" />
+        <!-- Pass 41: the reconnect logic is JavaScript, because it has to keep working while the
+             circuit - and therefore all C# - is gone. Jint is a pure-C# JS interpreter, so
+             ReconnectUiTests drives the REAL wwwroot/js/gxReconnect.js through the real .NET 10
+             state sequences with no Node, no browser and no native dependency. Without it the only
+             thing a test could assert about that file is that it exists. -->
+        <PackageReference Include="Jint" Version="4.16.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Linked, not copied: the test runs the file the application actually ships. A second
+             copy would drift, and a drifted copy would keep passing. -->
+        <Content Include="..\..\src\Server.UI\wwwroot\js\gxReconnect.js" Link="gxReconnect.js"
+                 CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
     <ItemGroup>
