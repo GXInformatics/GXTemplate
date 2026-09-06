@@ -164,6 +164,10 @@ namespace CleanArchitecture.Blazor.Migrators.SqLite.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Name", "Value")
+                        .IsUnique()
+                        .HasFilter("\"TenantId\" IS NULL");
+
                     b.HasIndex("TenantId", "Name", "Value")
                         .IsUnique();
 

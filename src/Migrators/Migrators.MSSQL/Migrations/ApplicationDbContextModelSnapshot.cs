@@ -175,6 +175,10 @@ namespace CleanArchitecture.Blazor.Migrators.MSSQL.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Name", "Value")
+                        .IsUnique()
+                        .HasFilter("\"TenantId\" IS NULL");
+
                     b.HasIndex("TenantId", "Name", "Value")
                         .IsUnique()
                         .HasFilter("[TenantId] IS NOT NULL AND [Value] IS NOT NULL");

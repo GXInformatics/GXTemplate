@@ -176,6 +176,10 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Name", "Value")
+                        .IsUnique()
+                        .HasFilter("\"TenantId\" IS NULL");
+
                     b.HasIndex("TenantId", "Name", "Value")
                         .IsUnique();
 

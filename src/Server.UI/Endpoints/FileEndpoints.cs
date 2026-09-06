@@ -116,7 +116,8 @@ public static class FileEndpoints
 
         // FROM THE USER ROW, NOT THE CLAIM - and this line is the whole of Pass 38.
         //
-        // It used to read `user.GetTenantId() ?? string.Empty`, and the TenantId CLAIM is written by
+        // It used to read the TenantId CLAIM, through a ClaimsPrincipal.GetTenantId() extension that
+        // Pass 40 deleted for having no correct use left. That claim is written by
         // exactly one place in the codebase, TenantSwitchService.RefreshUserClaimsAsync, reachable
         // only from SwitchToTenantAsync. So a user who has never switched tenant carries no claim at
         // all - Pass 36 measured AspNetUserClaims as EMPTY in a freshly seeded installation while the

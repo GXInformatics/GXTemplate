@@ -30,14 +30,33 @@ public class PicklistSetConfiguration : IEntityTypeConfiguration<PicklistSet>
         // constraints, and a duplicate check written against the filtered view disagrees with the
         // index precisely when the hidden rows are the ones that matter.
         //
-        // KNOWN GAP, deliberately left rather than papered over. This does not stop the SHARED
-        // partition holding the same value twice on SQLite or PostgreSQL, because both treat NULLs
-        // as distinct in a unique index; SQL Server treats them as equal and does block it. Closing
-        // it portably needs a second, partial unique index over (Name, Value) WHERE TenantId IS
-        // NULL, whose filter SQL differs per provider. It is narrow - shared rows come from seeding,
-        // which is idempotent, or from a PicklistSets.ManageShared holder who also has no tenant -
-        // and PicklistTenantUniquenessTests names it so it cannot widen unnoticed.
+        // TWO indexes, because one cannot cover both partitions. The first constrains each TENANT's
+        // rows. It cannot constrain the SHARED ones, whose key is a NULL: SQLite and PostgreSQL
+        // treat NULLs as DISTINCT in a unique index, so two shared rows with the same name and value
+        // do not collide.
+        //
+        // SQL SERVER IS NOT THE EXCEPTION PASS 32 THOUGHT IT WAS, and this was measured rather than
+        // reasoned. That pass recorded "SQL Server treats NULLs as equal and does block it". It does
+        // not get the chance: EF emits its own filter on a unique index over nullable columns, and
+        // sys.indexes shows the first index below created as
+        //
+        //     IX_PicklistSets_TenantId_Name_Value  filter: ([TenantId] IS NOT NULL AND [Value] IS NOT NULL)
+        //
+        // so shared rows are not in that index at all. The gap was on all three providers, not two.
         builder.HasIndex(t => new { t.TenantId, t.Name, t.Value }).IsUnique(true);
+
+        // The shared partition, closed in Pass 40. ONE filter string for all three providers: EF
+        // emits it verbatim, and `"TenantId" IS NULL` is ANSI identifier quoting that SQLite and
+        // PostgreSQL take as written and SQL Server normalises to ([TenantId] IS NULL) - verified by
+        // applying the migration to LocalDB and reading sys.indexes back, not by assuming it. That
+        // is why this is one HasFilter and not a per-provider branch.
+        //
+        // It matters more than Pass 32 judged. That pass called the gap narrow because shared rows
+        // came only from idempotent seeding or from a holder who also had no tenant; Pass 33 §C then
+        // gave a TENANT-SCOPED ManageShared holder a switch in the create dialog, so there has been
+        // an ordinary UI path to a duplicate ever since - and a duplicated shared value appears
+        // twice in every tenant's picker.
+        builder.HasIndex(t => new { t.Name, t.Value }).IsUnique(true).HasFilter("\"TenantId\" IS NULL");
         builder.Ignore(e => e.DomainEvents);
     }
 }

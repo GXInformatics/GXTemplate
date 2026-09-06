@@ -5,46 +5,77 @@ namespace CleanArchitecture.Blazor.Application.Common.Security;
 
 public static partial class Permissions
 {
+    /// <summary>
+    /// The role rights. <b>Every one of them acts on installation-wide data.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the descriptions say so.</b> <c>[Description]</c> text is what the role editor renders
+    /// under a permission's name at the moment an administrator decides to grant it. Every other
+    /// permission group in this template describes a tenant-scoped capability, so a reader
+    /// reasonably assumes the product's default - and roles are the exception:
+    /// <c>ApplicationRole</c> carries no tenant and Identity's own <c>RoleNameIndex</c> is unique
+    /// across the installation, so every tenant's users sit in the same role rows. Pass 35 §3.3
+    /// flagged this whole group as reading tenant-scoped when it is not; Pass 40 corrected it.
+    /// </para>
+    /// <para>
+    /// <b>Definition versus assignment, which is the distinction that matters when granting.</b>
+    /// <see cref="Create"/>, <see cref="Edit"/>, <see cref="Delete"/>, <see cref="Import"/> and
+    /// <see cref="ManagePermissions"/> DEFINE a role, and since Pass 33 each additionally requires
+    /// <see cref="ManageDefinitions"/> - so their descriptions say "also needs Manage Definitions"
+    /// rather than leaving an operator to discover the pairing by being refused. Assigning a user to
+    /// an existing role is not here at all: it is an operation on the user, on
+    /// <c>Permissions.Users.ManageRoles</c>.
+    /// </para>
+    /// <para>
+    /// <b>Five constants name a surface this template does not have</b> - the claims-in-role and
+    /// users-in-role administration, and the read-only permission viewer. They are EXCLUDED in
+    /// <c>AdministratorPermissionRegistry</c>, but exclusion keeps them out of the administrator's
+    /// grant, not out of the role editor's list, so their descriptions now say plainly that they do
+    /// nothing. A permission that appears grantable and is inert costs an administrator a decision
+    /// for no capability.
+    /// </para>
+    /// </remarks>
     [DisplayName("Role Permissions")]
-    [Description("Set permissions for role operations")]
+    [Description("Set permissions for role operations - roles are installation-wide")]
     public static class Roles
     {
-        [Description("Allows viewing role details")]
+        [Description("Allows viewing the installation's roles - every tenant shares them")]
         public const string View = "Permissions.Roles.View";
 
-        [Description("Allows creating new roles")]
+        [Description("Allows creating a role, for every tenant - also needs Manage Definitions")]
         public const string Create = "Permissions.Roles.Create";
 
-        [Description("Allows modifying existing roles")]
+        [Description("Allows renaming a role every tenant shares - also needs Manage Definitions")]
         public const string Edit = "Permissions.Roles.Edit";
 
-        [Description("Allows deleting roles")]
+        [Description("Allows deleting a role every tenant shares - also needs Manage Definitions")]
         public const string Delete = "Permissions.Roles.Delete";
 
-        [Description("Allows searching for role records")]
+        [Description("Allows searching the installation's roles")]
         public const string Search = "Permissions.Roles.Search";
 
-        [Description("Allows importing role data")]
+        [Description("Allows importing roles for the whole installation - also needs Manage Definitions")]
         public const string Import = "Permissions.Roles.Import";
-        [Description("Allows exporting role data")]
+        [Description("Allows exporting the installation's roles - reading only, not defining")]
         public const string Export= "Permissions.Roles.Export";
 
-        [Description("Allows managing role permissions")]
+        [Description("Allows re-permissioning a role for every tenant at once - also needs Manage Definitions")]
         public const string ManagePermissions = "Permissions.Roles.ManagePermissions";
 
-        [Description("Allows managing role claims")]
+        [Description("Not implemented in this template - there is no claims-in-role administration")]
         public const string ManageClaimsInRole = "Permissions.Roles.ManageClaimsInRole";
 
-        [Description("Allows managing users in role")]
+        [Description("Not implemented in this template - assign users to roles from the Users page")]
         public const string ManageUsersInRole = "Permissions.Roles.ManageUsersInRole";
 
-        [Description("Allows viewing role permissions")]
+        [Description("Not implemented in this template - viewing happens inside the Set Permissions dialog")]
         public const string ViewPermissions = "Permissions.Roles.ViewPermissions";
 
-        [Description("Allows viewing role claims")]
+        [Description("Not implemented in this template - there is no claims-in-role viewer")]
         public const string ViewClaimsInRole = "Permissions.Roles.ViewClaimsInRole";
 
-        [Description("Allows viewing users in role")]
+        [Description("Not implemented in this template - see the Users page's role column")]
         public const string ViewUsersInRole = "Permissions.Roles.ViewUsersInRole";
 
         /// <summary>
@@ -76,7 +107,7 @@ public static partial class Permissions
         /// lets someone delete a role but not fix it, which is worse than either.
         /// </para>
         /// </remarks>
-        [Description("Allows defining roles - creating, renaming, deleting, re-permissioning and importing them")]
+        [Description("Allows DEFINING the installation's roles - create, rename, delete, re-permission, import")]
         public const string ManageDefinitions = "Permissions.Roles.ManageDefinitions";
     }
 }

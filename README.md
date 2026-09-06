@@ -369,6 +369,16 @@ denied.**
 
 When you add a feature, add the attribute. The startup assertion is the reminder.
 
+**The navigation menu gates by ROLE, not by permission, and that is deliberate.** `MenuService`
+carries exactly one gate — `Roles = [Admin]` on the MANAGEMENT section — and all eleven entries
+under it inherit it; no individual entry carries a gate of its own. So **an entry visible to
+somebody who cannot use the page is expected rather than a gap**: the page's own `[Authorize]` and
+the request's own attribute are the enforcement, and the menu is navigation. A principal holding the
+`Admin` role with a customised permission set — which is exactly what the Tenancy section recommends
+building for a customer administrator — will see links they are then refused at. Two passes have
+examined this and found it sound; the model has a `Roles` array and no permission field, so the menu
+cannot express a permission even in principle.
+
 ### Transactional audit
 
 **Contract: an audit row and the change it describes commit together, or neither does.**
@@ -571,13 +581,16 @@ Three consequences follow, and none of them is obvious from the table:
   for "tenant not set yet" *and* the value that means "shared", so this flag is only the distinction
   between the two. It is opt-in by type (today `PicklistSet` alone), never persisted, and grants
   nothing — the right is still checked in the handler, over the tenant the row will carry.
-- **The unique index is `(TenantId, Name, Value)`.** Scoping the *reads* did not scope the
-  *constraint*: a query filter narrows what a query sees, a unique index constrains what the table
-  holds, and until Pass 32 the index still spanned tenants — so the duplicate check below said "not a
-  duplicate" and the insert then failed. One known gap remains: SQLite and PostgreSQL treat NULLs as
-  distinct in a unique index, so the *shared* partition is not protected from holding the same value
-  twice (SQL Server is, because it treats NULLs as equal). Closing it portably needs a partial unique
-  index whose filter SQL differs per provider; `PicklistTenantUniquenessTests` names the gap.
+- **Two unique indexes, one per partition.** `(TenantId, Name, Value)` constrains each tenant's rows;
+  `(Name, Value) WHERE "TenantId" IS NULL` constrains the shared ones. Scoping the *reads* did not
+  scope the *constraint*: a query filter narrows what a query sees, a unique index constrains what
+  the table holds, and until Pass 32 the index still spanned tenants — so the duplicate check below
+  said "not a duplicate" and the insert then failed. Pass 32 widened it and left the shared partition
+  unprotected, because a NULL key is distinct from itself in a unique index; Pass 40 measured that
+  and found it true on **all three** providers rather than two — SQL Server never got the chance to
+  treat those NULLs as equal, because EF emits its own `([TenantId] IS NOT NULL AND [Value] IS NOT
+  NULL)` filter on that index and shared rows were never in it. The second index closes it with one
+  filter string all three accept. `PicklistTenantUniquenessTests` asserts both partitions.
 - **The import's duplicate check is now per-tenant.** Two tenants may import the same picklist name
   and value without the second silently losing its rows to the first — which is what it should
   always have been. Neither may shadow a value the installation already ships, because a shared row

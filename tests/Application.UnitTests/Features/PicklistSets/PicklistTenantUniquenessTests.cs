@@ -117,30 +117,47 @@ public class PicklistTenantUniquenessTests
     }
 
     [Test]
-    public async Task TheSharedPartitionIsNotProtectedFromDuplicatesOnThisProvider()
+    public async Task TheSharedPartitionIsProtectedFromDuplicates()
     {
-        // A KNOWN GAP, asserted so it cannot widen unnoticed rather than left to be discovered.
+        // This fixture used to assert the OPPOSITE, and say so: "if it ever starts failing, the gap
+        // has been closed and this fixture should assert the protection instead of the gap." Pass 40
+        // closed it and this is that inversion - the mechanism working exactly as Pass 32 designed
+        // it, which is worth more than the assertion itself.
         //
-        // Widening the index to (TenantId, Name, Value) protects each tenant's partition, but the
-        // SHARED partition keys on a NULL - and SQLite and PostgreSQL treat NULLs as DISTINCT in a
-        // unique index, so two shared rows with the same Name and Value do not collide. SQL Server
-        // treats them as equal and does block it, so this is also a provider divergence.
+        // The gap: (TenantId, Name, Value) constrains each TENANT's rows and cannot constrain the
+        // shared ones, whose key is a NULL. SQLite and PostgreSQL treat NULLs as distinct in a
+        // unique index. SQL Server was believed to be the exception and is not - EF emits its own
+        // ([TenantId] IS NOT NULL AND [Value] IS NOT NULL) filter there, so shared rows were never
+        // in that index either. All three providers, not two.
         //
-        // Closing it portably needs a second, PARTIAL unique index over (Name, Value) WHERE
-        // TenantId IS NULL, whose filter SQL differs per provider. That was judged out of proportion
-        // here: shared rows come from seeding, which is idempotent, or from a
-        // PicklistSets.ManageShared holder who ALSO has no tenant - and both are narrow.
-        //
-        // This test runs on SQLite. If it ever starts failing, the gap has been closed and this
-        // fixture should assert the protection instead of the gap.
+        // Closed by a second, PARTIAL unique index over (Name, Value) WHERE "TenantId" IS NULL - one
+        // filter string that all three accept. This test runs on SQLite, which was one of the
+        // unprotected providers.
         await using var db = Context(null);
         db.PicklistSets.AddRange(Row(null), Row(null));
 
         var write = async () => await db.SaveChangesAsync();
 
+        await write.Should().ThrowAsync<Exception>(
+            "the partial unique index constrains the shared partition, which every tenant sees");
+    }
+
+    [Test]
+    public async Task TheSharedIndexDoesNotConstrainATenantsOwnRows()
+    {
+        // Narrowed, not emptied. The partial index must apply ONLY where TenantId IS NULL: a tenant
+        // holding a value that also exists as a shared one is the ordinary case - Pass 31's whole
+        // shape is shared reference data plus per-tenant additions - and an unfiltered (Name, Value)
+        // index would have broken it.
+        await using var db = Context(null);
+        db.PicklistSets.Add(Row(null));
+        await db.SaveChangesAsync();
+
+        db.PicklistSets.Add(Row(TenantA));
+        var write = async () => await db.SaveChangesAsync();
+
         await write.Should().NotThrowAsync(
-            "SQLite treats NULLs as distinct, so the shared partition is unprotected - the gap this " +
-            "test exists to name");
+            "a tenant may hold the same name and value as a shared row - that is the shape, not a clash");
     }
 
     [Test]

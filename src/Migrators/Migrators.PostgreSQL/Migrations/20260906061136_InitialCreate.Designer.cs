@@ -13,7 +13,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260904111855_InitialCreate")]
+    [Migration("20260906061136_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -178,6 +178,10 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
                         .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Name", "Value")
+                        .IsUnique()
+                        .HasFilter("\"TenantId\" IS NULL");
 
                     b.HasIndex("TenantId", "Name", "Value")
                         .IsUnique();

@@ -5,6 +5,38 @@ using CleanArchitecture.Blazor.Server.UI.Models.NavigationMenu;
 
 namespace CleanArchitecture.Blazor.Server.UI.Services.Navigation;
 
+/// <summary>
+/// The navigation menu's definition.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The menu gates by ROLE; every page gates by PERMISSION. That is deliberate, and it is the one
+/// thing to know before reading an entry below.</b> <c>NavigationMenu.razor</c> filters at three
+/// levels - section, item and sub-item - on <c>x.Roles == null || x.Roles.Any(r =&gt; Roles.Contains(r))</c>,
+/// where <c>Roles</c> is the signed-in user's assigned role names. There is exactly ONE gate in the
+/// whole menu: <c>Roles = [Admin]</c> on the MANAGEMENT section. No section item and no sub-item
+/// carries a gate of its own, so all eleven entries under it - Multi-Tenant, Users, Roles, Profile,
+/// Login History, Picklist, Security Settings, Audit Trails, Email Templates, Logs, Jobs - inherit
+/// that one.
+/// </para>
+/// <para>
+/// <b>An entry visible to someone who cannot use the page is therefore EXPECTED, not a gap.</b> The
+/// page's own <c>[Authorize(Policy = Permissions.*)]</c> - and, for anything behind Mediator,
+/// <c>AuthorizationBehaviour</c>'s deny-by-default - is the enforcement. The menu is navigation. A
+/// principal holding the <c>Admin</c> role but a customised permission set will see links they are
+/// refused at, and that is the designed behaviour: <c>MenuSectionSubItemModel</c> has a
+/// <c>Roles</c> array and no permission field, so the menu cannot express a permission even in
+/// principle.
+/// </para>
+/// <para>
+/// <b>This is written down because it has already cost a pass.</b> Pass 34 §2.3 reported the "Logs"
+/// entry as ungated and inconsistent with its neighbours; Pass 35 A4 established that the neighbours
+/// carry no permission either and the gate sits one level up, so nothing needed changing - and
+/// adding an item-level gate to Logs alone would have CREATED the inconsistency the finding
+/// described. <c>SystemMenuGateComponentTests.NoMenuEntryCarriesAGateOfItsOwn</c> asserts the idiom
+/// so a future "fix" of that shape fails rather than lands.
+/// </para>
+/// </remarks>
 public class MenuService : IMenuService
 {
     /// <summary>
