@@ -1,4 +1,5 @@
 #nullable enable
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -60,7 +61,6 @@ public class AnonymousMatrixTests
 
     /// <summary>The deliberate anonymous surface. Each of these is an explicit opt-out.</summary>
     [TestCase("/account/login")]
-    [TestCase("/account/register")]
     [TestCase("/account/forgot-password")]
     [TestCase("/account/lockout")]
     [TestCase("/account/invaliduser")]
@@ -72,6 +72,34 @@ public class AnonymousMatrixTests
         var response = await _client.GetAsync(path);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// The registration pages are the one part of the anonymous surface that configuration
+    /// switches, and the wizard ships the switch either way (GX default: off).
+    /// </summary>
+    /// <remarks>
+    /// Each state is stated in a host of its own rather than read from the shipped appsettings.json,
+    /// so the suite is green however a project was generated. /account/register used to sit in
+    /// <see cref="TheAnonymousSurface_IsReachable"/>, which assumed the flag was on: the first
+    /// project generated with self-registration off (GX ProjectTracking) shipped that row red.
+    /// </remarks>
+    [TestCase(false, HttpStatusCode.NotFound)]
+    [TestCase(true, HttpStatusCode.OK)]
+    public async Task TheRegistrationPages_FollowAllowSelfRegistration(bool allowed, HttpStatusCode expected)
+    {
+        using var factory = new GxWebApplicationFactory(Environments.Production, new Dictionary<string, string?>
+        {
+            ["AppConfigurationSettings:AllowSelfRegistration"] = allowed ? "true" : "false"
+        });
+        using var client = factory.CreateNonRedirectingClient();
+
+        foreach (var path in new[] { "/account/register", "/account/registerconfirmation" })
+        {
+            var response = await client.GetAsync(path);
+
+            response.StatusCode.Should().Be(expected, $"{path} with AllowSelfRegistration={allowed}");
+        }
     }
 
     [Test]

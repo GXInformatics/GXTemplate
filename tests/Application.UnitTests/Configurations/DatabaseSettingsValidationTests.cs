@@ -52,8 +52,17 @@ public class DatabaseSettingsValidationTests
             .Which.Failures.Should().Contain(f => f.Contains("DatabaseSettings.DBProvider is not configured"));
     }
 
+    /// <summary>
+    /// appsettings.json carries no connection string (the GX configuration layout), so a missing one
+    /// is the first thing a fresh checkout or a new server meets. The message names both places the
+    /// value comes from.
+    /// </summary>
+    private const string MissingConnectionStringMessage =
+        "DatabaseSettings.ConnectionString is not configured. Set it in " +
+        "src/Server.UI/appsettings.Development.json for local development; the server's web.config in deployment.";
+
     [Test]
-    public void AMissingConnectionString_FailsValidationWithTheSettingsClassOwnMessage()
+    public void AMissingConnectionString_FailsValidationNamingBothPlacesItComesFrom()
     {
         var options = BindOptions(new Dictionary<string, string?>
         {
@@ -63,7 +72,7 @@ public class DatabaseSettingsValidationTests
         var act = () => options.Value;
 
         act.Should().Throw<OptionsValidationException>()
-            .Which.Failures.Should().Contain(f => f.Contains("DatabaseSettings.ConnectionString is not configured"));
+            .Which.Failures.Should().Contain(f => f.Contains(MissingConnectionStringMessage));
     }
 
     [Test]
@@ -91,7 +100,7 @@ public class DatabaseSettingsValidationTests
         results.Should().HaveCount(2);
         results.Select(r => r.ErrorMessage).Should().BeEquivalentTo(
             "DatabaseSettings.DBProvider is not configured",
-            "DatabaseSettings.ConnectionString is not configured");
+            MissingConnectionStringMessage);
     }
 
     // ---- supported-provider check ---------------------------------------------------------------

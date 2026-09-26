@@ -75,9 +75,33 @@ folder it is written to, relative to where you are. The options are described un
 
 ### 3. Set the connection string
 
-Open `src/Server.UI/appsettings.json` and set `DatabaseSettings:ConnectionString` to a database you
-can actually reach. The wizard writes a placeholder of the right shape for the provider you chose
-and names it after your project, but it cannot know your host or credentials.
+A generated project follows the **GX configuration layout**: four settings files, each with one job.
+
+| File | Committed | Holds |
+|---|---|---|
+| `src/Server.UI/appsettings.json` | yes | **Structure only.** Every key is present; every secret or environment-specific value is empty — both connection strings, `ApplicationUrl`, `Mail:Domain` / `FromAddress` / `ApiKey`, `MaxMind:LicenseKey`, `Storage:ConnectionString` and the external-login ids and secrets. Never delete a key: the file is the list of what a server has to supply. |
+| `src/Server.UI/appsettings.Staging.json`, `appsettings.Production.json` | yes | Non-secret per-environment settings, with the same empty placeholders. |
+| `src/Server.UI/appsettings.Development.json` | **no — gitignored** | This machine's values. The wizard generates it with your provider's connection strings and your database names — for PostgreSQL `Host=localhost;Port=5434;Database=IMS;Username=postgres;Password=;` and the same for `IMS_Logs`. |
+| the server's `web.config` | on the server only | The deployed values, as ASP.NET Core Module `<environmentVariables>` such as `DatabaseSettings__ConnectionString`. Environment variables override every appsettings file. |
+
+So, locally: open `src/Server.UI/appsettings.Development.json` and **put your local database
+password after `Password=`** (and change host or port if yours differ). That file is the only place a
+local credential goes. It is gitignored, and `Server.UI.csproj` marks it
+`CopyToPublishDirectory="Never"`, so it reaches neither the repository nor a server. User secrets are
+not used; each generated project still gets its own `UserSecretsId`, so nothing is shared between
+projects if you choose to use them.
+
+Without a connection string the application refuses to start, and says where to put one:
+
+```
+DatabaseSettings.ConnectionString is not configured. Set it in src/Server.UI/appsettings.Development.json
+for local development; the server's web.config in deployment.
+```
+
+`tests/Application.UnitTests` enforces the layout: `CommittedAppSettingsTests` fails if a
+secret-bearing key in any committed file carries a value, if a required key is deleted from
+`appsettings.json`, or if `appsettings.Development.json` stops being gitignored; and
+`ServerUiPublishTests` fails if it would be published.
 
 There are **two** connection strings. `LogConnectionString` names a second database, on the same
 server, that Serilog writes to and the SystemLogs page reads from — so log volume stays out of the
@@ -107,12 +131,22 @@ GRANT CONNECT ON DATABASE "IMS_Logs" TO ims_log;
 The catalogue checks the application uses — `pg_database` and `DB_ID()` — need no privilege beyond
 connecting, which is what lets a least-privileged login start it silently every time.
 
-For anything beyond local development, keep secrets out of the file — every setting can be supplied
-as an environment variable using the standard double-underscore form:
+On a server every setting is supplied as an environment variable in the standard double-underscore
+form — in IIS, through `web.config`:
 
+```xml
+<aspNetCore processPath=".\IMS.Server.UI.exe" hostingModel="inprocess">
+  <environmentVariables>
+    <environmentVariable name="ASPNETCORE_ENVIRONMENT" value="Production" />
+    <environmentVariable name="DatabaseSettings__ConnectionString" value="Host=db;Port=5432;Database=IMS;Username=ims;Password=..." />
+  </environmentVariables>
+</aspNetCore>
 ```
-DatabaseSettings__ConnectionString="Host=db;Port=5432;Database=ims;Username=ims;Password=..."
-```
+
+`Server.UI.csproj` carries the GX IIS deployment settings: `RuntimeIdentifier` `win-x64`,
+`EnableMSDeployAppOffline` (the site goes offline while MSDeploy copies, so locked assemblies do not
+fail a deploy), and an MSDeploy skip rule, `SkipWebConfig`, so a deploy never overwrites or deletes
+the server's `web.config` and the values in it.
 
 ### 4. Run
 
@@ -162,10 +196,10 @@ verification, which is why there are four of them and not thirty.
 
 | Option | CLI | Values | Default | Effect |
 |---|---|---|---|---|
-| Database provider | `--Database` | `postgresql`, `mssql`, `sqlite` | `postgresql` | Generates that provider (and SQLite, always) and writes `DatabaseSettings:DBProvider` and a connection string of the right shape into `appsettings.json`. |
-| Database name | `--DatabaseName` | any name | the project name | Names both databases: `<name>` and `<name>_Logs`. |
-| Default time zone | `--DefaultTimeZone` | any time zone id | `UTC` | Writes `AppConfigurationSettings:DefaultTimeZone`, the zone a newly provisioned account gets when nobody has chosen one. |
-| Allow self-registration | `--AllowSelfRegistration` | `true`, `false` | `true` | Writes `AppConfigurationSettings:AllowSelfRegistration`. When `false`, the self-service account-creation surface returns 404. |
+| Database provider | `--Database` | `postgresql`, `mssql`, `sqlite` | `postgresql` | Generates that provider (and SQLite, always), writes `DatabaseSettings:DBProvider` into `appsettings.json`, and writes connection strings of that provider's shape into the gitignored `appsettings.Development.json`. |
+| Database name | `--DatabaseName` | any name | the project name | Names both local databases in `appsettings.Development.json`: `<name>` and `<name>_Logs`. |
+| Default time zone | `--DefaultTimeZone` | any time zone id | `Africa/Lagos` | Writes `AppConfigurationSettings:DefaultTimeZone`, the zone a newly provisioned account gets when nobody has chosen one. |
+| Allow self-registration | `--AllowSelfRegistration` | `true`, `false` | `false` | Writes `AppConfigurationSettings:AllowSelfRegistration`. When `false`, the self-service account-creation surface returns 404. |
 
 **`--DatabaseName`** defaults to the project name, so `dotnet new gxblazor -n IMS` produces databases
 called `IMS` and `IMS_Logs` rather than the `GXApplication` every generated project used to share —
@@ -211,8 +245,10 @@ A generated project can change its mind about either without regenerating from t
 
 ## Configuration reference
 
-All settings live in `src/Server.UI/appsettings.json` and can be overridden by environment variables
-(`Section__Key=value`). Three sections are validated when the application starts: a bad value fails
+Every key is listed in `src/Server.UI/appsettings.json`; secret and environment-specific values
+come from `appsettings.Development.json` locally and from the server's `web.config` in deployment
+(see [Set the connection string](#3-set-the-connection-string)). Any setting can be overridden by an
+environment variable (`Section__Key=value`). Three sections are validated when the application starts: a bad value fails
 the process immediately, naming the offending value, rather than surfacing later as an obscure
 runtime error.
 
@@ -286,7 +322,7 @@ Bounds and bootstrap defaults only; the policy in force is administered at runti
 | Key | Notes |
 |---|---|
 | `AppName` | Shown in the title, the navigation shell and the page metadata. |
-| `ApplicationUrl` | Used in the Open Graph `og:url` tag. Set it or the social preview points at `example.com`. |
+| `ApplicationUrl` | The public base URL: the base of links in email, and the Open Graph `og:url` tag. Environment-specific, so empty in the committed files; supply it per environment. |
 | `Company`, `Copyright`, `Version` | Displayed in the shell. |
 | `DefaultTimeZone` | Must be a time zone id this system recognises, or startup fails naming the value. |
 | `AllowSelfRegistration` | See below. |
@@ -299,7 +335,7 @@ Mail goes out through the **Mailgun HTTP API**. There is no SMTP option.
 |---|---|
 | `Region` | `US` or `EU`, matching where the sending domain is provisioned. Anything else fails startup naming the value. The endpoint URL is composed from this and `Domain`; it is never stored, so the two cannot disagree. |
 | `Domain` | The Mailgun sending domain, e.g. `mg.example.com`. |
-| `FromAddress` | Defaults to `noreply@example.com`, an IANA-reserved domain that can never route. **Set this**, or your messages claim to come from a placeholder. A malformed address fails startup. |
+| `FromAddress` | Environment-specific, so empty in the committed files. **Supply it per environment**, or messages have no sender address. A malformed address fails startup. |
 | `FromName` | Display name shown beside the address. |
 | `Delivery` | `Sink`, `Mailgun`, or empty. **Leave it empty** — see below. |
 | `SinkPath` | Where the sink writes. Defaults to `mail`, which is gitignored. |
@@ -307,16 +343,18 @@ Mail goes out through the **Mailgun HTTP API**. There is no SMTP option.
 
 #### The API key is environment-only
 
-`Mail__ApiKey`, from the environment. **It is not in `appsettings.json` and must not be put there.**
-Everything else in the block is environment-true rather than secret — which domain, which address,
-which region — and belongs in committed configuration where a reviewer can see it.
+`Mail__ApiKey`, from the environment (on a server, `web.config`). `appsettings.json` lists the key
+**empty**, so the structure shows what a server must supply; **its value must never be put in a
+committed file**, and `CommittedAppSettingsTests` fails if it is. `Domain` and `FromAddress` are
+supplied the same way; `Region` is the account's, and committed.
 
 #### The development sink is on by default
 
 With `Delivery` empty, mail goes to the **sink** in Development and to **Mailgun** everywhere else.
 The sink renders each message to `./mail/` and logs a line naming the recipient, subject and path;
 it makes no network call. A developer machine therefore cannot email a real customer by accident,
-and the decision needs no `appsettings.Development.json` — there is none, it is gitignored.
+and the decision does not depend on `appsettings.Development.json` — it is local and gitignored,
+so a fresh clone or a server has none.
 
 The sink renders through the same renderer as Mailgun, so the file is what would have been sent.
 
@@ -1146,21 +1184,41 @@ powershell -ExecutionPolicy Bypass -File tooling\smoke-generate.ps1
 ```
 
 It packs the template exactly as above, installs it into a throwaway template hive under `%TEMP%`
-(never the machine's own template store), generates `SmokeApp` with `--Database postgresql
---DefaultTimeZone Africa/Lagos --AllowSelfRegistration false`, and fails unless the output carries
-no MSSQL migrator, package or test code, names its databases `SmokeApp` and `SmokeApp_Logs`, carries
-the chosen time zone and registration flag, has no Docker artefact and no project name in upstream
-attribution text, and builds with 0 errors. `-Database mssql` and `-Database sqlite` check the other
-two choices. It also checks, before packing, that every `replaces` literal in `template.json` still
-occurs in the template: a replace whose text has drifted matches nothing, silently, which is how
-every generated project came to share the database name `GXApplication` until Pass 44.
+(never the machine's own template store), generates `SmokeApp` with the template's **defaults**, and
+fails unless the output:
+
+- carries no MSSQL migrator, package or test code;
+- follows the configuration layout — structure-only `appsettings.json` with every secret-bearing key
+  empty, committed Staging and Production files with empty placeholders, and an
+  `appsettings.Development.json` naming `SmokeApp` and `SmokeApp_Logs` on port 5434 with an empty
+  password — and carries the default time zone and registration flag;
+- carries `Server.UI.csproj`'s IIS settings, and the evaluated project never publishes the
+  Development file;
+- has a `UserSecretsId` that is neither the template's nor that of a second generation;
+- has no Docker artefact and no project name in upstream attribution text;
+- builds with 0 errors, and passes its three non-database test suites (`-NoTests` skips them);
+- and, after a `git init`, ignores `appsettings.Development.json`.
+
+`-Database mssql` and `-Database sqlite` check the other two choices; `-DefaultTimeZone` and
+`-AllowSelfRegistration` pass a non-default value through. It also checks, before packing, that every
+`replaces` literal and `guids` entry in `template.json` still occurs in the template: one whose text
+has drifted matches nothing, silently, which is how every generated project came to share the
+database name `GXApplication` until Pass 44.
+
+**The template's own `src/Server.UI/appsettings.Development.json` is yours, and local.** The template
+repository gitignores it like any generated project, so running the template's own `Server.UI` needs
+one (or `DatabaseSettings__*` variables). Generated projects never receive it: they get theirs from
+`.template.config/local-settings/`, a second `sources` entry in `template.json` that is processed like
+any other template content, and the nuspec and `template.json` both exclude the maintainer's copy.
 
 **NuGet caches by id and version.** Re-packing after a change without bumping `<version>` and then
 reinstalling gives you the *old* package back. Uninstall first, or bump the version.
 
 **Pack asserts its own output.** After packing, `build/pack.csproj` extracts the `.nupkg` and fails
-the build unless `content/.template.config/` contains `template.json`, `ide.host.json` and
-`icon.png`. That check exists because "the package lacks what the repository has" has bitten three
+the build unless `content/.template.config/` contains `template.json`, `ide.host.json`, `icon.png` and
+`local-settings/appsettings.Development.json`, and unless the package does **not** contain
+`content/src/Server.UI/appsettings.Development.json` — the maintainer's local file, which the nuspec
+would otherwise pack straight from the working tree, password and all. That check exists because "the package lacks what the repository has" has bitten three
 times, and each file fails differently and silently: without `template.json` the package installs
 and offers no template; without `ide.host.json` the template appears in Visual Studio with **no
 parameter page**, because VS hides every symbol unless a host file says otherwise — while the CLI

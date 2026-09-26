@@ -41,8 +41,11 @@ public class AppConfigurationSettingsValidationTests
         var settings = BindOptions(new Dictionary<string, string?>()).Value;
 
         settings.AppName.Should().Be("GX Application");
-        settings.DefaultTimeZone.Should().Be("UTC");
-        settings.AllowSelfRegistration.Should().BeTrue("upstream's behaviour is the default");
+        settings.Company.Should().Be("GX Informatics Limited");
+        settings.Copyright.Should().Be("© 2026 GX Informatics Limited");
+        settings.DefaultTimeZone.Should().Be("Africa/Lagos");
+        settings.AllowSelfRegistration.Should().BeFalse(
+            "GX accounts are created by an administrator; registration is opened by configuration, never by default");
     }
 
     [TestCase("UTC")]
@@ -90,16 +93,18 @@ public class AppConfigurationSettingsValidationTests
     }
 
     [Test]
-    public void SelfRegistrationCanBeTurnedOff_ByConfigurationAlone()
+    public void SelfRegistrationCanBeTurnedOn_ByConfigurationAlone()
     {
         // The point of the flag being configuration rather than conditional source: a generated
-        // project can change its mind without regenerating from the template.
+        // project can change its mind without regenerating from the template. It sets the value the
+        // default does NOT have - with the GX default of false, configuring "false" would pass
+        // whether or not the key was read at all.
         var settings = BindOptions(new Dictionary<string, string?>
         {
-            ["AppConfigurationSettings:AllowSelfRegistration"] = "false"
+            ["AppConfigurationSettings:AllowSelfRegistration"] = "true"
         }).Value;
 
-        settings.AllowSelfRegistration.Should().BeFalse();
+        settings.AllowSelfRegistration.Should().BeTrue();
     }
 }
 #nullable restore

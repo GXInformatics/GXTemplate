@@ -79,9 +79,12 @@ public class DatabaseSettings : IValidatableObject
                 $"supported providers are: {string.Join(", ", SupportedProviders)}",
                 new[] { nameof(DBProvider) });
 
+        // Names where the value lives, because appsettings.json deliberately carries none (the GX
+        // configuration layout): the gitignored development file locally, web.config on a server.
         if (string.IsNullOrEmpty(ConnectionString))
             yield return new ValidationResult(
-                $"{nameof(DatabaseSettings)}.{nameof(ConnectionString)} is not configured",
+                $"{nameof(DatabaseSettings)}.{nameof(ConnectionString)} is not configured. Set it in " +
+                "src/Server.UI/appsettings.Development.json for local development; the server's web.config in deployment.",
                 new[] { nameof(ConnectionString) });
     }
 }

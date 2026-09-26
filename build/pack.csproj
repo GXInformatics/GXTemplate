@@ -38,12 +38,15 @@
       worst way - the package builds, installs without error, and simply offers no template, or
       offers one with no options in Visual Studio.
 
-      Three files are checked, and each has a distinct failure if it goes missing:
+      Three template files are checked, and each has a distinct failure if it goes missing:
         template.json   - no template at all; `dotnet new install` reports success and installs nothing
         ide.host.json   - the template appears in Visual Studio with NO parameter page, because VS
                           hides every symbol unless a host file says otherwise (the CLI shows them
                           by default, which is why this can pass CLI testing and still be broken)
         icon.png        - the package icon the nuspec <icon> element points at
+
+      One file is checked for ABSENCE: the maintainer's local src/Server.UI/appsettings.Development.json
+      (see the assertion itself).
 
       Extracting is the only honest check: inspecting the nuspec would test our intent, not NuGet's
       output, and it is NuGet's own exclude rules that have caused every one of these failures.
@@ -85,8 +88,21 @@
     <Error Condition="!Exists('$(_PackageAssertDir)\content\.template.config\icon.png')"
            Text="The package is missing content/.template.config/icon.png, which ide.host.json references." />
 
+    <!--
+        The local-settings pair (the GX configuration layout). Generated projects get their
+        appsettings.Development.json from .template.config/local-settings/; the maintainer's own
+        src/Server.UI/appsettings.Development.json holds their local password and must never ship.
+        It is gitignored, which keeps it out of git and nothing else: the nuspec packs the working
+        tree, so only its exclude rule stands between that file and every copy of the package.
+    -->
+    <Error Condition="!Exists('$(_PackageAssertDir)\content\.template.config\local-settings\appsettings.Development.json')"
+           Text="The package is missing content/.template.config/local-settings/appsettings.Development.json. Generated projects would have no local settings file, and would fail at startup with no connection string." />
+
+    <Error Condition="Exists('$(_PackageAssertDir)\content\src\Server.UI\appsettings.Development.json')"
+           Text="The package CONTAINS content/src/Server.UI/appsettings.Development.json: the maintainer's own local settings file, with whatever password it holds. Check the nuspec exclude for **\src\Server.UI\appsettings.Development.json, and do not distribute this package." />
+
     <Message Importance="high"
-             Text="Template package contents verified: template.json, ide.host.json and icon.png are all present under content/.template.config/." />
+             Text="Template package contents verified: template.json, ide.host.json, icon.png and local-settings/appsettings.Development.json are present under content/.template.config/, and no local src/Server.UI/appsettings.Development.json was packed." />
 
     <RemoveDir Directories="$(_PackageAssertDir)" />
   </Target>

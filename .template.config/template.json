@@ -13,7 +13,8 @@
   },
   "sourceName": "CleanArchitecture.Blazor",
   "preferNameDirectory": true,
-  "description": "A Blazor Server solution template for .NET 10 in Clean Architecture layers, with multi-tenant identity, deny-by-default authorization and transactional auditing. Business models you add are mapped into the core schema as TBL_UPPER_SNAKE automatically, by deriving from BaseEntity.",
+  "guids": [ "8118d19e-a6db-4446-bdb6-fa62b17f843d" ],
+  "description":"A Blazor Server solution template for .NET 10 in Clean Architecture layers, with multi-tenant identity, deny-by-default authorization and transactional auditing. Business models you add are mapped into the core schema as TBL_UPPER_SNAKE automatically, by deriving from BaseEntity.",
 
   "symbols": {
     "Database": {
@@ -46,21 +47,21 @@
       "datatype": "text",
       "defaultValue": "",
       "displayName": "Database name",
-      "description": "The name of the databases the generated project connects to. Leave empty to use the project name. The log database takes the same name with a _Logs suffix, so a project named IMS gets IMS and IMS_Logs. Anything outside letters, digits and underscore is stripped, because a database name with a space or a quote produces a connection string that fails obscurely at runtime."
+      "description": "The name of the databases the generated project connects to locally, written into its gitignored src/Server.UI/appsettings.Development.json. Leave empty to use the project name. The log database takes the same name with a _Logs suffix, so a project named IMS gets IMS and IMS_Logs. Anything outside letters, digits and underscore is stripped, because a database name with a space or a quote produces a connection string that fails obscurely at runtime."
     },
 
     "DefaultTimeZone": {
       "type": "parameter",
       "datatype": "text",
-      "defaultValue": "UTC",
+      "defaultValue": "Africa/Lagos",
       "displayName": "Default time zone",
-      "description": "Time zone id given to a newly provisioned account when nobody has chosen one, for example UTC or Africa/Lagos. Validated when the generated application starts."
+      "description": "Time zone id given to a newly provisioned account when nobody has chosen one, for example Africa/Lagos or UTC. Validated when the generated application starts."
     },
 
     "AllowSelfRegistration": {
       "type": "parameter",
       "datatype": "bool",
-      "defaultValue": "true",
+      "defaultValue": "false",
       "displayName": "Allow self-registration",
       "description": "Whether anonymous visitors may create their own accounts. When false the registration pages and the external-login account-provisioning callback both return 404. This is a runtime configuration flag, so a generated project can change it later without regenerating."
     },
@@ -103,6 +104,7 @@
       "type": "generated",
       "generator": "regex",
       "dataType": "string",
+      "replaces": "GXTemplateDatabase",
       "parameters": {
         "source": "DatabaseNameOrProject",
         "steps": [
@@ -114,81 +116,10 @@
       }
     },
 
-    "LogDatabaseName": {
-      "type": "generated",
-      "generator": "join",
-      "parameters": {
-        "symbols": [
-          { "type": "ref", "value": "DatabaseNameSafe" },
-          { "type": "const", "value": "_Logs" }
-        ],
-        "separator": "",
-        "removeEmptyValues": false
-      }
-    },
-
-    "DbConnPrefix": {
-      "type": "generated",
-      "generator": "switch",
-      "parameters": {
-        "evaluator": "C++",
-        "datatype": "string",
-        "cases": [
-          { "condition": "(Database == 'mssql')", "value": "Server=(localdb)\\\\mssqllocaldb;Database=" },
-          { "condition": "(Database == 'sqlite')", "value": "Data Source=" },
-          { "condition": "(true)", "value": "Host=localhost;Port=5432;Database=" }
-        ]
-      }
-    },
-
-    "DbConnSuffix": {
-      "type": "generated",
-      "generator": "switch",
-      "parameters": {
-        "evaluator": "C++",
-        "datatype": "string",
-        "cases": [
-          { "condition": "(Database == 'mssql')", "value": ";Trusted_Connection=True;MultipleActiveResultSets=true;" },
-          { "condition": "(Database == 'sqlite')", "value": ".db" },
-          { "condition": "(true)", "value": ";Username=postgres;Password=postgres;" }
-        ]
-      }
-    },
-
-    "DbConnectionStringSetting": {
-      "type": "generated",
-      "generator": "join",
-      "replaces": "Host=localhost;Port=5434;Database=GXApplication;Username=postgres;Password=postgres;",
-      "parameters": {
-        "symbols": [
-          { "type": "ref", "value": "DbConnPrefix" },
-          { "type": "ref", "value": "DatabaseNameSafe" },
-          { "type": "ref", "value": "DbConnSuffix" }
-        ],
-        "separator": "",
-        "removeEmptyValues": false
-      }
-    },
-
-    "LogDbConnectionStringSetting": {
-      "type": "generated",
-      "generator": "join",
-      "replaces": "Host=localhost;Port=5434;Database=GXApplication_Logs;Username=postgres;Password=postgres;",
-      "parameters": {
-        "symbols": [
-          { "type": "ref", "value": "DbConnPrefix" },
-          { "type": "ref", "value": "LogDatabaseName" },
-          { "type": "ref", "value": "DbConnSuffix" }
-        ],
-        "separator": "",
-        "removeEmptyValues": false
-      }
-    },
-
     "DefaultTimeZoneSetting": {
       "type": "generated",
       "generator": "join",
-      "replaces": "\"DefaultTimeZone\": \"UTC\"",
+      "replaces": "\"DefaultTimeZone\": \"Africa/Lagos\"",
       "parameters": {
         "symbols": [
           { "type": "const", "value": "\"DefaultTimeZone\": \"" },
@@ -203,7 +134,7 @@
     "AllowSelfRegistrationSetting": {
       "type": "generated",
       "generator": "switch",
-      "replaces": "\"AllowSelfRegistration\": true",
+      "replaces": "\"AllowSelfRegistration\": false",
       "parameters": {
         "evaluator": "C++",
         "datatype": "string",
@@ -283,8 +214,14 @@
         "build/**/*",
         "tooling/**/*",
         "GXTemplate-passes/**/*",
-        "Directory.Build.props"
+        "Directory.Build.props",
+        "src/Server.UI/appsettings.Development.json"
       ]
+    },
+    {
+      "source": "./.template.config/local-settings/",
+      "target": "./src/Server.UI/",
+      "include": [ "appsettings.Development.json" ]
     }
   ]
 }

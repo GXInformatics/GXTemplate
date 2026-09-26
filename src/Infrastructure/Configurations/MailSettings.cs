@@ -45,10 +45,11 @@ public enum MailDelivery
 ///     <see cref="ApiEndpoint">composed</see> from region and domain, so there is one source of
 ///     truth for each fact.
 ///     <para>
-///     <b><see cref="ApiKey"/> is never written to appsettings.json.</b> It is read from the
-///     environment as <c>Mail__ApiKey</c>, like any other secret. Everything else here is
-///     environment-true rather than secret - which domain, which from-address, which region - and
-///     belongs in committed configuration where a reviewer can see it.
+///     <b><see cref="ApiKey"/>'s value is never written to a committed file.</b> appsettings.json
+///     lists the key empty, so the structure shows what a server must supply; the value is read
+///     from the environment as <c>Mail__ApiKey</c> (on a server, web.config), like any other
+///     secret. Domain and from-address are environment-specific and supplied the same way; region
+///     is the account's, and committed.
 ///     </para>
 /// </remarks>
 public class MailSettings : IValidatableObject

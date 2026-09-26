@@ -197,7 +197,7 @@ public class LogDatabaseDdlTests
     {
         // Doubling is the escape PostgreSQL defines and it is complete: the name becomes harmless
         // instead of breaking out of the identifier. The wizard's DatabaseName symbol is sanitised
-        // by template.json, but appsettings.json and DatabaseSettings__LogConnectionString are not,
+        // by template.json, but the settings files and DatabaseSettings__LogConnectionString are not,
         // and this is the layer that reads them.
         Assert.Equal("\"ev\"\"il\"", LogDatabaseDdl.QuoteIdentifier(DbProviderKeys.Npgsql, "ev\"il"));
     }

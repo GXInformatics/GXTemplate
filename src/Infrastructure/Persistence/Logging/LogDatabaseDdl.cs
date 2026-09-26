@@ -228,7 +228,7 @@ public static class LogDatabaseDdl
     /// <remarks>
     /// <b>This is the layer that has to be safe.</b> The wizard's <c>DatabaseName</c> symbol is
     /// sanitised by <c>template.json</c>'s regex generator - anything outside letters, digits and
-    /// underscore is stripped - but a generated project's <c>appsettings.json</c> and its
+    /// underscore is stripped - but a generated project's settings files and its
     /// <c>DatabaseSettings__LogConnectionString</c> environment variable are not sanitised by
     /// anything, and this class reads its name from there.
     /// <para>

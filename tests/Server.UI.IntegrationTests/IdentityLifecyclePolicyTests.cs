@@ -25,8 +25,8 @@ namespace CleanArchitecture.Blazor.Server.UI.IntegrationTests;
 /// <para>
 /// <b>§B — self-registration produces an INACTIVE account.</b> Self-registration exists so people
 /// can ask for access, not so they can grant themselves access. The template ships
-/// <c>AllowSelfRegistration = true</c>, so the default posture has to be safe for a deployment that
-/// leaves it on and never thinks about it again.
+/// <c>AllowSelfRegistration = false</c>, but the wizard and configuration can turn it on, so the
+/// posture has to be safe for a deployment that does and never thinks about it again.
 /// </para>
 /// <para>
 /// These drive <c>/pages/authentication/login</c> through <see cref="CookieLogin"/> rather than

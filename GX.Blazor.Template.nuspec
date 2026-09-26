@@ -63,9 +63,15 @@
             compared against C:\...\GXTemplate\docs\... and never matches - it excludes nothing,
             silently. That is not hypothetical: docs\** and doc\** matched nothing and shipped
             6.5 MB of screenshots and design notes inside the package until Pass 9.
+
+            **\src\Server.UI\appsettings.Development.json is the maintainer's OWN local file, with
+            their local password; it is gitignored but on disk, and .\** would otherwise pack it.
+            Generated projects get theirs from .template.config\local-settings\, whose path does not
+            end in src\Server.UI\, so this pattern cannot exclude it too. build/pack.csproj asserts
+            both halves on the produced package.
         -->
         <file src=".\**" target="content"
-              exclude="**\*.exe;**\*.nuspec;**\*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;**\docs\**;**\doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;**\src\Server.UI\Files\**;**\src\Server.UI\log\**;**\GXTemplate-passes\**;**\build\**;**\tooling\**;**\Directory.Build.props"/>
+              exclude="**\*.exe;**\*.nuspec;**\*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;**\docs\**;**\doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;**\src\Server.UI\Files\**;**\src\Server.UI\log\**;**\src\Server.UI\appsettings.Development.json;**\GXTemplate-passes\**;**\build\**;**\tooling\**;**\Directory.Build.props"/>
     </files>
 
 </package>

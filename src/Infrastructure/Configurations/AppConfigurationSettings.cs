@@ -22,12 +22,12 @@ public class AppConfigurationSettings : IApplicationSettings, IValidatableObject
     /// <summary>
     ///     The name of the company
     /// </summary>
-    public string Company { get; set; } = "Company";
+    public string Company { get; set; } = "GX Informatics Limited";
 
     /// <summary>
     ///     Copyright watermark
     /// </summary>
-    public string Copyright { get; set; } = "@2023 Copyright";
+    public string Copyright { get; set; } = "© 2026 GX Informatics Limited";
 
     /// <summary>
     ///     Current application version
@@ -46,10 +46,10 @@ public class AppConfigurationSettings : IApplicationSettings, IValidatableObject
     public string AppName { get; set; } = "GX Application";
 
     /// <inheritdoc />
-    public string DefaultTimeZone { get; set; } = "UTC";
+    public string DefaultTimeZone { get; set; } = "Africa/Lagos";
 
     /// <inheritdoc />
-    public bool AllowSelfRegistration { get; set; } = true;
+    public bool AllowSelfRegistration { get; set; } = false;
 
     /// <summary>
     ///     Validates the entered configuration

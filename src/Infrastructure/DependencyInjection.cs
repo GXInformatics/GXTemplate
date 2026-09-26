@@ -425,8 +425,9 @@ public static class DependencyInjection
             // Unspecified means nobody chose, and the safe default depends on where this is running:
             // a developer machine must not be able to email a real customer by accident, while a
             // deployed environment that silently swallowed its mail would be worse than one that
-            // complained. There is no appsettings.Development.json to carry the default - it is
-            // gitignored - so the decision is made here, where IHostEnvironment is available.
+            // complained. appsettings.Development.json cannot carry the default: it is gitignored and
+            // local, so a fresh clone or a server has none. The decision is made here instead,
+            // where IHostEnvironment is available.
             // Resolving it into the settings object, rather than at the point of use, means
             // MailStartupCheck and everything else read the decision that was actually made.
             .PostConfigure<IHostEnvironment>((settings, environment) =>
@@ -572,14 +573,14 @@ public static class DependencyInjection
             })
             .AddMicrosoftAccount(microsoftOptions =>
             {
-                microsoftOptions.ClientId = configuration.GetValue<string>("Authentication:Microsoft:ClientId") ?? "disabled";
-                microsoftOptions.ClientSecret = configuration.GetValue<string>("Authentication:Microsoft:ClientSecret") ?? "disabled";
+                microsoftOptions.ClientId = ExternalLoginSetting(configuration, "Authentication:Microsoft:ClientId");
+                microsoftOptions.ClientSecret = ExternalLoginSetting(configuration, "Authentication:Microsoft:ClientSecret");
                 //microsoftOptions.CallbackPath = new PathString("/pages/authentication/ExternalLogin"); # dotn't set this parameter!!
             })
             .AddGoogle(googleOptions =>
             {
-                googleOptions.ClientId = configuration.GetValue<string>("Authentication:Google:ClientId") ?? "disabled";
-                googleOptions.ClientSecret = configuration.GetValue<string>("Authentication:Google:ClientSecret") ?? "disabled";
+                googleOptions.ClientId = ExternalLoginSetting(configuration, "Authentication:Google:ClientId");
+                googleOptions.ClientSecret = ExternalLoginSetting(configuration, "Authentication:Google:ClientSecret");
             }
             )
 
@@ -644,9 +645,24 @@ public static class DependencyInjection
         });
         services.AddDataProtection().PersistKeysToDbContext<ApplicationDbContext>();
 
-        
+
 
         return services;
+    }
+
+    /// <summary>
+    /// An external-login id or secret, or a placeholder when none is configured.
+    /// </summary>
+    /// <remarks>
+    /// Empty counts as none. appsettings.json lists these keys with empty values (the GX
+    /// configuration layout), and the OAuth handlers reject an empty ClientId when a sign-in is
+    /// attempted - a 500 - where the placeholder only fails at the provider, as a missing key
+    /// always has.
+    /// </remarks>
+    private static string ExternalLoginSetting(IConfiguration configuration, string key)
+    {
+        var value = configuration.GetValue<string>(key);
+        return string.IsNullOrWhiteSpace(value) ? "disabled" : value;
     }
     #endregion
 
