@@ -13,14 +13,24 @@
         <PackageReference Include="Mediator.Abstractions" Version="3.0.2" />
         <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.11" />
         <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.11" />
+        <!--#if (UsePostgreSql) -->
         <PackageReference Include="EntityFrameworkCore.Exceptions.PostgreSQL" Version="10.0.1" />
+        <!--#endif -->
         <PackageReference Include="EntityFrameworkCore.Exceptions.Sqlite" Version="10.0.1" />
+        <!--#if (UseSqlServer) -->
         <PackageReference Include="EntityFrameworkCore.Exceptions.SqlServer" Version="10.0.1" />
+        <!--#endif -->
         <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.11" />
+        <!--#if (UsePostgreSql) -->
         <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+        <!--#endif -->
+        <!--#if (UseSqlServer) -->
         <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
+        <!--#endif -->
         <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+        <!--#if (UsePostgreSql) -->
         <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
+        <!--#endif -->
         <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="10.0.11" />
         <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.11" />
   

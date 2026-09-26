@@ -104,6 +104,7 @@ public class LogTableNamingTests
         Assert.Equal("SystemLogs", db.Model.FindEntityType(typeof(SystemLog))!.GetTableName());
     }
 
+#if (UseSqlServer)
     [Fact]
     public void OnSqlServer_TheModelReadsSystemLogs()
     {
@@ -112,7 +113,9 @@ public class LogTableNamingTests
 
         Assert.Equal("SystemLogs", db.Model.FindEntityType(typeof(SystemLog))!.GetTableName());
     }
+#endif
 
+#if (UsePostgreSql)
     [Fact]
     public void OnPostgres_TheModelReadsTheSnakeCaseNameTheSinkWrites()
     {
@@ -126,4 +129,5 @@ public class LogTableNamingTests
             CleanArchitecture.Blazor.Infrastructure.Extensions.SerilogExtensions.NpgsqlTableName,
             db.Model.FindEntityType(typeof(SystemLog))!.GetTableName());
     }
+#endif
 }

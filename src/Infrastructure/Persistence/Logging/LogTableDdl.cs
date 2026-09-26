@@ -45,11 +45,15 @@ public static class LogTableDdl
     /// <summary>The table's name on SQLite and SQL Server.</summary>
     public const string TableName = "SystemLogs";
 
+#if (UseSqlServer)
     /// <summary>The SQL Server schema the table lives in.</summary>
     public const string SqlServerSchema = "dbo";
+#endif
 
+#if (UsePostgreSql)
     /// <summary>The PostgreSQL schema the table lives in.</summary>
     public const string NpgsqlSchema = "public";
+#endif
 
     /// <summary>
     /// The columns, per provider, in order, as (name, type-and-constraints) pairs.
@@ -79,6 +83,7 @@ public static class LogTableDdl
         ("LogEvent",        "TEXT NULL")
     ];
 
+#if (UseSqlServer)
     private static readonly (string Name, string Definition)[] SqlServerColumns =
     [
         ("Id",              "int IDENTITY(1,1) NOT NULL"),
@@ -103,7 +108,9 @@ public static class LogTableDdl
         ("Properties",      "nvarchar(max) NULL"),
         ("LogEvent",        "nvarchar(max) NULL")
     ];
+#endif
 
+#if (UsePostgreSql)
     /// <remarks>
     /// snake_case, because <c>UseDatabase</c> applies <c>UseSnakeCaseNamingConvention()</c> for this
     /// provider and the sink writes these exact names. <c>time_stamp</c> is
@@ -139,6 +146,7 @@ public static class LogTableDdl
         ("properties",       "text NULL"),
         ("log_event",        "text NULL")
     ];
+#endif
 
     /// <summary>The column names this DDL creates, for the configured provider.</summary>
     public static IReadOnlyList<string> ColumnNames(string dbProvider) =>
@@ -148,8 +156,12 @@ public static class LogTableDdl
         dbProvider.ToLowerInvariant() switch
         {
             DbProviderKeys.SqLite => SqliteColumns,
+#if (UseSqlServer)
             DbProviderKeys.SqlServer => SqlServerColumns,
+#endif
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql => NpgsqlColumns,
+#endif
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
 
@@ -175,18 +187,22 @@ public static class LogTableDdl
             DbProviderKeys.SqLite =>
                 $"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '{TableName}'",
 
+#if (UseSqlServer)
             DbProviderKeys.SqlServer =>
                 $"""
                  SELECT COUNT(*) FROM sys.tables t
                  JOIN sys.schemas s ON s.schema_id = t.schema_id
                  WHERE s.name = '{SqlServerSchema}' AND t.name = '{TableName}'
                  """,
+#endif
 
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql =>
                 $"""
                  SELECT COUNT(*) FROM pg_tables
                  WHERE schemaname = '{NpgsqlSchema}' AND tablename = '{SerilogExtensions.NpgsqlTableName}'
                  """,
+#endif
 
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
@@ -208,8 +224,12 @@ public static class LogTableDdl
         dbProvider.ToLowerInvariant() switch
         {
             DbProviderKeys.SqLite => SqliteStatements(),
+#if (UseSqlServer)
             DbProviderKeys.SqlServer => SqlServerStatements(),
+#endif
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql => NpgsqlStatements(),
+#endif
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
 
@@ -230,6 +250,7 @@ public static class LogTableDdl
         $"""CREATE INDEX IF NOT EXISTS "IX_{TableName}_TimeStamp" ON "{TableName}" ("TimeStamp");"""
     ];
 
+#if (UseSqlServer)
     private static IReadOnlyList<string> SqlServerStatements() =>
     [
         $"""
@@ -258,7 +279,9 @@ public static class LogTableDdl
              CREATE INDEX [IX_{TableName}_TimeStamp] ON [{SqlServerSchema}].[{TableName}] ([TimeStamp]);
          """
     ];
+#endif
 
+#if (UsePostgreSql)
     private static IReadOnlyList<string> NpgsqlStatements() =>
     [
         $"""
@@ -271,4 +294,5 @@ public static class LogTableDdl
         $"""CREATE INDEX IF NOT EXISTS "ix_{SerilogExtensions.NpgsqlTableName}_level" ON "{NpgsqlSchema}"."{SerilogExtensions.NpgsqlTableName}" ("level");""",
         $"""CREATE INDEX IF NOT EXISTS "ix_{SerilogExtensions.NpgsqlTableName}_time_stamp" ON "{NpgsqlSchema}"."{SerilogExtensions.NpgsqlTableName}" ("time_stamp");"""
     ];
+#endif
 }

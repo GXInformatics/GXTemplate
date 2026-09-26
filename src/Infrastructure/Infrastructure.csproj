@@ -18,8 +18,12 @@
         <PackageReference Include="Azure.Storage.Blobs" Version="12.26.0" />
         <PackageReference Include="QuestPDF" Version="2026.7.3" />
         <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+        <!--#if (UseSqlServer) -->
         <PackageReference Include="Serilog.Sinks.MSSqlServer" Version="10.0.0" />
+        <!--#endif -->
+        <!--#if (UsePostgreSql) -->
         <PackageReference Include="Serilog.Sinks.Postgresql.Alternative" Version="4.3.0" />
+        <!--#endif -->
         <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
         <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
         <PackageReference Include="Blazor.Serilog.Sinks.SQLite" Version="1.1.0" />

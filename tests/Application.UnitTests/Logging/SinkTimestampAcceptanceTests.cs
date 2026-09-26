@@ -1,4 +1,5 @@
 #nullable enable
+#if (UseSqlServer || UsePostgreSql)
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -7,8 +8,12 @@ using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using FluentAssertions;
+#if (UseSqlServer)
 using Microsoft.Data.SqlClient;
+#endif
+#if (UsePostgreSql)
 using Npgsql;
+#endif
 using NUnit.Framework;
 using Serilog;
 using Serilog.Core;
@@ -17,7 +22,8 @@ using Serilog.Events;
 namespace CleanArchitecture.Blazor.Application.UnitTests.Logging;
 
 /// <summary>
-/// The UTC timestamp rule, written and read back through a real SQL Server and a real PostgreSQL.
+/// The UTC timestamp rule, written and read back through a real database server - SQL Server and/or
+/// PostgreSQL, whichever this project ships.
 /// </summary>
 /// <remarks>
 /// <c>Infrastructure.UnitTests/Logging/SinkTimestampTests</c> pins each provider's CONFIGURATION and
@@ -41,18 +47,22 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Logging;
 [TestFixture]
 public class SinkTimestampAcceptanceTests
 {
+#if (UseSqlServer)
     private const string SqlServerMaster =
         @"Server=(localdb)\mssqllocaldb;Database=master;Trusted_Connection=True;";
 
     private static string SqlServerLogDatabase(string name) =>
         $@"Server=(localdb)\mssqllocaldb;Database={name};Trusted_Connection=True;";
 
+#endif
+#if (UsePostgreSql)
     private const string PostgresMaintenance =
         "Host=localhost;Port=5433;Database=postgres;Username=postgres;Password=postgres;Timeout=3";
 
     private static string PostgresLogDatabase(string name) =>
         $"Host=localhost;Port=5433;Database={name};Username=postgres;Password=postgres";
 
+#endif
     /// <summary>The window a UTC write lands in and a local write (in a non-UTC zone) does not.</summary>
     private static void AssertStoredInUtc(DateTime stored, DateTime before)
     {
@@ -92,6 +102,7 @@ public class SinkTimestampAcceptanceTests
         }
     }
 
+#if (UseSqlServer)
     // ------------------------------------------------------------------ SQL Server
 
     [Test]
@@ -161,6 +172,8 @@ public class SinkTimestampAcceptanceTests
         }
     }
 
+#endif
+#if (UsePostgreSql)
     // ------------------------------------------------------------------ PostgreSQL
 
     [Test]
@@ -230,6 +243,7 @@ public class SinkTimestampAcceptanceTests
         }
     }
 
+#endif
     private static bool CanConnect(Func<DbConnection> factory)
     {
         try
@@ -244,4 +258,5 @@ public class SinkTimestampAcceptanceTests
         }
     }
 }
+#endif
 #nullable restore

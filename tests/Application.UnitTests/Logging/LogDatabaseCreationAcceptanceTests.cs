@@ -9,12 +9,16 @@ using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Infrastructure;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using FluentAssertions;
+#if (UseSqlServer)
 using Microsoft.Data.SqlClient;
+#endif
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+#if (UsePostgreSql)
 using Npgsql;
+#endif
 using NUnit.Framework;
 
 namespace CleanArchitecture.Blazor.Application.UnitTests.Logging;
@@ -41,12 +45,15 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Logging;
 [TestFixture]
 public class LogDatabaseCreationAcceptanceTests
 {
+#if (UsePostgreSql)
     private const string PostgresMaintenance =
         "Host=localhost;Port=5433;Database=postgres;Username=postgres;Password=postgres;Timeout=3";
 
     private static string PostgresDb(string name, string user = "postgres", string password = "postgres") =>
         $"Host=localhost;Port=5433;Database={name};Username={user};Password={password};Timeout=3";
+#endif
 
+#if (UseSqlServer)
     private const string SqlServerMaster =
         @"Server=(localdb)\mssqllocaldb;Database=master;Trusted_Connection=True;";
 
@@ -55,7 +62,9 @@ public class LogDatabaseCreationAcceptanceTests
 
     private static string SqlServerDbAs(string name, string login, string password) =>
         $@"Server=(localdb)\mssqllocaldb;Database={name};User Id={login};Password={password};TrustServerCertificate=True";
+#endif
 
+#if (UsePostgreSql)
     // ------------------------------------------------------------------ PostgreSQL
 
     [Test]
@@ -167,6 +176,8 @@ public class LogDatabaseCreationAcceptanceTests
         }
     }
 
+#endif
+#if (UseSqlServer)
     // ------------------------------------------------------------------ SQL Server
 
     [Test]
@@ -270,6 +281,7 @@ public class LogDatabaseCreationAcceptanceTests
         }
     }
 
+#endif
     // ------------------------------------------------------------------ SQLite
 
     [Test]
@@ -388,6 +400,7 @@ public class LogDatabaseCreationAcceptanceTests
         }
     }
 
+#if (UsePostgreSql)
     private static void ExecPostgres(string connectionString, string sql)
     {
         using var connection = new NpgsqlConnection(connectionString);
@@ -413,6 +426,8 @@ public class LogDatabaseCreationAcceptanceTests
         catch (Exception) { /* a fixture teardown is not a test result */ }
     }
 
+#endif
+#if (UseSqlServer)
     private static void ExecSqlServer(string connectionString, string sql)
     {
         using var connection = new SqlConnection(connectionString);
@@ -442,5 +457,6 @@ public class LogDatabaseCreationAcceptanceTests
         ExecSqlServerQuiet(SqlServerMaster,
             $"IF DB_ID('{name}') IS NOT NULL BEGIN ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{name}]; END");
     }
+#endif
 }
 #nullable restore

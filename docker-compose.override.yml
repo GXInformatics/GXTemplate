@@ -1,5 +1,0 @@
-﻿services:
-  dashboard:
-    environment:
-      - "ASPNETCORE_ENVIRONMENT=Development"
-

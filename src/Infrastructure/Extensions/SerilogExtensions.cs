@@ -1,19 +1,29 @@
-﻿using System.Collections.ObjectModel;
+﻿#if (UseSqlServer)
+using System.Collections.ObjectModel;
 using System.Data;
+#endif
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+#if (UsePostgreSql)
 using NpgsqlTypes;
+#endif
 using Serilog;
 using Serilog.Configuration;
 using Serilog.Core;
 using Serilog.Events;
+#if (UseSqlServer)
 using Serilog.Sinks.MSSqlServer;
+#endif
+#if (UsePostgreSql)
 using Serilog.Sinks.PostgreSQL;
 using Serilog.Sinks.PostgreSQL.ColumnWriters;
+#endif
+#if (UseSqlServer)
 using ColumnOptions = Serilog.Sinks.MSSqlServer.ColumnOptions;
+#endif
 using CleanArchitecture.Blazor.Application.Common.Constants;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Extensions;
@@ -151,19 +161,24 @@ public static class SerilogExtensions
 
         switch (dbProvider)
         {
+#if (UseSqlServer)
             case DbProviderKeys.SqlServer:
                 WriteToSqlServer(serilogConfig, connectionString);
                 break;
+#endif
+#if (UsePostgreSql)
             case DbProviderKeys.Npgsql:
                 WriteToNpgsql(serilogConfig, connectionString);
                 break;
+#endif
             case DbProviderKeys.SqLite:
                 WriteToSqLite(serilogConfig, connectionString);
                 break;
         }
     }
 
-   
+
+#if (UseSqlServer)
 
     /// <summary>
     /// How long the SQL Server sink may hold a log event before writing it.
@@ -289,6 +304,8 @@ public static class SerilogExtensions
         columnOpts.TimeStamp.NonClusteredIndex = true;
         return columnOpts;
     }
+#endif
+#if (UsePostgreSql)
 
     /// <summary>The log table's name on PostgreSQL, where the snake_case convention applies.</summary>
     public const string NpgsqlTableName = "system_logs";
@@ -378,6 +395,7 @@ public static class SerilogExtensions
             useCopy: false
         ));
     }
+#endif
 
 
     /// <summary>

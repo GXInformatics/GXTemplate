@@ -16,7 +16,7 @@ namespace CleanArchitecture.Blazor.Domain.Common.Entities;
 /// </para>
 /// <para>
 /// Renamed from <c>IAuditTrial</c>, which was a typo for "trail" and named the artefact rather than
-/// the property. This is a deliberate divergence from upstream CleanArchitecture.Blazor.
+/// the property. This is a deliberate divergence from upstream neozhu/CleanArchitectureWithBlazorServer.
 /// </para>
 /// </summary>
 public interface IAuditable

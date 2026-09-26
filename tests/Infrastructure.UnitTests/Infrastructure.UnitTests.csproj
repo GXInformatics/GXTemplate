@@ -27,13 +27,17 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Infrastructure\Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Application\Application.csproj" />
-    <!-- The three migration assemblies are resolved BY NAME at runtime - UseDatabase calls
+    <!-- The migration assemblies are resolved BY NAME at runtime - UseDatabase calls
          MigrationsAssembly("CleanArchitecture.Blazor.Migrators.*") - so ModelMatchesMigrationsTests
          needs their DLLs in this project's output directory. They are referenced for the TEST, not
          because anything here compiles against them; nothing in Infrastructure does either. -->
     <ProjectReference Include="..\..\src\Migrators\Migrators.SqLite\Migrators.SqLite.csproj" />
+    <!--#if (UseSqlServer) -->
     <ProjectReference Include="..\..\src\Migrators\Migrators.MSSQL\Migrators.MSSQL.csproj" />
+    <!--#endif -->
+    <!--#if (UsePostgreSql) -->
     <ProjectReference Include="..\..\src\Migrators\Migrators.PostgreSQL\Migrators.PostgreSQL.csproj" />
+    <!--#endif -->
   </ItemGroup>
 
 </Project>

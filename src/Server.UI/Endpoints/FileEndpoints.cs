@@ -27,6 +27,30 @@ public static class FileEndpoints
     /// <summary>The route <c>StoredFile.PublicUrl</c> points at, under every provider.</summary>
     public const string RoutePattern = "/files/{**key}";
 
+    /// <summary>
+    /// The upload types this endpoint serves, keyed by the first segment of the storage key, each
+    /// with its own visibility rule. A prefix that is not listed here is never served.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="UploadType.Image"/> is deliberately absent: nothing uploads under it today, so it
+    /// has no visibility rule to apply. Whoever starts using it adds it here with one.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, FileVisibility> ServedUploadTypes =
+        new Dictionary<string, FileVisibility>(StringComparer.OrdinalIgnoreCase)
+        {
+            [UploadType.ProfilePicture.GetDisplayName()] = FileVisibility.AnyAuthenticatedUser,
+            [UploadType.Document.GetDisplayName()] = FileVisibility.VisibleDocument
+        };
+
+    private enum FileVisibility
+    {
+        /// <summary>Any authenticated caller - see the remarks on <see cref="IsPermittedAsync"/>.</summary>
+        AnyAuthenticatedUser,
+
+        /// <summary>Documents.Download plus <see cref="VisibleDocumentSpecification"/>, by storage key.</summary>
+        VisibleDocument
+    }
+
     public static IEndpointConventionBuilder MapFileEndpoints(this IEndpointRouteBuilder endpoints)
     {
         // RequireAuthorization is redundant against the fallback policy and is stated anyway: this
@@ -87,6 +111,15 @@ public static class FileEndpoints
     /// <see cref="VisibleDocumentSpecification"/> - the same rule
     /// <c>GetFileStreamQueryHandler</c> applies - resolved by storage key.
     /// </para>
+    /// <para>
+    /// <b>Everything else is refused.</b> Only the upload types listed in
+    /// <see cref="ServedUploadTypes"/> are served, so a key under any other prefix - an upload type
+    /// added later, a folder written by something other than the upload path, or a Documents key
+    /// spelled so it no longer compares equal (<c>" Documents/..."</c>, which the storage layer trims
+    /// back to the real key) - is reported exactly like a missing one. Until Pass 44 this was the
+    /// other way round: any first segment that was not "Documents" was served to every
+    /// authenticated caller, and the whitespace spelling reached private documents that way.
+    /// </para>
     /// </remarks>
     public static async Task<bool> IsPermittedAsync(
         string key,
@@ -97,7 +130,12 @@ public static class FileEndpoints
         CancellationToken cancellationToken)
     {
         var firstSegment = key.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        if (!string.Equals(firstSegment, UploadType.Document.GetDisplayName(), StringComparison.OrdinalIgnoreCase))
+        if (firstSegment is null || !ServedUploadTypes.TryGetValue(firstSegment, out var visibility))
+        {
+            return false;
+        }
+
+        if (visibility == FileVisibility.AnyAuthenticatedUser)
         {
             return true;
         }

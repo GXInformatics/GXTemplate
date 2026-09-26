@@ -83,8 +83,12 @@ public class LogDbContext : DbContext, ILogDbContext
         // wrong one on PostgreSQL, whose sink writes system_logs. That is a provider-specific
         // failure invisible to any single-provider test, which is why LogTableNamingTests covers all
         // three.
+#if (UsePostgreSql)
         builder.Entity<SystemLog>().ToTable(
             Database.IsNpgsql() ? SerilogExtensions.NpgsqlTableName : "SystemLogs");
+#else
+        builder.Entity<SystemLog>().ToTable("SystemLogs");
+#endif
     }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)

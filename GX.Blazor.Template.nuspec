@@ -65,7 +65,7 @@
             6.5 MB of screenshots and design notes inside the package until Pass 9.
         -->
         <file src=".\**" target="content"
-              exclude="**\*.exe;**\*.nuspec;**\*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;**\docs\**;**\doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;**\src\Server.UI\Files\**;**\src\Server.UI\log\**;**\GXTemplate-passes\**;**\build\**"/>
+              exclude="**\*.exe;**\*.nuspec;**\*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;**\docs\**;**\doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;**\src\Server.UI\Files\**;**\src\Server.UI\log\**;**\GXTemplate-passes\**;**\build\**;**\tooling\**;**\Directory.Build.props"/>
     </files>
 
 </package>

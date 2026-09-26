@@ -1,4 +1,5 @@
 #nullable enable
+#if (UsePostgreSql)
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -229,3 +230,4 @@ public class TimestamptzModelInvariantTests
             "silently scanning nothing.");
     }
 }
+#endif

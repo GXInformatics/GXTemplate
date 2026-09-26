@@ -241,6 +241,23 @@ public class FileEndpointsAuthorizationTests
         (await IsPermitted(key, Principal(UserB), _permitAll)).Should().BeFalse();
     }
 
+    // ---- Pass 44: deny by default -----------------------------------------------------------------
+
+    [TestCase("Reports/x.pdf")]
+    [TestCase("Images/x.png")]
+    [TestCase("x.pdf")]
+    [TestCase(" Documents/private-of-a.png")]
+    [TestCase("Documents /private-of-a.png")]
+    public async Task AKeyUnderAnUnlistedPrefix_IsRefused_EvenWithEveryPermission(string key)
+    {
+        // Before Pass 44 every one of these returned TRUE: any first segment other than exactly
+        // "Documents" was served to any authenticated caller. The last two are the sharp end of
+        // that - the storage layer trims segments, so " Documents/..." reads the very bytes the
+        // Documents rule exists to protect, having skipped that rule. "Images" is a real UploadType
+        // with no visibility rule, which is exactly the case deny-by-default is for.
+        (await IsPermitted(key, Principal(UserB), _permitAll)).Should().BeFalse();
+    }
+
     // ---- Pass 38: the tenant comes from the user row, not the claim -----------------------------
 
     [Test]

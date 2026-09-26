@@ -10,14 +10,18 @@ using CleanArchitecture.Blazor.Infrastructure.Extensions;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using FluentAssertions;
+#if (UseSqlServer)
 using Microsoft.Data.SqlClient;
+#endif
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+#if (UsePostgreSql)
 using Npgsql;
+#endif
 using NUnit.Framework;
 
 namespace CleanArchitecture.Blazor.Server.UI.IntegrationTests;
@@ -43,6 +47,19 @@ public class LogDatabaseSeparationTests
 
     /// <summary>A message distinctive enough to find among whatever else the application logged.</summary>
     private static readonly string Marker = "gx-log-roundtrip-" + Guid.NewGuid().ToString("N");
+#if (!UseSqlServer)
+
+    /// <summary>
+    /// The SQLite sink's flush timer, which is the slowest period left when SQL Server's is not
+    /// generated (PostgreSQL's is <c>LoggerConfigurationPostgreSqlExtensions.DefaultPeriod</c>, 5s).
+    /// </summary>
+    /// <remarks>
+    /// Restated rather than referenced because Blazor.Serilog.Sinks.SQLite 1.1.0 exposes no constant:
+    /// it hard-codes 10 seconds in <c>BatchProvider._timerThresholdSpan</c>. Read from a constructed
+    /// sink by reflection in Pass 44, not guessed; re-read it if that package is upgraded.
+    /// </remarks>
+    private static readonly TimeSpan SqliteSinkTimerPeriod = TimeSpan.FromSeconds(10);
+#endif
 
     [OneTimeSetUp]
     public async Task StartTheApplication()
@@ -70,7 +87,8 @@ public class LogDatabaseSeparationTests
     /// is not synchronous with the log call and polling is the honest way to observe it.
     /// </summary>
     /// <remarks>
-    /// The budget is derived from <see cref="SerilogExtensions.SqlServerBatchPeriod"/> rather than
+    /// The budget is derived from the slowest configured sink period - the SQL Server sink's
+    /// <c>SerilogExtensions.SqlServerBatchPeriod</c> where that provider ships - rather than
     /// picked, and that is not fussiness. It was a flat 60 x 250ms = 15 seconds, which is comfortable
     /// for SQLite and PostgreSQL and **shorter than the SQL Server sink's own 20-second BatchPeriod**
     /// - so under <c>GX_TEST_DBPROVIDER=mssql</c> this test failed by giving up before the sink was
@@ -87,7 +105,16 @@ public class LogDatabaseSeparationTests
         var factory = scope.ServiceProvider.GetRequiredService<ILogDbContextFactory>();
 
         var interval = TimeSpan.FromMilliseconds(250);
-        var attempts = (int)Math.Ceiling(SerilogExtensions.SqlServerBatchPeriod * 1.5 / interval);
+#if (UseSqlServer)
+        var slowestPeriod = SerilogExtensions.SqlServerBatchPeriod;
+#elif (UsePostgreSql)
+        var slowestPeriod = SqliteSinkTimerPeriod > Serilog.LoggerConfigurationPostgreSqlExtensions.DefaultPeriod
+            ? SqliteSinkTimerPeriod
+            : Serilog.LoggerConfigurationPostgreSqlExtensions.DefaultPeriod;
+#else
+        var slowestPeriod = SqliteSinkTimerPeriod;
+#endif
+        var attempts = (int)Math.Ceiling(slowestPeriod * 1.5 / interval);
 
         for (var attempt = 0; attempt < attempts; attempt++)
         {
@@ -132,8 +159,12 @@ public class LogDatabaseSeparationTests
         using DbConnection connection = provider.ToLowerInvariant() switch
         {
             DbProviderKeys.SqLite => new SqliteConnection(connectionString),
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql => new NpgsqlConnection(connectionString),
+#endif
+#if (UseSqlServer)
             DbProviderKeys.SqlServer => new SqlConnection(connectionString),
+#endif
             _ => throw new NotSupportedException(
                 $"LogDatabaseSeparationTests cannot inspect the schema of a '{provider}' database. " +
                 "Add its catalogue query here rather than letting these tests silently stop asserting.")
@@ -145,6 +176,7 @@ public class LogDatabaseSeparationTests
         {
             DbProviderKeys.SqLite => "SELECT name FROM sqlite_master WHERE type='table'",
 
+#if (UsePostgreSql)
             // Excluding the two system schemas rather than filtering to 'public': the business
             // database keeps Identity's tables and the snake_cased ones side by side, and pinning a
             // schema name here would quietly stop finding them if either ever moved.
@@ -155,9 +187,12 @@ public class LogDatabaseSeparationTests
                   AND table_schema NOT IN ('pg_catalog', 'information_schema')
                 """,
 
+#endif
+#if (UseSqlServer)
             // sys.tables is already scoped to user tables in the connected database.
             DbProviderKeys.SqlServer => "SELECT name FROM sys.tables",
 
+#endif
             _ => throw new NotSupportedException(provider)
         };
 

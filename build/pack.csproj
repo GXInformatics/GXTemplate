@@ -11,7 +11,7 @@
     -NoDefaultExcludes, and the .nuspec path of `dotnet pack` accepts no such option: it is not
     MSBuild-driven, so -p:NoDefaultExcludes=true is ignored, and a bare -NoDefaultExcludes is
     read as a second .nuspec to pack. The resulting package is missing .editorconfig,
-    .gitignore, .gitattributes and .dockerignore, so every generated project loses its formatting
+    .gitignore and .gitattributes, so every generated project loses its formatting
     rules and its ignore list, and nothing fails to tell you so.
 
     Packing through a project makes NoDefaultExcludes an ordinary MSBuild property, which is the

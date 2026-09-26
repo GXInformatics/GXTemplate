@@ -180,10 +180,15 @@ public class GxTableNamingTests
 /// </remarks>
 public class TemplateTablesStayOutOfCoreTests
 {
+#if (UsePostgreSql)
     private static ApplicationDbContext BusinessContext(bool postgres = false) =>
         new(postgres
             ? new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql("Host=none;Database=none;").Options
             : new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite("Data Source=:memory:").Options);
+#else
+    private static ApplicationDbContext BusinessContext() =>
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite("Data Source=:memory:").Options);
+#endif
 
     [Theory]
     [InlineData(typeof(ApplicationUser), "AspNetUsers")]
@@ -222,6 +227,7 @@ public class TemplateTablesStayOutOfCoreTests
         Assert.Empty(inCore);
     }
 
+#if (UsePostgreSql)
     [Fact]
     public void OnPostgres_TheBusinessModelIsNotSnakeCased()
     {
@@ -242,4 +248,5 @@ public class TemplateTablesStayOutOfCoreTests
 
         Assert.Empty(snakeCased);
     }
+#endif
 }

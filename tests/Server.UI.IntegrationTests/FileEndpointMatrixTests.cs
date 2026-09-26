@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -41,6 +42,8 @@ public class FileEndpointMatrixTests
     private byte[] _documentBytes = null!;
     private string _visibleDocumentKey = null!;
     private string _orphanDocumentKey = null!;
+    private readonly byte[] _orphanDocumentBytes = { 7, 7, 7 };
+    private readonly byte[] _unlistedBytes = { 0x25, 0x50, 0x44, 0x46 };
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -69,8 +72,15 @@ public class FileEndpointMatrixTests
         // Bytes on disk with no Documents row granting them: the per-object check should refuse
         // this even though the object is right there and the caller holds Documents.Download.
         var orphan = await storage.SaveAsync(new FileUploadRequest(
-            "someone-elses.png", UploadType.Document, new byte[] { 7, 7, 7 }, overwrite: true));
+            "someone-elses.png", UploadType.Document, _orphanDocumentBytes, overwrite: true));
         _orphanDocumentKey = orphan.Data!.StorageKey;
+
+        // Real bytes under a prefix no upload type produces, written straight into the storage root.
+        // They must exist: a row requesting a key that is simply absent is 404 under the old
+        // fail-open code too, and so would pass whether or not the endpoint denies by default.
+        var unlisted = Path.Combine(_factory.StorageRoot, "Reports", "x.pdf");
+        Directory.CreateDirectory(Path.GetDirectoryName(unlisted)!);
+        await File.WriteAllBytesAsync(unlisted, _unlistedBytes);
 
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         db.Documents.Add(new Document
@@ -170,6 +180,29 @@ public class FileEndpointMatrixTests
 
         // Identical to the refused case above, so keys cannot be probed by comparing responses.
         missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Test]
+    public async Task AKeyUnderAnUnlistedPrefix_Is404_EvenThoughTheBytesExist()
+    {
+        // Pass 44: deny by default. Only listed upload types are served; before this, any prefix
+        // other than Documents went to every authenticated caller.
+        var response = await CookieLogin.GetAsAssetAsync(_authenticated, "/files/Reports/x.pdf");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsByteArrayAsync()).Should().NotEqual(_unlistedBytes);
+    }
+
+    [Test]
+    public async Task ADocumentKeyWithALeadingSpace_Is404_AndDoesNotSkipTheDocumentsRule()
+    {
+        // The storage layer trims each key segment, so " Documents/x" reads Documents/x. Under the
+        // old fail-open rule " Documents" was "not Documents", so the per-object check never ran and
+        // the orphan document's bytes were served.
+        var response = await CookieLogin.GetAsAssetAsync(_authenticated, "/files/%20" + _orphanDocumentKey);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsByteArrayAsync()).Should().NotEqual(_orphanDocumentBytes);
     }
 
     [Test]

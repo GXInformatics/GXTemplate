@@ -3,9 +3,13 @@
 
 using System.Data.Common;
 using CleanArchitecture.Blazor.Application.Common.Constants;
+#if (UseSqlServer)
 using Microsoft.Data.SqlClient;
+#endif
 using Microsoft.Data.Sqlite;
+#if (UsePostgreSql)
 using Npgsql;
+#endif
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 
@@ -68,8 +72,12 @@ public static class LogDatabaseDdl
         dbProvider.ToLowerInvariant() switch
         {
             DbProviderKeys.SqLite => false,
+#if (UseSqlServer)
             DbProviderKeys.SqlServer => true,
+#endif
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql => true,
+#endif
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
 
@@ -77,8 +85,12 @@ public static class LogDatabaseDdl
     public static string RequiredGrant(string dbProvider) =>
         dbProvider.ToLowerInvariant() switch
         {
+#if (UseSqlServer)
             DbProviderKeys.SqlServer => "the dbcreator server role (or CREATE DATABASE permission in master)",
+#endif
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql => "the CREATEDB attribute (ALTER ROLE ... CREATEDB)",
+#endif
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
 
@@ -86,8 +98,12 @@ public static class LogDatabaseDdl
     public static string DatabaseName(string dbProvider, string connectionString) =>
         dbProvider.ToLowerInvariant() switch
         {
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql => new NpgsqlConnectionStringBuilder(connectionString).Database ?? "",
+#endif
+#if (UseSqlServer)
             DbProviderKeys.SqlServer => new SqlConnectionStringBuilder(connectionString).InitialCatalog,
+#endif
             DbProviderKeys.SqLite => new SqliteConnectionStringBuilder(connectionString).DataSource,
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
@@ -99,8 +115,12 @@ public static class LogDatabaseDdl
     public static string MaintenanceDatabase(string dbProvider) =>
         dbProvider.ToLowerInvariant() switch
         {
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql => "postgres",
+#endif
+#if (UseSqlServer)
             DbProviderKeys.SqlServer => "master",
+#endif
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
 
@@ -125,19 +145,23 @@ public static class LogDatabaseDdl
     {
         switch (dbProvider.ToLowerInvariant())
         {
+#if (UsePostgreSql)
             case DbProviderKeys.Npgsql:
                 var npgsql = new NpgsqlConnectionStringBuilder(connectionString)
                 {
                     Database = MaintenanceDatabase(dbProvider)
                 };
                 return new NpgsqlConnection(npgsql.ConnectionString);
+#endif
 
+#if (UseSqlServer)
             case DbProviderKeys.SqlServer:
                 var sqlServer = new SqlConnectionStringBuilder(connectionString)
                 {
                     InitialCatalog = MaintenanceDatabase(dbProvider)
                 };
                 return new SqlConnection(sqlServer.ConnectionString);
+#endif
 
             default:
                 throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.");
@@ -157,11 +181,15 @@ public static class LogDatabaseDdl
     public static string ExistsCommandText(string dbProvider) =>
         dbProvider.ToLowerInvariant() switch
         {
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql =>
                 $"SELECT COUNT(*) FROM pg_database WHERE datname = {NameParameter}",
+#endif
 
+#if (UseSqlServer)
             DbProviderKeys.SqlServer =>
                 $"SELECT CASE WHEN DB_ID({NameParameter}) IS NULL THEN 0 ELSE 1 END",
+#endif
 
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
@@ -180,12 +208,16 @@ public static class LogDatabaseDdl
     public static string CreateStatement(string dbProvider, string databaseName) =>
         dbProvider.ToLowerInvariant() switch
         {
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql =>
                 $"CREATE DATABASE {QuoteIdentifier(dbProvider, databaseName)}",
+#endif
 
+#if (UseSqlServer)
             DbProviderKeys.SqlServer =>
                 $"IF DB_ID({QuoteLiteral(databaseName)}) IS NULL " +
                 $"CREATE DATABASE {QuoteIdentifier(dbProvider, databaseName)}",
+#endif
 
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
@@ -230,8 +262,12 @@ public static class LogDatabaseDdl
 
         return dbProvider.ToLowerInvariant() switch
         {
+#if (UsePostgreSql)
             DbProviderKeys.Npgsql => $"\"{name.Replace("\"", "\"\"")}\"",
+#endif
+#if (UseSqlServer)
             DbProviderKeys.SqlServer => $"[{name.Replace("]", "]]")}]",
+#endif
             _ => throw new InvalidOperationException($"DB Provider {dbProvider} is not supported.")
         };
     }
@@ -255,8 +291,12 @@ public static class LogDatabaseDdl
     /// </remarks>
     public static bool IsAlreadyExists(Exception exception) => exception switch
     {
+#if (UsePostgreSql)
         PostgresException { SqlState: "42P04" } => true,   // duplicate_database
+#endif
+#if (UseSqlServer)
         SqlException { Number: 1801 } => true,             // Database '...' already exists
+#endif
         _ => false
     };
 
@@ -272,8 +312,12 @@ public static class LogDatabaseDdl
     /// </remarks>
     public static bool IsPermissionDenied(Exception exception) => exception switch
     {
+#if (UsePostgreSql)
         PostgresException { SqlState: "42501" } => true,
+#endif
+#if (UseSqlServer)
         SqlException { Number: 262 } => true,
+#endif
         _ => false
     };
 
@@ -313,13 +357,17 @@ public static class LogDatabaseDdl
     {
         switch (dbProvider.ToLowerInvariant())
         {
+#if (UsePostgreSql)
             case DbProviderKeys.Npgsql:
                 NpgsqlConnection.ClearAllPools();
                 break;
+#endif
 
+#if (UseSqlServer)
             case DbProviderKeys.SqlServer:
                 SqlConnection.ClearAllPools();
                 break;
+#endif
         }
     }
 

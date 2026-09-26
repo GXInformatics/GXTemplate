@@ -67,9 +67,17 @@ public class SinkColumnDriftTests
         return result.ToString();
     }
 
+    /// <summary>Whether the provider spells columns in snake_case - PostgreSQL, and only PostgreSQL.</summary>
+    private static bool SpellsSnakeCase(string provider) =>
+#if (UsePostgreSql)
+        provider == DbProviderKeys.Npgsql;
+#else
+        false;
+#endif
+
     /// <summary>The entity's properties, spelled the way the given provider spells columns.</summary>
     private static string[] EntityColumnsFor(string provider) =>
-        provider == DbProviderKeys.Npgsql
+        SpellsSnakeCase(provider)
             ? EntityProperties.Select(ToSnakeCase).ToArray()
             : EntityProperties;
 
@@ -121,12 +129,17 @@ public class SinkColumnDriftTests
     /// <summary>What that provider's sink writes.</summary>
     private static string[] SinkColumnsFor(string provider) => provider switch
     {
+#if (UseSqlServer)
         DbProviderKeys.SqlServer => SqlServerSinkColumns(),
+#endif
+#if (UsePostgreSql)
         DbProviderKeys.Npgsql => SerilogExtensions.BuildNpgsqlColumnWriters().Keys.ToArray(),
+#endif
         DbProviderKeys.SqLite => SqliteSinkColumns,
         _ => throw new InvalidOperationException(provider)
     };
 
+#if (UseSqlServer)
     private static string[] SqlServerSinkColumns()
     {
         var options = SerilogExtensions.BuildSqlServerColumnOptions();
@@ -134,9 +147,19 @@ public class SinkColumnDriftTests
             .Concat(options.AdditionalColumns!.Select(c => c.ColumnName!))
             .ToArray();
     }
+#endif
 
     public static TheoryData<string> Providers =>
-        new() { DbProviderKeys.SqLite, DbProviderKeys.SqlServer, DbProviderKeys.Npgsql };
+        new()
+        {
+            DbProviderKeys.SqLite,
+#if (UseSqlServer)
+            DbProviderKeys.SqlServer,
+#endif
+#if (UsePostgreSql)
+            DbProviderKeys.Npgsql,
+#endif
+        };
 
     // ------------------------------------------------------------- entity -> DDL
 
@@ -166,7 +189,7 @@ public class SinkColumnDriftTests
         // list that the sink does not write is a defect: the column would exist, be readable, and
         // be permanently null, which is the quietest failure in the whole log pipeline.
         var accepted = SinkCannotWrite(provider)
-            .Select(p => provider == DbProviderKeys.Npgsql ? ToSnakeCase(p) : p)
+            .Select(p => SpellsSnakeCase(provider) ? ToSnakeCase(p) : p)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var missing = EntityColumnsFor(provider)
@@ -189,7 +212,7 @@ public class SinkColumnDriftTests
         {
             Assert.Contains(property, EntityProperties);
 
-            var spelled = provider == DbProviderKeys.Npgsql ? ToSnakeCase(property) : property;
+            var spelled = SpellsSnakeCase(provider) ? ToSnakeCase(property) : property;
             Assert.DoesNotContain(spelled, SinkColumnsFor(provider), StringComparer.OrdinalIgnoreCase);
         }
     }
@@ -238,7 +261,7 @@ public class SinkColumnDriftTests
         // id - written to fail once that was fixed. It is fixed: the DDL supplies the key on all
         // three providers, which is what makes the reading side work at all.
         var ddl = LogTableDdl.ColumnNames(provider);
-        var key = provider == DbProviderKeys.Npgsql ? "id" : "Id";
+        var key = SpellsSnakeCase(provider) ? "id" : "Id";
 
         Assert.Contains(key, ddl, StringComparer.OrdinalIgnoreCase);
     }

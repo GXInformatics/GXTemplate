@@ -2,13 +2,17 @@ using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
+#if (UsePostgreSql)
 using NpgsqlTypes;
+#endif
 using Microsoft.Data.Sqlite;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
+#if (UsePostgreSql)
 using Serilog.Sinks.PostgreSQL;
 using Serilog.Sinks.PostgreSQL.ColumnWriters;
+#endif
 using Xunit;
 
 namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
@@ -66,6 +70,7 @@ public class SinkTimestampTests : IDisposable
 
     // ------------------------------------------------------- the configuration, all three providers
 
+#if (UsePostgreSql)
     [Fact]
     public void ThePostgresSink_ReadsTheUtcEnrichedProperty_NotTheEventsOwnTimestamp()
     {
@@ -84,6 +89,7 @@ public class SinkTimestampTests : IDisposable
         Assert.Equal(NpgsqlDbType.TimestampTz, single.DbType);
     }
 
+#endif
     [Fact]
     public void ThePropertyThePostgresSinkReads_IsTheOneTheEnricherWritesInUtc()
     {
@@ -116,6 +122,7 @@ public class SinkTimestampTests : IDisposable
             new(name, new ScalarValue(value));
     }
 
+#if (UseSqlServer)
     [Fact]
     public void TheSqlServerSink_ConvertsItsTimestampToUtc()
     {
@@ -125,6 +132,7 @@ public class SinkTimestampTests : IDisposable
         Assert.Equal("TimeStamp", options.TimeStamp.ColumnName);
     }
 
+#endif
     // ------------------------------------------------------- SQLite, end to end
 
     /// <summary>

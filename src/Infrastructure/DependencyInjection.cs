@@ -32,8 +32,12 @@ public static class DependencyInjection
     private const string APP_CONFIGURATION_SETTINGS_KEY = "AppConfigurationSettings";
     private const string DATABASE_SETTINGS_KEY = "DatabaseSettings";
     // Removed UseInMemoryDatabase and in-memory database name constants (feature deprecated)
+#if (UsePostgreSql)
     private const string POSTGRESQL_MIGRATIONS_ASSEMBLY = "CleanArchitecture.Blazor.Migrators.PostgreSQL";
+#endif
+#if (UseSqlServer)
     private const string MSSQL_MIGRATIONS_ASSEMBLY = "CleanArchitecture.Blazor.Migrators.MSSQL";
+#endif
     private const string SQLITE_MIGRATIONS_ASSEMBLY = "CleanArchitecture.Blazor.Migrators.SqLite";
     private const string LOGIN_PATH = "/account/login";
     private const int DEFAULT_LOCKOUT_TIME_SPAN_MINUTES = 5;
@@ -251,6 +255,7 @@ public static class DependencyInjection
         DatabaseProviders =
             new Dictionary<string, Func<DbContextOptionsBuilder, string, bool, DbContextOptionsBuilder>>(StringComparer.Ordinal)
             {
+#if (UsePostgreSql)
                 [DbProviderKeys.Npgsql] = (builder, connectionString, snakeCaseNaming) =>
                 {
                     // No AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior") here, and none
@@ -279,10 +284,13 @@ public static class DependencyInjection
                     // __EFMigrationsHistory.
                     return snakeCaseNaming ? npgsql.UseSnakeCaseNamingConvention() : npgsql;
                 },
+#endif
 
+#if (UseSqlServer)
                 [DbProviderKeys.SqlServer] = (builder, connectionString, _) =>
                     builder.UseSqlServer(connectionString,
                         e => e.MigrationsAssembly(MSSQL_MIGRATIONS_ASSEMBLY)),
+#endif
 
                 [DbProviderKeys.SqLite] = (builder, connectionString, _) =>
                     builder.UseSqlite(connectionString,
@@ -300,14 +308,17 @@ public static class DependencyInjection
 
         switch (dbProvider.ToLowerInvariant())
         {
+#if (UsePostgreSql)
             case DbProviderKeys.Npgsql:
                 EntityFramework.Exceptions.PostgreSQL.ExceptionProcessorExtensions.UseExceptionProcessor(builder);
                 return builder;
+#endif
 
+#if (UseSqlServer)
             case DbProviderKeys.SqlServer:
                 EntityFramework.Exceptions.SqlServer.ExceptionProcessorExtensions.UseExceptionProcessor(builder);
                 return builder;
-
+#endif
 
             case DbProviderKeys.SqLite:
                 EntityFramework.Exceptions.Sqlite.ExceptionProcessorExtensions.UseExceptionProcessor(builder);

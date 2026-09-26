@@ -17,7 +17,16 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
 public class LogTableDdlTests
 {
     public static TheoryData<string> Providers =>
-        new() { DbProviderKeys.SqLite, DbProviderKeys.SqlServer, DbProviderKeys.Npgsql };
+        new()
+        {
+            DbProviderKeys.SqLite,
+#if (UseSqlServer)
+            DbProviderKeys.SqlServer,
+#endif
+#if (UsePostgreSql)
+            DbProviderKeys.Npgsql,
+#endif
+        };
 
     // ------------------------------------------------------------- naming
 
@@ -33,6 +42,7 @@ public class LogTableDdlTests
         Assert.Equal(LogTableDdl.TableName, db.Model.FindEntityType(typeof(SystemLog))!.GetTableName());
     }
 
+#if (UseSqlServer)
     [Fact]
     public void TheDdlNamesTheSameTableTheModelReads_OnSqlServer()
     {
@@ -44,7 +54,9 @@ public class LogTableDdlTests
             LogTableDdl.Statements(DbProviderKeys.SqlServer)[0]);
         Assert.Equal(LogTableDdl.TableName, db.Model.FindEntityType(typeof(SystemLog))!.GetTableName());
     }
+#endif
 
+#if (UsePostgreSql)
     [Fact]
     public void TheDdlNamesTheSameTableTheModelReadsAndTheSinkWrites_OnPostgres()
     {
@@ -61,6 +73,7 @@ public class LogTableDdlTests
             SerilogExtensions.NpgsqlTableName,
             db.Model.FindEntityType(typeof(SystemLog))!.GetTableName());
     }
+#endif
 
     // ------------------------------------------------------------- idempotence, by dialect
 
@@ -77,6 +90,7 @@ public class LogTableDdlTests
         }
     }
 
+#if (UseSqlServer)
     [Fact]
     public void TheSqlServerGuardsUseTSqlsOwnForm_BecauseTSqlHasNoCreateTableIfNotExists()
     {
@@ -91,10 +105,13 @@ public class LogTableDdlTests
         Assert.Contains("sys.tables", statements[0]);
         Assert.Contains(statements, s => s.Contains("sys.indexes"));
     }
+#endif
 
     [Theory]
     [InlineData(DbProviderKeys.SqLite)]
+#if (UsePostgreSql)
     [InlineData(DbProviderKeys.Npgsql)]
+#endif
     public void TheOtherTwoTakeIfNotExistsDirectly(string provider)
     {
         Assert.Contains("CREATE TABLE IF NOT EXISTS", LogTableDdl.Statements(provider)[0]);
@@ -102,6 +119,7 @@ public class LogTableDdlTests
 
     // ------------------------------------------------------------- column types that must agree
 
+#if (UsePostgreSql)
     [Fact]
     public void ThePostgresTimestampColumnIsTimestamptz_BecauseTheWriterAndTheEnricherSayItIs()
     {
@@ -118,6 +136,7 @@ public class LogTableDdlTests
         Assert.Contains("timestamp with time zone", create, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("timestamp without time zone", create, StringComparison.OrdinalIgnoreCase);
     }
+#endif
 
     [Fact]
     public void TheOtherTwoProvidersTimestampColumnsAreUnchangedByTheTimestamptzWork()
@@ -126,7 +145,9 @@ public class LogTableDdlTests
         // were already in the target state and nothing about them moved in Pass 14B. Stated as an
         // assertion rather than assumed, because "unchanged" is exactly the kind of claim that goes
         // stale silently.
+#if (UseSqlServer)
         Assert.Contains("datetime2", LogTableDdl.Statements(DbProviderKeys.SqlServer)[0]);
+#endif
         Assert.Contains("TEXT NOT NULL", LogTableDdl.Statements(DbProviderKeys.SqLite)[0]);
     }
 

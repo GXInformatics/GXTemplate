@@ -42,13 +42,53 @@ public class Testing
     private static Respawner _checkpoint;
     private static string _currentUserId;
 
+    /// <summary>The variables that name the test database - the same three Server.UI.IntegrationTests reads.</summary>
+    public const string ProviderVariable = "GX_TEST_DBPROVIDER";
+    public const string ConnectionStringVariable = "GX_TEST_CONNECTIONSTRING";
+    public const string LogConnectionStringVariable = "GX_TEST_LOGCONNECTIONSTRING";
+
+    /// <summary>The server providers this project was generated with - the ones this suite can run on.</summary>
+#if (UseSqlServer && UsePostgreSql)
+    private const string ServerProviders = "postgresql or mssql";
+#elif (UsePostgreSql)
+    private const string ServerProviders = "postgresql";
+#elif (UseSqlServer)
+    private const string ServerProviders = "mssql";
+#else
+    // Respawn has no SQLite adapter, so in a project generated for SQLite alone this suite always skips.
+    private const string ServerProviders = "a server provider, which this SQLite-only project was not generated with";
+#endif
+
     [OneTimeSetUp]
     public async Task RunBeforeAnyTests()
     {
+        // No default database. This suite used to fall back to a SQL Server LocalDB database named
+        // after upstream, so on any machine without LocalDB - and in every project generated for
+        // PostgreSQL - its tests FAILED rather than said why they could not run. Ignored here, they
+        // are reported as skipped, never as passed.
+        var provider = Environment.GetEnvironmentVariable(ProviderVariable);
+        var connectionString = Environment.GetEnvironmentVariable(ConnectionStringVariable);
+        if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(connectionString))
+        {
+            Assert.Ignore(
+                $"Application.IntegrationTests need a database: set {ProviderVariable} ({ServerProviders}) " +
+                $"and {ConnectionStringVariable}, and optionally {LogConnectionStringVariable}. " +
+                "The database named is emptied before every test, so it must be a throwaway one.");
+        }
+
+        var adapter = RespawnAdapterFor(provider);
+
         var builder = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
             .AddJsonFile("appsettings.json", true, true)
-            .AddEnvironmentVariables();
+            .AddEnvironmentVariables()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["DatabaseSettings:DBProvider"] = provider,
+                ["DatabaseSettings:ConnectionString"] = connectionString,
+                ["DatabaseSettings:LogConnectionString"] =
+                    Environment.GetEnvironmentVariable(LogConnectionStringVariable) ?? string.Empty
+            });
 
         _configuration = builder.Build();
 
@@ -112,6 +152,7 @@ public class Testing
                 connection,
                 new RespawnerOptions
                 {
+                    DbAdapter = adapter,
                     TablesToIgnore = new Table[] { "__EFMigrationsHistory" }
                 });
         }
@@ -119,8 +160,34 @@ public class Testing
         {
             await connection.CloseAsync();
         }
+    }
 
-        
+    /// <summary>
+    /// The Respawn adapter for a provider key. Respawn defaults to SQL Server, which was only ever
+    /// right because the default database was LocalDB.
+    /// </summary>
+    private static IDbAdapter RespawnAdapterFor(string provider)
+    {
+        switch (provider)
+        {
+#if (UsePostgreSql)
+            case DbProviderKeys.Npgsql:
+                return DbAdapter.Postgres;
+#endif
+#if (UseSqlServer)
+            case DbProviderKeys.SqlServer:
+                return DbAdapter.SqlServer;
+#endif
+            case DbProviderKeys.SqLite:
+                // Respawn has no SQLite adapter, and resetting between tests is what this suite is.
+                // Server.UI.IntegrationTests is the suite that runs on SQLite.
+                Assert.Ignore($"Application.IntegrationTests cannot run on SQLite ({ProviderVariable}={provider}): " +
+                              $"Respawn has no SQLite adapter. Use {ServerProviders}.");
+                return null;
+            default:
+                Assert.Fail($"{ProviderVariable}='{provider}' is not a provider this suite knows: use {ServerProviders}.");
+                return null;
+        }
     }
 
     /// <summary>

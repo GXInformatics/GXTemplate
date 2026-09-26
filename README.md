@@ -42,25 +42,36 @@ The GX fork differs from upstream in ways that matter for a line-of-business app
 
 ### 1. Install the template
 
-From a local clone:
+Run these from the root of your clone of this repository. Install it **one** way, not both: two
+installations of the same template make `dotnet new gxblazor` ambiguous.
+
+**As a package** — the way to use for Visual Studio. The package is not in the repository; build it
+first. The first command writes `GX.Blazor.Template.1.0.0.nupkg` to the clone's root:
+
+```
+dotnet pack build/pack.csproj -o .
+dotnet new install ./GX.Blazor.Template.1.0.0.nupkg
+```
+
+**Or as a folder**, which is enough for the command line:
 
 ```
 dotnet new install .
 ```
 
-Or from a package:
-
-```
-dotnet new install GX.Blazor.Template.1.0.0.nupkg
-```
-
 ### 2. Generate a project
 
+**Outside the clone.** A folder installation serves whatever the clone contains at the moment you
+generate, so a project generated *inside* it is copied into every project generated after it.
+
 ```
-dotnet new gxblazor -n IMS -o IMS
+cd ..
+dotnet new gxblazor -n IMS -o IMS --Database postgresql
 ```
 
-`-n` sets the project name; every assembly, namespace and the solution file take it.
+`-n` sets the project name; every assembly, namespace and the solution file take it. `-o` is the
+folder it is written to, relative to where you are. The options are described under
+[The wizard options](#the-wizard-options); leave any of them out to take its default.
 
 ### 3. Set the connection string
 
@@ -151,7 +162,7 @@ verification, which is why there are four of them and not thirty.
 
 | Option | CLI | Values | Default | Effect |
 |---|---|---|---|---|
-| Database provider | `--Database` | `postgresql`, `mssql`, `sqlite` | `postgresql` | Writes `DatabaseSettings:DBProvider` and a connection string of the right shape into `appsettings.json`. |
+| Database provider | `--Database` | `postgresql`, `mssql`, `sqlite` | `postgresql` | Generates that provider (and SQLite, always) and writes `DatabaseSettings:DBProvider` and a connection string of the right shape into `appsettings.json`. |
 | Database name | `--DatabaseName` | any name | the project name | Names both databases: `<name>` and `<name>_Logs`. |
 | Default time zone | `--DefaultTimeZone` | any time zone id | `UTC` | Writes `AppConfigurationSettings:DefaultTimeZone`, the zone a newly provisioned account gets when nobody has chosen one. |
 | Allow self-registration | `--AllowSelfRegistration` | `true`, `false` | `true` | Writes `AppConfigurationSettings:AllowSelfRegistration`. When `false`, the self-service account-creation surface returns 404. |
@@ -169,12 +180,16 @@ that is already valid.
 
 Two things worth knowing about `--Database`:
 
-- **All three providers and all three migration projects ship regardless of your choice.** The
-  option selects configuration, not content. That keeps generated projects mergeable against future
-  template versions, and it means switching provider later is a configuration change plus a
-  migration regeneration, not a regeneration of the project.
-- The migration for each provider already exists under `src/Migrators/`. If you change the model,
-  regenerate with, for example:
+- **Only the provider you choose is generated — plus SQLite.** The other server provider's
+  migration project, EF Core and Serilog packages, provider code and provider-specific tests are
+  left out. SQLite is always included, whichever you choose, because it is the database both test
+  harnesses run on: `tests/Server.UI.IntegrationTests` boots the real application over a throwaway
+  SQLite database, and a great many unit tests use in-memory SQLite. `DatabaseSettings` validation
+  accepts exactly the providers that were generated, so a PostgreSQL project configured with
+  `mssql` fails at startup naming the value. Switching a generated project to the other server
+  provider therefore means adding that provider back, not just changing configuration.
+- The migrations for each generated provider already exist under `src/Migrators/`. If you change the
+  model, regenerate with, for example:
   ```
   DatabaseSettings__DBProvider=postgresql dotnet ef migrations add <Name> \
     --project src/Migrators/Migrators.PostgreSQL --startup-project src/Server.UI \
@@ -186,7 +201,8 @@ Two things worth knowing about `--Database`:
   the configured one needs `DatabaseSettings__ConnectionString` and
   `DatabaseSettings__LogConnectionString` overridden to match, because the design-time host builds
   the real service provider and a PostgreSQL connection string fails to parse as a SQLite one.
-  Regenerate all three providers together so the chains stay in step.
+  Regenerate every provider in `src/Migrators/` together — your chosen one and SQLite — so the
+  chains stay in step; `ModelMatchesMigrationsTests` fails if one falls behind.
 
 `--DefaultTimeZone` and `--AllowSelfRegistration` are written as **configuration**, not compiled in.
 A generated project can change its mind about either without regenerating from the template.
@@ -1016,14 +1032,6 @@ Stated plainly, because finding these out later is worse than reading them now.
   copy rather than the real cause, so it reads as a mysterious build break. Generate into a short
   path — `C:\src\IMS` rather than a nested folder under `Documents` — or enable long paths
   (`git config --global core.longpaths true` plus the `LongPathsEnabled` registry setting).
-- **`tests/Application.IntegrationTests` is pinned to SQL Server LocalDB, whatever `--Database` you
-  chose.** Its own `appsettings.json` sets `mssql` and a `(localdb)\mssqllocaldb` connection string,
-  and the wizard does not rewrite it. On a machine without LocalDB those 9 tests **fail** — they do
-  not skip — while the rest of the suite passes. This is deliberate: they assert handler behaviour
-  against a real SQL Server, and repointing them at whatever the wizard chose would quietly change
-  what they prove. It is also why the newer HTTP harness, `tests/Server.UI.IntegrationTests`,
-  defaults to SQLite: that one needs a database, not a particular one. To run these, install
-  LocalDB, or point that file at any SQL Server you can reach.
 - **`BaseEntity` is `IEntity<int>`, with no `long` variant.** A project with high-volume tables — a
   ledger, a movement history — cannot use the template base and must carry its own, which then has to
   implement `IEntity<T>` by hand before the pagination and specification helpers will accept it. It
@@ -1043,7 +1051,7 @@ src/
   Migrators/        one EF Core migration project per provider
 tests/
   Application.UnitTests/         handlers, pipeline, security, storage, configuration
-  Application.IntegrationTests/  handlers against a real SQL Server database
+  Application.IntegrationTests/  handlers against a real database named by GX_TEST_* (skipped without)
   Server.UI.IntegrationTests/    the real HTTP pipeline: cookie login, authorization matrices
   Infrastructure.UnitTests/      infrastructure services
 ```
@@ -1073,8 +1081,21 @@ emulator and are **skipped** — not failed — when it is not running. To inclu
 npx azurite --silent --location <a temp dir>
 ```
 
-Nine tests in `tests/Application.IntegrationTests` need SQL Server LocalDB and **fail** rather than
-skip without it, whatever `--Database` you generated with. See Known limitations for why.
+`tests/Application.IntegrationTests` runs handlers through the real container against a real
+PostgreSQL or SQL Server database, and has **no default database**. Without the variables below its
+tests are reported as **skipped**, with a message naming them. Set them to run it:
+
+```
+GX_TEST_DBPROVIDER=postgresql
+GX_TEST_CONNECTIONSTRING=Host=localhost;Port=5432;Database=ims_tests;Username=postgres;Password=...
+GX_TEST_LOGCONNECTIONSTRING=Host=localhost;Port=5432;Database=ims_tests_logs;Username=postgres;Password=...
+```
+
+**Point them at a throwaway database.** That suite empties every table before each test. The same
+three variables point `tests/Server.UI.IntegrationTests` at that server instead of its default
+throwaway SQLite files. `GX_TEST_DBPROVIDER` takes the server provider you generated; that suite
+cannot run on SQLite, because Respawn, which resets the database between tests, has no SQLite
+adapter.
 
 ---
 
@@ -1098,8 +1119,8 @@ Two things about that command are load-bearing.
 name begins with a dot unless it is given `-NoDefaultExcludes`, and the `.nuspec` form of
 `dotnet pack` has no way to accept that option: it is not MSBuild-driven, so
 `-p:NoDefaultExcludes=true` is ignored, and a bare `-NoDefaultExcludes` is read as a second
-`.nuspec` to pack. The package it produces is missing `.editorconfig`, `.gitignore`,
-`.gitattributes` and `.dockerignore`, so every project generated from it loses its formatting rules
+`.nuspec` to pack. The package it produces is missing `.editorconfig`, `.gitignore`
+and `.gitattributes`, so every project generated from it loses its formatting rules
 and its ignore list. Nothing fails, and nothing warns you at install time. `build/pack.csproj` sets
 `NoDefaultExcludes` as an ordinary property, which is the only way to set it short of the full
 `nuget.exe`.
@@ -1108,13 +1129,31 @@ and its ignore list. Nothing fails, and nothing warns you at install time. `buil
 file's resolved *absolute* path, so a root-anchored pattern such as `docs\**` is compared against
 `C:\...\GXTemplate\docs\...` and never matches. Such a pattern excludes nothing and reports nothing.
 
-To install the built package locally and generate from it:
+To install the built package locally and generate from it — outside the clone, because the nuspec
+packs everything under the clone's root and would carry a generated `IMS/` into the next package:
 
 ```
 dotnet new install ./GX.Blazor.Template.1.0.0.nupkg
+cd ..
 dotnet new gxblazor -n IMS -o IMS
 dotnet new uninstall GX.Blazor.Template
 ```
+
+**Before shipping a change, run the generation smoke test:**
+
+```
+powershell -ExecutionPolicy Bypass -File tooling\smoke-generate.ps1
+```
+
+It packs the template exactly as above, installs it into a throwaway template hive under `%TEMP%`
+(never the machine's own template store), generates `SmokeApp` with `--Database postgresql
+--DefaultTimeZone Africa/Lagos --AllowSelfRegistration false`, and fails unless the output carries
+no MSSQL migrator, package or test code, names its databases `SmokeApp` and `SmokeApp_Logs`, carries
+the chosen time zone and registration flag, has no Docker artefact and no project name in upstream
+attribution text, and builds with 0 errors. `-Database mssql` and `-Database sqlite` check the other
+two choices. It also checks, before packing, that every `replaces` literal in `template.json` still
+occurs in the template: a replace whose text has drifted matches nothing, silently, which is how
+every generated project came to share the database name `GXApplication` until Pass 44.
 
 **NuGet caches by id and version.** Re-packing after a change without bumping `<version>` and then
 reinstalling gives you the *old* package back. Uninstall first, or bump the version.

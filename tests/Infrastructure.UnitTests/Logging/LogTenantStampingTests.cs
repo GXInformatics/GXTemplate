@@ -6,8 +6,10 @@ using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using Microsoft.Data.Sqlite;
 using Serilog;
 using Serilog.Events;
+#if (UsePostgreSql)
 using Serilog.Sinks.PostgreSQL;
 using Serilog.Sinks.PostgreSQL.ColumnWriters;
+#endif
 using Xunit;
 
 namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
@@ -64,8 +66,10 @@ public class LogTenantStampingTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+#if (UseSqlServer || UsePostgreSql)
     // ------------------------------------------------------- configuration, the two server providers
 
+#if (UseSqlServer)
     [Fact]
     public void TheSqlServerSink_WritesTheTenantColumn_AndAllowsItToBeNull()
     {
@@ -81,6 +85,8 @@ public class LogTenantStampingTests : IDisposable
         Assert.True(column.AllowNull);
     }
 
+#endif
+#if (UsePostgreSql)
     [Fact]
     public void ThePostgresSink_ReadsTheEnrichedTenantProperty()
     {
@@ -94,7 +100,9 @@ public class LogTenantStampingTests : IDisposable
         // "null" - and the installation partition would stop being distinguishable.
         Assert.Equal(PropertyWriteMethod.Raw, single.WriteMethod);
     }
+#endif
 
+#endif
     // ------------------------------------------------------- SQLite, end to end
 
     /// <summary>

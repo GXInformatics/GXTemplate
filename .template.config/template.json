@@ -21,7 +21,7 @@
       "datatype": "choice",
       "defaultValue": "postgresql",
       "displayName": "Database provider",
-      "description": "The database the generated project is configured to use. All three providers and all three migration projects ship regardless of this choice; it selects the DatabaseSettings values written into appsettings.json.",
+      "description": "The database the generated project uses. Only the chosen provider's packages, migration project and provider-specific tests are generated. SQLite is always included as well, because the test harnesses run on it.",
       "choices": [
         {
           "choice": "postgresql",
@@ -63,6 +63,16 @@
       "defaultValue": "true",
       "displayName": "Allow self-registration",
       "description": "Whether anonymous visitors may create their own accounts. When false the registration pages and the external-login account-provisioning callback both return 404. This is a runtime configuration flag, so a generated project can change it later without regenerating."
+    },
+
+    "UseSqlServer": {
+      "type": "computed",
+      "value": "(Database == \"mssql\")"
+    },
+
+    "UsePostgreSql": {
+      "type": "computed",
+      "value": "(Database == \"postgresql\")"
     },
 
     "DbProviderSetting": {
@@ -148,7 +158,7 @@
     "DbConnectionStringSetting": {
       "type": "generated",
       "generator": "join",
-      "replaces": "Host=localhost;Port=5432;Database=GXApplication;Username=postgres;Password=postgres;",
+      "replaces": "Host=localhost;Port=5434;Database=GXApplication;Username=postgres;Password=postgres;",
       "parameters": {
         "symbols": [
           { "type": "ref", "value": "DbConnPrefix" },
@@ -163,7 +173,7 @@
     "LogDbConnectionStringSetting": {
       "type": "generated",
       "generator": "join",
-      "replaces": "Host=localhost;Port=5432;Database=GXApplication_Logs;Username=postgres;Password=postgres;",
+      "replaces": "Host=localhost;Port=5434;Database=GXApplication_Logs;Username=postgres;Password=postgres;",
       "parameters": {
         "symbols": [
           { "type": "ref", "value": "DbConnPrefix" },
@@ -205,10 +215,49 @@
     }
   },
 
+  "SpecialCustomOperations": {
+    "**/*.slnx": {
+      "operations": [
+        {
+          "type": "conditional",
+          "configuration": {
+            "style": "block",
+            "startToken": "<!--",
+            "endToken": "-->",
+            "pseudoEndToken": "-- >",
+            "keywords": {
+              "keywordPrefix": "#"
+            }
+          }
+        }
+      ]
+    }
+  },
+
   "sources": [
     {
       "source": "./",
       "target": "./",
+      "modifiers": [
+        {
+          "condition": "(!UseSqlServer)",
+          "exclude": [
+            "src/Migrators/Migrators.MSSQL/**"
+          ]
+        },
+        {
+          "condition": "(!UsePostgreSql)",
+          "exclude": [
+            "src/Migrators/Migrators.PostgreSQL/**"
+          ]
+        },
+        {
+          "condition": "(!UseSqlServer && !UsePostgreSql)",
+          "exclude": [
+            "tests/Application.UnitTests/Logging/SinkTimestampAcceptanceTests.cs"
+          ]
+        }
+      ],
       "exclude": [
         "**/[Bb]in/**",
         "**/[Oo]bj/**",
@@ -231,7 +280,10 @@
         "src/Server.UI/[Ll]og/**",
         "src/Server.UI/[Mm]ail/**",
         "docs/**/*",
-        "build/**/*"
+        "build/**/*",
+        "tooling/**/*",
+        "GXTemplate-passes/**/*",
+        "Directory.Build.props"
       ]
     }
   ]

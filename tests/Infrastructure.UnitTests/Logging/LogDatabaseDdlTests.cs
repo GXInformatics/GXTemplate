@@ -1,7 +1,11 @@
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
+#if (UseSqlServer)
 using Microsoft.Data.SqlClient;
+#endif
+#if (UsePostgreSql)
 using Npgsql;
+#endif
 using Xunit;
 
 namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
@@ -18,11 +22,32 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
 /// </remarks>
 public class LogDatabaseDdlTests
 {
+#if (UseSqlServer || UsePostgreSql)
+    // The server providers this project was generated with. A SQLite-only project has none, so the
+    // theories that read this are generated only alongside it.
     public static TheoryData<string> ServerProviders =>
-        new() { DbProviderKeys.SqlServer, DbProviderKeys.Npgsql };
+        new()
+        {
+#if (UseSqlServer)
+            DbProviderKeys.SqlServer,
+#endif
+#if (UsePostgreSql)
+            DbProviderKeys.Npgsql,
+#endif
+        };
+
+    // Any server provider this project ships, for the name checks that run before any per-provider
+    // quoting. SQLite never quotes a database name - its database is a file - so it has none.
+#if (UsePostgreSql)
+    private const string AServerProvider = DbProviderKeys.Npgsql;
+#elif (UseSqlServer)
+    private const string AServerProvider = DbProviderKeys.SqlServer;
+#endif
+#endif
 
     // ------------------------------------------------------------- the guard contract
 
+#if (UseSqlServer || UsePostgreSql)
     [Theory]
     [MemberData(nameof(ServerProviders))]
     public void TheCreateStatementCarriesNoIfNotExists_BecauseNeitherServerHasOne(string provider)
@@ -36,7 +61,9 @@ public class LogDatabaseDdlTests
         Assert.DoesNotContain("IF NOT EXISTS", statement, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("CREATE DATABASE", statement, StringComparison.OrdinalIgnoreCase);
     }
+#endif
 
+#if (UseSqlServer)
     [Fact]
     public void SqlServerStillGuardsItsOwnWay_BecauseTSqlOffersDbId()
     {
@@ -48,7 +75,9 @@ public class LogDatabaseDdlTests
         Assert.Contains("IF DB_ID(", statement, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("IS NULL", statement, StringComparison.OrdinalIgnoreCase);
     }
+#endif
 
+#if (UsePostgreSql)
     [Fact]
     public void PostgresGetsABareCreate_BecauseNoGuardedFormExists()
     {
@@ -58,9 +87,11 @@ public class LogDatabaseDdlTests
 
         Assert.Equal("CREATE DATABASE \"gx_logs\"", statement);
     }
+#endif
 
     // ------------------------------------------------------------- the existence check
 
+#if (UseSqlServer || UsePostgreSql)
     [Theory]
     [MemberData(nameof(ServerProviders))]
     public void TheExistenceCheckIsParameterised_NotInterpolated(string provider)
@@ -71,7 +102,9 @@ public class LogDatabaseDdlTests
 
         Assert.Contains(LogDatabaseDdl.NameParameter, sql, StringComparison.Ordinal);
     }
+#endif
 
+#if (UseSqlServer || UsePostgreSql)
     [Fact]
     public void TheExistenceChecksReadTheCatalogue_WhichNeedsNoPrivilege()
     {
@@ -79,12 +112,18 @@ public class LogDatabaseDdlTests
         // PostgreSQL role and a SQL Server login without dbcreator. That is the property that lets a
         // correctly provisioned production deployment find the database present and issue nothing,
         // so the create path never executes and the elevated grant never comes up.
+#if (UsePostgreSql)
         Assert.Contains("pg_database", LogDatabaseDdl.ExistsCommandText(DbProviderKeys.Npgsql));
+#endif
+#if (UseSqlServer)
         Assert.Contains("DB_ID(", LogDatabaseDdl.ExistsCommandText(DbProviderKeys.SqlServer));
+#endif
     }
+#endif
 
     // ------------------------------------------------------------- maintenance connection
 
+#if (UsePostgreSql)
     [Fact]
     public void ThePostgresMaintenanceConnection_SwapsOnlyTheDatabase()
     {
@@ -103,7 +142,9 @@ public class LogDatabaseDdlTests
         Assert.Equal("gx", b.Username);
         Assert.Equal(17, b.Timeout);
     }
+#endif
 
+#if (UseSqlServer)
     [Fact]
     public void TheSqlServerMaintenanceConnection_SwapsOnlyTheCatalogue()
     {
@@ -119,24 +160,38 @@ public class LogDatabaseDdlTests
         Assert.True(b.Encrypt);
         Assert.Equal(17, b.ConnectTimeout);
     }
+#endif
 
+#if (UseSqlServer || UsePostgreSql)
     [Fact]
     public void TheDatabaseNameComesFromTheConfiguredConnectionString()
     {
+#if (UsePostgreSql)
         Assert.Equal("gx_logs", LogDatabaseDdl.DatabaseName(
             DbProviderKeys.Npgsql, "Host=h;Database=gx_logs;Username=u"));
+#endif
+#if (UseSqlServer)
         Assert.Equal("GxLogs", LogDatabaseDdl.DatabaseName(
             DbProviderKeys.SqlServer, @"Server=h;Database=GxLogs;Trusted_Connection=True"));
+#endif
     }
+#endif
 
     // ------------------------------------------------------------- identifier quoting
 
+#if (UseSqlServer || UsePostgreSql)
     [Theory]
+#if (UsePostgreSql)
     [InlineData(DbProviderKeys.Npgsql, "gx_logs", "\"gx_logs\"")]
+#endif
+#if (UseSqlServer)
     [InlineData(DbProviderKeys.SqlServer, "GxLogs", "[GxLogs]")]
+#endif
     public void AnOrdinaryNameIsQuotedInTheProvidersOwnForm(string provider, string name, string expected) =>
         Assert.Equal(expected, LogDatabaseDdl.QuoteIdentifier(provider, name));
+#endif
 
+#if (UsePostgreSql)
     [Fact]
     public void APostgresNameContainingADoubleQuote_IsEscapedRatherThanRejected()
     {
@@ -146,11 +201,15 @@ public class LogDatabaseDdlTests
         // and this is the layer that reads them.
         Assert.Equal("\"ev\"\"il\"", LogDatabaseDdl.QuoteIdentifier(DbProviderKeys.Npgsql, "ev\"il"));
     }
+#endif
 
+#if (UseSqlServer)
     [Fact]
     public void ASqlServerNameContainingABracket_IsEscapedRatherThanRejected() =>
         Assert.Equal("[ev]]il]", LogDatabaseDdl.QuoteIdentifier(DbProviderKeys.SqlServer, "ev]il"));
+#endif
 
+#if (UsePostgreSql)
     [Fact]
     public void AnInjectionAttemptCannotEscapeTheIdentifier()
     {
@@ -163,7 +222,9 @@ public class LogDatabaseDdlTests
         Assert.Equal(1, CountOccurrences(statement, "CREATE DATABASE"));
         Assert.Equal(0, CountOccurrences(statement, "DROP DATABASE \"gx\""));
     }
+#endif
 
+#if (UseSqlServer)
     [Fact]
     public void TheSqlServerLiteralGuardIsEscapedToo()
     {
@@ -174,13 +235,15 @@ public class LogDatabaseDdlTests
         Assert.Contains("N'ev''il]x'", statement, StringComparison.Ordinal);
         Assert.Contains("[ev'il]]x]", statement, StringComparison.Ordinal);
     }
+#endif
 
+#if (UseSqlServer || UsePostgreSql)
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
     public void AnEmptyNameIsRefused(string name) =>
         Assert.Throws<InvalidOperationException>(
-            () => LogDatabaseDdl.QuoteIdentifier(DbProviderKeys.Npgsql, name));
+            () => LogDatabaseDdl.QuoteIdentifier(AServerProvider, name));
 
     [Theory]
     [InlineData("gx\0logs")]
@@ -192,11 +255,13 @@ public class LogDatabaseDdlTests
         // misconfiguration worth failing loudly on rather than quietly creating a database for.
         // The throw is caught by the startup check's non-fatal try, like every other failure there.
         Assert.Throws<InvalidOperationException>(
-            () => LogDatabaseDdl.QuoteIdentifier(DbProviderKeys.Npgsql, name));
+            () => LogDatabaseDdl.QuoteIdentifier(AServerProvider, name));
     }
+#endif
 
     // ------------------------------------------------------------- outcome classification
 
+#if (UsePostgreSql)
     /// <remarks>
     /// PostgreSQL only, and deliberately. <see cref="PostgresException"/> has a public constructor
     /// taking the fields the wire protocol carries, so the object under test here is the real type
@@ -248,13 +313,20 @@ public class LogDatabaseDdlTests
         Assert.False(LogDatabaseDdl.IsAlreadyExists(unrelated));
         Assert.False(LogDatabaseDdl.IsPermissionDenied(unrelated));
     }
+#endif
 
+#if (UseSqlServer || UsePostgreSql)
     [Fact]
     public void TheRequiredGrantIsNamedPerProvider()
     {
+#if (UsePostgreSql)
         Assert.Contains("CREATEDB", LogDatabaseDdl.RequiredGrant(DbProviderKeys.Npgsql));
+#endif
+#if (UseSqlServer)
         Assert.Contains("dbcreator", LogDatabaseDdl.RequiredGrant(DbProviderKeys.SqlServer));
+#endif
     }
+#endif
 
     // ------------------------------------------------------------- SQLite
 
@@ -263,8 +335,12 @@ public class LogDatabaseDdlTests
     {
         // Microsoft.Data.Sqlite creates the file on Open(). Measured in Pass 15, not assumed.
         Assert.False(LogDatabaseDdl.RequiresExplicitCreation(DbProviderKeys.SqLite));
+#if (UsePostgreSql)
         Assert.True(LogDatabaseDdl.RequiresExplicitCreation(DbProviderKeys.Npgsql));
+#endif
+#if (UseSqlServer)
         Assert.True(LogDatabaseDdl.RequiresExplicitCreation(DbProviderKeys.SqlServer));
+#endif
     }
 
     [Fact]
@@ -295,8 +371,12 @@ public class LogDatabaseDdlTests
     public void EnsureParentDirectoryIsANoOpForTheOtherProvidersAndForMemory()
     {
         // Called unconditionally by the startup check, so it has to be harmless everywhere.
+#if (UsePostgreSql)
         LogDatabaseDdl.EnsureParentDirectoryExists(DbProviderKeys.Npgsql, "Host=h;Database=d;Username=u");
+#endif
+#if (UseSqlServer)
         LogDatabaseDdl.EnsureParentDirectoryExists(DbProviderKeys.SqlServer, @"Server=h;Database=d;");
+#endif
         LogDatabaseDdl.EnsureParentDirectoryExists(DbProviderKeys.SqLite, "Data Source=:memory:");
     }
 
@@ -333,6 +413,7 @@ public class LogDatabaseDdlTests
         }
         return count;
     }
+#if (UsePostgreSql)
 
     /// <summary>
     /// A real <see cref="PostgresException"/> carrying a chosen SqlState. Its public constructor
@@ -340,4 +421,5 @@ public class LogDatabaseDdlTests
     /// </summary>
     private static PostgresException PostgresError(string sqlState) =>
         new(messageText: "probe", severity: "ERROR", invariantSeverity: "ERROR", sqlState: sqlState);
+#endif
 }

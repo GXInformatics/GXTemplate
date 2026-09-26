@@ -111,14 +111,22 @@ public class DatabaseSettingsValidationTests
 
         var failure = act.Should().Throw<OptionsValidationException>().Which.Failures.Single();
         failure.Should().Contain("'mysql' is not supported");
-        failure.Should().Contain(DbProviderKeys.SqLite)
-            .And.Contain(DbProviderKeys.SqlServer)
-            .And.Contain(DbProviderKeys.Npgsql);
+        failure.Should().Contain(DbProviderKeys.SqLite);
+#if (UseSqlServer)
+        failure.Should().Contain(DbProviderKeys.SqlServer);
+#endif
+#if (UsePostgreSql)
+        failure.Should().Contain(DbProviderKeys.Npgsql);
+#endif
     }
 
     [TestCase(DbProviderKeys.SqLite)]
+#if (UseSqlServer)
     [TestCase(DbProviderKeys.SqlServer)]
+#endif
+#if (UsePostgreSql)
     [TestCase(DbProviderKeys.Npgsql)]
+#endif
     public void EverySupportedProviderKey_Validates(string provider)
     {
         var options = BindOptions(new Dictionary<string, string?>
@@ -129,6 +137,30 @@ public class DatabaseSettingsValidationTests
 
         options.Value.DBProvider.Should().Be(provider);
     }
+#if (!UseSqlServer || !UsePostgreSql)
+
+    // A provider this project was not generated with has no packages, no migrator and no dispatch
+    // arm here, so it must be refused at startup rather than fail at first use.
+#if (!UseSqlServer)
+    [TestCase(DbProviderKeys.SqlServer)]
+#endif
+#if (!UsePostgreSql)
+    [TestCase(DbProviderKeys.Npgsql)]
+#endif
+    public void AProviderThisProjectWasNotGeneratedWith_FailsValidation(string provider)
+    {
+        var options = BindOptions(new Dictionary<string, string?>
+        {
+            ["DatabaseSettings:DBProvider"] = provider,
+            ["DatabaseSettings:ConnectionString"] = "Data Source=app.db"
+        });
+
+        var act = () => options.Value;
+
+        act.Should().Throw<OptionsValidationException>()
+            .Which.Failures.Single().Should().Contain($"'{provider}' is not supported");
+    }
+#endif
 
     [Test]
     public void TheProviderCheckIsCaseInsensitive_MatchingUseDatabase()
@@ -145,7 +177,7 @@ public class DatabaseSettingsValidationTests
     }
 
     [Test]
-    public void TheSupportedSetIsExactlyTheThreeProvidersUseDatabaseCanDispatch()
+    public void TheSupportedSetIsExactlyTheProvidersUseDatabaseCanDispatch()
     {
         // A hand-written list, deliberately. The validator now reads its set from the dispatch table
         // DependencyInjection.UseDatabase resolves an arm from, so a test that read that same table
@@ -154,7 +186,7 @@ public class DatabaseSettingsValidationTests
         // DbProviderKeys and all ten tests here stayed green, while "oracle" started passing
         // validation for a provider UseDatabase would have thrown on.
         //
-        // Naming the three here makes this the second, independent source. Adding or removing a
+        // Naming them here makes this the second, independent source. Adding or removing a
         // provider arm reddens it, and that is the prompt to check the two provider switches
         // validation does NOT see - UseExceptionProcessor, and SerilogExtensions' sink selection.
         var settings = new DatabaseSettings { ConnectionString = "x", DBProvider = "definitely-not-a-provider" };
@@ -166,9 +198,21 @@ public class DatabaseSettingsValidationTests
         var listed = message[(message.IndexOf(preamble, StringComparison.Ordinal) + preamble.Length)..]
             .Split(", ");
 
-        listed.Should().BeEquivalentTo(new[] { "postgresql", "mssql", "sqlite" },
+        // The providers this project was generated with: SQLite always, plus the chosen server.
+        var expected = new List<string>
+        {
+#if (UsePostgreSql)
+            "postgresql",
+#endif
+#if (UseSqlServer)
+            "mssql",
+#endif
+            "sqlite"
+        };
+
+        listed.Should().BeEquivalentTo(expected,
             "the validator accepts exactly the providers UseDatabase has an arm for, and this list " +
-            "is the only place that says which three those are without reading the same source");
+            "is the only place that says which those are without reading the same source");
     }
 }
 #nullable restore

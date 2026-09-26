@@ -1,9 +1,7 @@
 <Solution>
   <Folder Name="/Solution Items/">
-    <File Path=".dockerignore" />
     <File Path=".editorconfig" />
     <File Path=".gitignore" />
-    <File Path="Dockerfile" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Application/Application.csproj" />
@@ -12,8 +10,12 @@
     <Project Path="src/Server.UI/Server.UI.csproj" />
   </Folder>
   <Folder Name="/src/Migrators/">
+    <!--#if (UseSqlServer) -->
     <Project Path="src/Migrators/Migrators.MSSQL/Migrators.MSSQL.csproj" />
+    <!--#endif -->
+    <!--#if (UsePostgreSql) -->
     <Project Path="src/Migrators/Migrators.PostgreSQL/Migrators.PostgreSQL.csproj" />
+    <!--#endif -->
     <Project Path="src/Migrators/Migrators.SqLite/Migrators.SqLite.csproj" />
   </Folder>
   <Folder Name="/tests/">

@@ -32,11 +32,8 @@
 *.cmd       text eol=crlf
 *.ps1       text eol=crlf
 
-# Shell scripts and container files are consumed by Linux tooling; LF regardless of host.
+# Shell scripts are consumed by Linux tooling; LF regardless of host.
 *.sh        text eol=lf
-Dockerfile  text eol=lf
-.dockerignore text eol=lf
-*.dcproj    text
 
 # Binary. Never touched, never diffed as text.
 *.png       binary

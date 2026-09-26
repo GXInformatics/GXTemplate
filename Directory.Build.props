@@ -1,0 +1,17 @@
+<!--
+    TEMPLATE REPOSITORY ONLY. Excluded from every generated project (template.json "sources").
+
+    The C# sources carry template conditionals such as `#if (UseSqlServer)` around code that only
+    one database provider needs. `dotnet new` evaluates those against the Database option and strips
+    the directives, so a generated project never sees them. The template repository itself has to
+    build ALL providers - it is where every provider's migrations are generated and tested - so the
+    compiler is told here that every provider symbol is defined.
+
+    SQLite has no symbol: it ships in every generated project, because it is the database the test
+    harnesses run on (see "The wizard options" in the README).
+-->
+<Project>
+  <PropertyGroup>
+    <DefineConstants>$(DefineConstants);UseSqlServer;UsePostgreSql</DefineConstants>
+  </PropertyGroup>
+</Project>

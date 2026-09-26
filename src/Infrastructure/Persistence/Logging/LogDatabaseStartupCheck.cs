@@ -3,8 +3,12 @@
 
 using System.Data.Common;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
+#if (UseSqlServer)
 using Microsoft.Data.SqlClient;
+#endif
+#if (UsePostgreSql)
 using Npgsql;
+#endif
 using Microsoft.Extensions.Hosting;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
@@ -296,19 +300,27 @@ public static class LogDatabaseStartupCheck
     /// </remarks>
     private static bool ServerAnswered(Exception exception) => exception switch
     {
+#if (UsePostgreSql)
         PostgresException => true,
+#endif
+#if (UseSqlServer)
         SqlException sql => sql.Number is not (53 or 40 or -2 or 258),
+#endif
         _ => false
     };
 
     /// <summary>The login the connection authenticates as, for a message that has to name it.</summary>
     private static string LoginOf(DbConnection connection) => connection switch
     {
+#if (UsePostgreSql)
         NpgsqlConnection => new NpgsqlConnectionStringBuilder(connection.ConnectionString).Username
                             ?? "(integrated security)",
+#endif
+#if (UseSqlServer)
         SqlConnection => new SqlConnectionStringBuilder(connection.ConnectionString) is { IntegratedSecurity: false } b
                             ? b.UserID
                             : "(integrated security)",
+#endif
         _ => "(unknown)"
     };
 
