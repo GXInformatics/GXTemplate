@@ -116,6 +116,35 @@
       }
     },
 
+    "TestDatabaseProjectLower": {
+      "type": "generated",
+      "generator": "casing",
+      "parameters": {
+        "source": "name",
+        "toLower": true
+      }
+    },
+
+    "TestDatabaseProject": {
+      "type": "generated",
+      "generator": "regex",
+      "dataType": "string",
+      "replaces": "cleanarchitectureblazor",
+      "parameters": {
+        "source": "TestDatabaseProjectLower",
+        "steps": [
+          {
+            "regex": "[^a-z0-9_]",
+            "replacement": ""
+          },
+          {
+            "regex": "^(.{40}).+$",
+            "replacement": "$1"
+          }
+        ]
+      }
+    },
+
     "DefaultTimeZoneSetting": {
       "type": "generated",
       "generator": "join",

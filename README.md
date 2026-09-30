@@ -216,9 +216,10 @@ Two things worth knowing about `--Database`:
 
 - **Only the provider you choose is generated — plus SQLite.** The other server provider's
   migration project, EF Core and Serilog packages, provider code and provider-specific tests are
-  left out. SQLite is always included, whichever you choose, because it is the database both test
-  harnesses run on: `tests/Server.UI.IntegrationTests` boots the real application over a throwaway
-  SQLite database, and a great many unit tests use in-memory SQLite. `DatabaseSettings` validation
+  left out. SQLite is still included in `src/` whichever you choose, until the provider choice is
+  removed (the template is becoming PostgreSQL-only). Since pass 47 **no test uses it: the test
+  suites run on PostgreSQL only** (see "Running the tests"), so a project generated with `mssql` or
+  `sqlite` has no runnable test suite. `DatabaseSettings` validation
   accepts exactly the providers that were generated, so a PostgreSQL project configured with
   `mssql` fails at startup naming the value. Switching a generated project to the other server
   provider therefore means adding that provider back, not just changing configuration.
@@ -236,7 +237,8 @@ Two things worth knowing about `--Database`:
   `DatabaseSettings__LogConnectionString` overridden to match, because the design-time host builds
   the real service provider and a PostgreSQL connection string fails to parse as a SQLite one.
   Regenerate every provider in `src/Migrators/` together — your chosen one and SQLite — so the
-  chains stay in step; `ModelMatchesMigrationsTests` fails if one falls behind.
+  chains stay in step; `ModelMatchesMigrationsTests` fails if the PostgreSQL or SQL Server chain
+  falls behind. Since pass 47 it no longer checks the SQLite chain, which goes with the provider.
 
 `--DefaultTimeZone` and `--AllowSelfRegistration` are written as **configuration**, not compiled in.
 A generated project can change its mind about either without regenerating from the template.
@@ -1089,7 +1091,8 @@ src/
   Migrators/        one EF Core migration project per provider
 tests/
   Application.UnitTests/         handlers, pipeline, security, storage, configuration
-  Application.IntegrationTests/  handlers against a real database named by GX_TEST_* (skipped without)
+  Application.IntegrationTests/  handlers against PostgreSQL (GX_TEST_PG; fails without it)
+  TestSupport/                   the test databases: guard, create, migrate, reset
   Server.UI.IntegrationTests/    the real HTTP pipeline: cookie login, authorization matrices
   Infrastructure.UnitTests/      infrastructure services
 ```
@@ -1097,7 +1100,8 @@ tests/
 ### The HTTP integration harness
 
 `tests/Server.UI.IntegrationTests` boots the **real application** with
-`WebApplicationFactory<Program>` over a throwaway SQLite database and storage root, and drives a
+`WebApplicationFactory<Program>` over its own PostgreSQL databases (reset before each host boots)
+and a throwaway storage root, and drives a
 **real cookie sign-in**. It holds the authorization matrices that used to be re-measured by hand:
 which paths challenge an anonymous caller, which are deliberately anonymous, how `/files` responds
 to authorized, unauthorized and anonymous callers, and how the forced-password-change gate behaves.
@@ -1108,9 +1112,31 @@ If you add an endpoint, add its row. That file is the regression net for the sec
 
 ## Running the tests
 
+The database tests run on **PostgreSQL only**, against a server you name in one environment variable,
+`GX_TEST_PG`: host, port, username and password, and **no database**.
+
 ```
+GX_TEST_PG=Host=localhost;Port=5434;Username=postgres;Password=<your password>
 dotnet test
 ```
+
+- **Each test assembly uses its own database** on that server, named after the project:
+  `gx_test_<project>_unit`, `_unit_logs`, `_infra`, `_infra_logs`, `_appint`, `_ui` and `_ui_logs`
+  (`tests/TestSupport/TestDatabaseNames.cs`). Assemblies that `dotnet test` runs side by side can
+  therefore never empty each other's tables.
+- **Created when missing, never dropped.** Each database is migrated through the real migrations
+  once per run and emptied before every test (one `DELETE` batch, children first, plus a restart of
+  every sequence). If you regenerate a migration, the suite fails naming the stale migration and
+  printing the `psql` command that drops that database by hand; the next run recreates it.
+- **Only `gx_test_` databases.** `TestDatabaseGuard` refuses any other name before anything
+  connects, and `GX_TEST_PG` must not name a database at all.
+- **Without `GX_TEST_PG` the database tests FAIL**, with a message naming the variable. They are
+  never skipped and never fall back to another database: a run that reported them as skipped would
+  look green while proving nothing.
+
+Two tests create a database and a role of their own and drop them again. They run only when
+`GX_TEST_CREATE_DATABASES=1` is also set, and are reported as **skipped** otherwise. Set it only
+against a server where that is acceptable, such as CI's throwaway one.
 
 Twelve tests exercise the Azure Blob provider against the [Azurite](https://github.com/Azure/Azurite)
 emulator and are **skipped** — not failed — when it is not running. To include them:
@@ -1118,22 +1144,6 @@ emulator and are **skipped** — not failed — when it is not running. To inclu
 ```
 npx azurite --silent --location <a temp dir>
 ```
-
-`tests/Application.IntegrationTests` runs handlers through the real container against a real
-PostgreSQL or SQL Server database, and has **no default database**. Without the variables below its
-tests are reported as **skipped**, with a message naming them. Set them to run it:
-
-```
-GX_TEST_DBPROVIDER=postgresql
-GX_TEST_CONNECTIONSTRING=Host=localhost;Port=5432;Database=ims_tests;Username=postgres;Password=...
-GX_TEST_LOGCONNECTIONSTRING=Host=localhost;Port=5432;Database=ims_tests_logs;Username=postgres;Password=...
-```
-
-**Point them at a throwaway database.** That suite empties every table before each test. The same
-three variables point `tests/Server.UI.IntegrationTests` at that server instead of its default
-throwaway SQLite files. `GX_TEST_DBPROVIDER` takes the server provider you generated; that suite
-cannot run on SQLite, because Respawn, which resets the database between tests, has no SQLite
-adapter.
 
 ---
 

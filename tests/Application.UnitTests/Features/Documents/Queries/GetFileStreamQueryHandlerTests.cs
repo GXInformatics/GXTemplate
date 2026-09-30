@@ -16,7 +16,7 @@ using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using NUnit.Framework;
@@ -35,7 +35,7 @@ public class GetFileStreamQueryHandlerTests
     private const string UserA = "user-a";
     private const string UserB = "user-b";
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
     private ApplicationDbContext _db = null!;
     private string _fileRoot = null!;
     private IFileStorage _fileStorage = null!;
@@ -46,14 +46,14 @@ public class GetFileStreamQueryHandlerTests
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(_connection)
+            .UseNpgsql(_connection)
             .Options;
         _db = new ApplicationDbContext(options);
-        await _db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
 
         // The handler no longer touches the filesystem itself - it reads through IFileStorage. The
         // real disk provider is used here, rooted at a throwaway directory, so these tests exercise
@@ -104,12 +104,12 @@ public class GetFileStreamQueryHandlerTests
     }
 
     private ApplicationDbContext NewContext() =>
-        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options);
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options);
 
     private GetFileStreamQueryHandler CreateHandler(UserContext? ambientUser)
     {
         // The handler owns and disposes the context it is handed, so every call gets a fresh one over
-        // the same open SQLite connection (and therefore the same in-memory database).
+        // the same open connection to the shared test database.
         var factory = new Mock<IApplicationDbContextFactory>();
         factory.Setup(x => x.CreateAsync(It.IsAny<CancellationToken>()))
             .Returns(() => new ValueTask<IApplicationDbContext>(NewContext()));

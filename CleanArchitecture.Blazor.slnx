@@ -23,5 +23,6 @@
     <Project Path="tests/Application.UnitTests/Application.UnitTests.csproj" />
     <Project Path="tests/Server.UI.IntegrationTests/Server.UI.IntegrationTests.csproj" />
     <Project Path="tests/Infrastructure.UnitTests/Infrastructure.UnitTests.csproj" />
+    <Project Path="tests/TestSupport/TestSupport.csproj" />
   </Folder>
 </Solution>

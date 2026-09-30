@@ -6,7 +6,7 @@ using CleanArchitecture.Blazor.Application.Features.PicklistSets.Caching;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 using ZiggyCreatures.Caching.Fusion;
@@ -40,12 +40,13 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Services;
 /// sharing assertion is what would fail if it did.
 /// </para>
 /// </remarks>
+[Collection(PostgresCollection.Name)]
 public class PicklistDataSourceScopeTests : IDisposable
 {
     private const string TenantA = "tenant-a";
     private const string TenantB = "tenant-b";
 
-    private readonly SqliteConnection _connection;
+    private readonly NpgsqlConnection _connection;
     private readonly DbContextOptions<ApplicationDbContext> _options;
     private readonly IFusionCache _cache = new FusionCache(new FusionCacheOptions());
 
@@ -77,13 +78,13 @@ public class PicklistDataSourceScopeTests : IDisposable
 
     public PicklistDataSourceScopeTests()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = InfraTestDatabase.NewConnection();
         _connection.Open();
-        _options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
+        _options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options;
 
         // Seeded with no ambient principal, which is the only way to write a shared row.
         using var db = new ApplicationDbContext(_options, userContextAccessor: null);
-        db.Database.EnsureCreated();
+        InfraTestDatabase.Reset();
         db.PicklistSets.AddRange(
             Row(1, "shipped", null),
             Row(2, "a-only", TenantA),

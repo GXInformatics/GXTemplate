@@ -6,7 +6,7 @@ using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 
@@ -44,7 +44,7 @@ public class PicklistTenantUniquenessTests
     private const string TenantA = "tenant-a";
     private const string TenantB = "tenant-b";
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
     private DbContextOptions<ApplicationDbContext> _options = null!;
 
     private sealed class Ambient : IUserContextAccessor
@@ -60,12 +60,12 @@ public class PicklistTenantUniquenessTests
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
-        _options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
+        _options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options;
 
         await using var db = Context(null);
-        await db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
     }
 
     [TearDown]
@@ -125,14 +125,11 @@ public class PicklistTenantUniquenessTests
         // it, which is worth more than the assertion itself.
         //
         // The gap: (TenantId, Name, Value) constrains each TENANT's rows and cannot constrain the
-        // shared ones, whose key is a NULL. SQLite and PostgreSQL treat NULLs as distinct in a
-        // unique index. SQL Server was believed to be the exception and is not - EF emits its own
-        // ([TenantId] IS NOT NULL AND [Value] IS NOT NULL) filter there, so shared rows were never
-        // in that index either. All three providers, not two.
+        // shared ones, whose key is a NULL: PostgreSQL treats NULLs as distinct in a unique index.
         //
         // Closed by a second, PARTIAL unique index over (Name, Value) WHERE "TenantId" IS NULL - one
-        // filter string that all three accept. This test runs on SQLite, which was one of the
-        // unprotected providers.
+        // filter string that every provider accepts. This test runs on PostgreSQL, migrated, so it
+        // checks the index the migration actually creates.
         await using var db = Context(null);
         db.PicklistSets.AddRange(Row(null), Row(null));
 

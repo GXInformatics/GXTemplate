@@ -17,7 +17,7 @@ using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using NUnit.Framework;
@@ -58,7 +58,7 @@ public class SharedPicklistCreationTests
     private const string Holder = "user-holder";
     private const string NonHolder = "user-non-holder";
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
 
     private sealed class Ambient : IUserContextAccessor
     {
@@ -95,10 +95,10 @@ public class SharedPicklistCreationTests
 
     private sealed class Factory : IApplicationDbContextFactory
     {
-        private readonly SqliteConnection _connection;
+        private readonly NpgsqlConnection _connection;
         private readonly IUserContextAccessor _accessor;
 
-        public Factory(SqliteConnection connection, IUserContextAccessor accessor)
+        public Factory(NpgsqlConnection connection, IUserContextAccessor accessor)
         {
             _connection = connection;
             _accessor = accessor;
@@ -107,13 +107,13 @@ public class SharedPicklistCreationTests
         public ValueTask<IApplicationDbContext> CreateAsync(CancellationToken ct = default) =>
             new(Build(_connection, _accessor));
 
-        public static ApplicationDbContext Build(SqliteConnection connection, IUserContextAccessor accessor)
+        public static ApplicationDbContext Build(NpgsqlConnection connection, IUserContextAccessor accessor)
         {
             var dateTime = new Mock<IDateTime>();
             dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 9, 5, 12, 0, 0, DateTimeKind.Utc));
 
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-                .UseSqlite(connection)
+                .UseNpgsql(connection)
                 .AddInterceptors(new AuditableEntityInterceptor(accessor, dateTime.Object))
                 .Options;
 
@@ -126,11 +126,11 @@ public class SharedPicklistCreationTests
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
         await using var db = Factory.Build(_connection, NoPrincipal);
-        await db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
 
         // Pass 32 A5: the interceptor's audit row has a real FK to AspNetUsers, so without these
         // every SUCCESSFUL write here fails on the constraint and only the refusals pass - a

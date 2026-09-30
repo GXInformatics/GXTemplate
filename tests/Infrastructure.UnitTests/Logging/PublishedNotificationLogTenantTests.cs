@@ -1,11 +1,8 @@
-using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Application.Common.PublishStrategies;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
-using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using Mediator;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Serilog;
 using Serilog.Events;
@@ -14,8 +11,8 @@ using Xunit;
 namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
 
 /// <summary>
-/// A log row written by a NOTIFICATION HANDLER carries the tenant of the scope that published the
-/// notification - sampled from a real log database, not reasoned from call sites.
+/// A log event written by a NOTIFICATION HANDLER carries the tenant of the scope that published the
+/// notification, not the tenant the publisher happened to be constructed in.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,41 +23,15 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
 /// <c>IUserContextAccessor.Current?.TenantId</c>, so the fix and the log row are one question.
 /// </para>
 /// <para>
-/// <b>Why the assertion is on <c>Properties</c> rather than the <c>TenantId</c> column.</b> Pass 34
-/// established that the SQLite sink is a third-party package with a fixed INSERT and cannot write
-/// that column at all - it is permanently null on this provider. It does write <c>Properties</c>,
-/// and the enriched <c>TenantId</c> appears there as JSON, which is exactly what Pass 34 sampled
-/// (<c>"TenantId":null</c> on every row it captured). So this asserts the same value from the same
-/// real database, through the one column this provider can carry it in.
-/// </para>
-/// <para>
-/// A run against SQL Server or PostgreSQL would populate the dedicated column too, but neither can
-/// produce a tenanted notification row without a live Blazor circuit - the ambient context exists
-/// only inside a hub invocation (Pass 34 §2.4) - which is why the publisher is driven directly here.
+/// <b>Asserted on the enriched event, with no database</b> (pass 47). This used to write through the
+/// file-database sink and read the <c>Properties</c> JSON, because that sink cannot write the tenant column.
+/// What is under test is which tenant the publisher and enricher attach, and a database cannot change
+/// that. That the PostgreSQL sink then writes the property into <c>tenant_id</c> is asserted
+/// end to end by <c>LogTablePostgresTests</c>.
 /// </para>
 /// </remarks>
-[Collection(SqliteFileCollection.Name)]
-public class PublishedNotificationLogTenantTests : IDisposable
+public class PublishedNotificationLogTenantTests
 {
-    private readonly string _directory =
-        Path.Combine(Path.GetTempPath(), "gx-publisher-log-tests", Guid.NewGuid().ToString("N"));
-
-    private string DatabasePath => Path.Combine(_directory, "logs.db");
-
-    public PublishedNotificationLogTenantTests() => Directory.CreateDirectory(_directory);
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
-        }
-        catch (IOException)
-        {
-            // A sink thread may still hold the file; the temp directory is disposable either way.
-        }
-    }
-
     private sealed record Ping : INotification;
 
     /// <summary>Logs from inside the handler, exactly as the six shipped handlers do.</summary>
@@ -78,53 +49,21 @@ public class PublishedNotificationLogTenantTests : IDisposable
         }
     }
 
-    private void CreateTable()
+    /// <summary>Captures the enriched events rather than writing them anywhere.</summary>
+    private sealed class CapturingSink : Serilog.Core.ILogEventSink
     {
-        using var connection = new SqliteConnection($"Data Source={DatabasePath}");
-        connection.Open();
-        foreach (var statement in LogTableDdl.Statements(DbProviderKeys.SqLite))
-        {
-            using var command = connection.CreateCommand();
-            command.CommandText = statement;
-            command.ExecuteNonQuery();
-        }
-    }
-
-    private int CountRows()
-    {
-        if (!File.Exists(DatabasePath)) return 0;
-        using var connection = new SqliteConnection($"Data Source={DatabasePath}");
-        connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM SystemLogs";
-        try { return Convert.ToInt32(command.ExecuteScalar()); }
-        catch (SqliteException) { return 0; }
-    }
-
-    private string ReadProperties()
-    {
-        using var connection = new SqliteConnection($"Data Source={DatabasePath}");
-        connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Properties FROM SystemLogs LIMIT 1";
-        return command.ExecuteScalar() as string ?? string.Empty;
+        public List<LogEvent> Events { get; } = [];
+        public void Emit(LogEvent logEvent) { lock (Events) Events.Add(logEvent); }
     }
 
     [Fact]
-    public async Task ARowWrittenByAHandlerCarriesThePublishingTenant_NotTheConstructingOne()
+    public async Task AnEventWrittenByAHandlerCarriesThePublishingTenant_NotTheConstructingOne()
     {
-        CreateTable();
-
+        var capture = new CapturingSink();
         var logger = new LoggerConfiguration()
             .MinimumLevel.Verbose()
             .Enrich.WithUserInfo()
-            .WriteTo.SQLite(
-                DatabasePath,
-                "SystemLogs",
-                LogEventLevel.Information,
-                storeTimestampInUtc: true,
-                batchSize: 1,
-                needAutoCreateTable: false)
+            .WriteTo.Sink(capture)
             .CreateLogger();
 
         IUserContextAccessor accessor = new UserContextAccessor();
@@ -148,18 +87,10 @@ public class PublishedNotificationLogTenantTests : IDisposable
 
         await handler.Logged.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await publisher.DisposeAsync();
-
-        for (var attempt = 0; attempt < 100 && CountRows() == 0; attempt++)
-        {
-            await Task.Delay(100);
-        }
-
         logger.Dispose();
 
-        Assert.Equal(1, CountRows());
-
-        var properties = ReadProperties();
-        Assert.Contains("\"TenantId\":\"tenant-B\"", properties);
-        Assert.DoesNotContain("tenant-A", properties);
+        var logEvent = Assert.Single(capture.Events);
+        var tenant = Assert.IsType<ScalarValue>(logEvent.Properties["TenantId"]);
+        Assert.Equal("tenant-B", tenant.Value);
     }
 }

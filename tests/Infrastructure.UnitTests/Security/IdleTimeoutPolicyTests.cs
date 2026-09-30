@@ -8,7 +8,7 @@ using CleanArchitecture.Blazor.Infrastructure.Services.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -17,8 +17,8 @@ using ZiggyCreatures.Caching.Fusion;
 namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Security;
 
 /// <summary>
-/// A context factory over one open in-memory SQLite connection, so every context sees the same
-/// database for the life of a test.
+/// A context factory over one open connection to the shared <c>gx_test_&lt;project&gt;_infra</c> database, reset
+/// before each test.
 /// </summary>
 internal sealed class TestDbContextFactory(DbContextOptions<ApplicationDbContext> options)
     : IDbContextFactory<ApplicationDbContext>
@@ -36,21 +36,19 @@ internal sealed class TestDbContextFactory(DbContextOptions<ApplicationDbContext
 /// would simply set it to eight hours and the control would be gone. These tests pin the asymmetry
 /// in the place that enforces it - read time - rather than only in the screen that offers it.
 /// </remarks>
+[Collection(PostgresCollection.Name)]
 public class IdleTimeoutPolicyProviderTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
+    private readonly NpgsqlConnection _connection;
     private readonly TestDbContextFactory _factory;
 
     public IdleTimeoutPolicyProviderTests()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = InfraTestDatabase.NewConnection();
         _connection.Open();
 
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
-        using (var db = new ApplicationDbContext(options))
-        {
-            db.Database.EnsureCreated();
-        }
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options;
+        InfraTestDatabase.Reset();
 
         _factory = new TestDbContextFactory(options);
     }

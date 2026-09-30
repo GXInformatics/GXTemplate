@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Shared test-database support for every test assembly (pass 47, ported from GX ProjectTracking
+         pass 4b). A plain class library: it references no test framework, so NUnit and xUnit projects
+         can both use it, and it reports problems by throwing, which each framework turns into a failure. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <RootNamespace>CleanArchitecture.Blazor.TestSupport</RootNamespace>
+        <AssemblyName>CleanArchitecture.Blazor.TestSupport</AssemblyName>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>false</IsTestProject>
+        <LangVersion>default</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Infrastructure\Infrastructure.csproj" />
+        <!-- Resolved by name at migration time, exactly as the application resolves it. -->
+        <ProjectReference Include="..\..\src\Migrators\Migrators.PostgreSQL\Migrators.PostgreSQL.csproj" />
+    </ItemGroup>
+
+</Project>

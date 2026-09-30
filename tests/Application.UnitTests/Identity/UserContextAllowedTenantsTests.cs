@@ -9,7 +9,7 @@ using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -43,18 +43,18 @@ public class UserContextAllowedTenantsTests
     private const string TenantB = "tenant-b";
     private const string TenantC = "tenant-c";
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
     private ServiceProvider _provider = null!;
 
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<ApplicationDbContext>(o => o.UseNpgsql(_connection));
         services.AddIdentityCore<ApplicationUser>()
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>();
@@ -62,7 +62,7 @@ public class UserContextAllowedTenantsTests
 
         using var scope = _provider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
         db.Tenants.Add(new Tenant { Id = TenantA, Name = "Tenant A" });
         db.Tenants.Add(new Tenant { Id = TenantB, Name = "Tenant B" });
         db.Tenants.Add(new Tenant { Id = TenantC, Name = "Tenant C" });

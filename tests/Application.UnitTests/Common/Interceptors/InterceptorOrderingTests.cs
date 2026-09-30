@@ -16,7 +16,7 @@ using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
 using FluentAssertions;
 using Mediator;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
@@ -45,8 +45,9 @@ public class InterceptorOrderingTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DatabaseSettings:DBProvider"] = "sqlite",
-                ["DatabaseSettings:ConnectionString"] = "Data Source=:memory:"
+                // PostgreSQL (pass 47). Registration only: nothing opens this.
+                ["DatabaseSettings:DBProvider"] = "postgresql",
+                ["DatabaseSettings:ConnectionString"] = "Host=none;Database=none"
             })
             .Build();
 
@@ -72,7 +73,7 @@ public class InterceptorOrderingTests
         // own, which throws once the audit interceptor is holding one ("The connection is already in
         // a transaction and cannot participate in another"). Deleting an entity that carries a domain
         // event is what drives the dispatch interceptor's SavingChanges branch.
-        var connection = new SqliteConnection("Data Source=:memory:");
+        var connection = UnitTestDatabase.NewConnection();
         await connection.OpenAsync();
 
         var userContext = new Mock<IUserContextAccessor>();
@@ -84,14 +85,14 @@ public class InterceptorOrderingTests
             .Returns(ValueTask.CompletedTask);
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(connection)
+            .UseNpgsql(connection)
             .AddInterceptors(
                 new AuditableEntityInterceptor(userContext.Object, dateTime.Object),
                 new DispatchDomainEventsInterceptor(mediator.Object))
             .Options;
 
         await using var context = new ApplicationDbContext(options);
-        await context.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
         context.Users.Add(new ApplicationUser
         {
             Id = "ordering-user", UserName = "orderer", Email = "orderer@example.com"

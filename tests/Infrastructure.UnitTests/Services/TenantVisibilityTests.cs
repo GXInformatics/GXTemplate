@@ -5,7 +5,7 @@ using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services.MultiTenant;
 using Mapster;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using Xunit;
@@ -28,21 +28,22 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Services;
 /// than visibility. Deliberately untouched by Pass 27.
 /// </para>
 /// </remarks>
+[Collection(PostgresCollection.Name)]
 public class TenantVisibilityTests : IDisposable
 {
     private const string TenantA = "tenant-a";
     private const string TenantB = "tenant-b";
     private const string TenantC = "tenant-c";
 
-    private readonly SqliteConnection _connection;
+    private readonly NpgsqlConnection _connection;
 
     public TenantVisibilityTests()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = InfraTestDatabase.NewConnection();
         _connection.Open();
 
         using var db = NewContext();
-        db.Database.EnsureCreated();
+        InfraTestDatabase.Reset();
         db.Tenants.Add(new Tenant { Id = TenantA, Name = "A Tenant" });
         db.Tenants.Add(new Tenant { Id = TenantB, Name = "B Tenant" });
         db.Tenants.Add(new Tenant { Id = TenantC, Name = "C Tenant" });
@@ -56,7 +57,7 @@ public class TenantVisibilityTests : IDisposable
     }
 
     private ApplicationDbContext NewContext() =>
-        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options);
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options);
 
     /// <param name="allowed">null means "no ambient principal at all".</param>
     private TenantDataSourceService CreateService(string[]? allowed, bool viewAllTenants = false)

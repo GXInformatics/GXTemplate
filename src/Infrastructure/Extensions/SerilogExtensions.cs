@@ -33,8 +33,12 @@ public static class SerilogExtensions
     public static void RegisterSerilog(this WebApplicationBuilder builder)
     {
         Serilog.Debugging.SelfLog.Enable(msg => Console.WriteLine(msg));
-        builder.Host.UseSerilog((context, configuration) =>
+        // ReadFrom.Services adds any ILogEventSink registered in DI. The application registers none;
+        // it is how a test observes every event a real boot emits through this pipeline (pass 47,
+        // CO-161: SerilogPipelineCaptureTests).
+        builder.Host.UseSerilog((context, services, configuration) =>
             configuration.ReadFrom.Configuration(context.Configuration)
+                .ReadFrom.Services(services)
                 .MinimumLevel.Override("Microsoft", LogEventLevel.Error)
                 .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Error)
                 .MinimumLevel.Override("MudBlazor", LogEventLevel.Information)

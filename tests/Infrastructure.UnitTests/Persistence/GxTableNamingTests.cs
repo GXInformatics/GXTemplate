@@ -1,6 +1,8 @@
 using CleanArchitecture.Blazor.Domain.Common.Entities;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Domain.Identity;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Extensions;
 using Microsoft.EntityFrameworkCore;
@@ -88,7 +90,7 @@ public class GxTableNamingTests
 {
     // The provider only has to be enough to build a model; nothing here opens a connection.
     private static SampleContext Sample(int applyCount = 1) =>
-        new(new DbContextOptionsBuilder<SampleContext>().UseSqlite("Data Source=:memory:").Options)
+        new(new DbContextOptionsBuilder<SampleContext>().UseNpgsql("Host=none").Options)
         { ApplyCount = applyCount };
 
     private static (string? Table, string? Schema) Mapping<T>(DbContext db)
@@ -180,15 +182,21 @@ public class GxTableNamingTests
 /// </remarks>
 public class TemplateTablesStayOutOfCoreTests
 {
-#if (UsePostgreSql)
-    private static ApplicationDbContext BusinessContext(bool postgres = false) =>
-        new(postgres
-            ? new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql("Host=none;Database=none;").Options
-            : new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite("Data Source=:memory:").Options);
-#else
+    // PostgreSQL only (pass 47). The provider only has to build a model; nothing opens a connection.
     private static ApplicationDbContext BusinessContext() =>
-        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite("Data Source=:memory:").Options);
-#endif
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql("Host=none").Options);
+
+    /// <summary>
+    /// Every entity type the template itself ships. Listed, not derived: a generated project's model
+    /// adds its own types, and those belong in core.
+    /// </summary>
+    private static readonly Type[] TemplateEntityTypes =
+    [
+        typeof(ApplicationUser), typeof(ApplicationRole), typeof(ApplicationUserClaim), typeof(ApplicationRoleClaim),
+        typeof(ApplicationUserLogin), typeof(ApplicationUserRole), typeof(ApplicationUserToken),
+        typeof(IdentityUserPasskey<string>), typeof(Tenant), typeof(TenantUser), typeof(AuditTrail), typeof(Document),
+        typeof(PicklistSet), typeof(SecurityPolicy), typeof(DataProtectionKey)
+    ];
 
     [Theory]
     [InlineData(typeof(ApplicationUser), "AspNetUsers")]
@@ -214,20 +222,35 @@ public class TemplateTablesStayOutOfCoreTests
     [Fact]
     public void NoTemplateEntity_IsMappedIntoTheCoreSchema()
     {
-        // The template ships no business models of its own, so core stays empty until a project adds
-        // one. HasDefaultSchema("core") - the wrong way to do this - fails here by sweeping Identity
-        // in with everything else.
+        // Core holds the project's own business models and nothing of the template's.
+        // HasDefaultSchema("core") - the wrong way to do this - fails here by sweeping Identity in
+        // with everything else. (Before pass 47 this asserted that core was EMPTY, which every
+        // generated project failed on its first table: CO-166.)
         using var db = BusinessContext();
 
-        var inCore = db.Model.GetEntityTypes()
-            .Where(e => e.GetSchema() == GxNamingConventions.BusinessSchema)
+        var templateTypesInCore = db.Model.GetEntityTypes()
+            .Where(e => e.GetSchema() == GxNamingConventions.BusinessSchema && TemplateEntityTypes.Contains(e.ClrType))
             .Select(e => e.ClrType.Name)
             .ToArray();
 
-        Assert.Empty(inCore);
+        Assert.Empty(templateTypesInCore);
     }
 
-#if (UsePostgreSql)
+    [Fact]
+    public void EveryTableOutsideCore_IsOneOfTheTemplates()
+    {
+        // The other direction, and what keeps the list above honest: a project's own table belongs in
+        // core, and a table the template adds must be listed there, or this names it.
+        using var db = BusinessContext();
+
+        var unlisted = db.Model.GetEntityTypes()
+            .Where(e => e.GetSchema() != GxNamingConventions.BusinessSchema && !TemplateEntityTypes.Contains(e.ClrType))
+            .Select(e => e.ClrType.Name)
+            .ToArray();
+
+        Assert.Empty(unlisted);
+    }
+
     [Fact]
     public void OnPostgres_TheBusinessModelIsNotSnakeCased()
     {
@@ -236,7 +259,7 @@ public class TemplateTablesStayOutOfCoreTests
         // product_version columns, and the day the plugin is removed EF queries "MigrationId" and
         // fails with 42703, leaving a database that can be neither migrated forward nor inspected.
         // This test is cheap; recovering from that means hand-editing EF's bookkeeping table.
-        using var db = BusinessContext(postgres: true);
+        using var db = BusinessContext();
 
         var snakeCased = db.Model.GetEntityTypes()
             .SelectMany(e => e.GetProperties()
@@ -248,5 +271,4 @@ public class TemplateTablesStayOutOfCoreTests
 
         Assert.Empty(snakeCased);
     }
-#endif
 }

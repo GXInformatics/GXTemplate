@@ -3,7 +3,6 @@ using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
-using Microsoft.Data.Sqlite;
 using Serilog;
 using Serilog.Events;
 #if (UsePostgreSql)
@@ -40,31 +39,9 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Logging;
 /// holds it true.
 /// </para>
 /// </remarks>
-[Collection(SqliteFileCollection.Name)]
-public class LogTenantStampingTests : IDisposable
+public class LogTenantStampingTests
 {
     private const string TenantId = "tenant-from-context";
-
-    private readonly string _directory =
-        Path.Combine(Path.GetTempPath(), "gx-log-tenant-tests", Guid.NewGuid().ToString("N"));
-
-    private string DatabasePath => Path.Combine(_directory, "logs.db");
-
-    public LogTenantStampingTests() => Directory.CreateDirectory(_directory);
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
-        }
-        catch (IOException)
-        {
-            // A file the sink still holds is not a test failure.
-        }
-
-        GC.SuppressFinalize(this);
-    }
 
 #if (UseSqlServer || UsePostgreSql)
     // ------------------------------------------------------- configuration, the two server providers
@@ -103,125 +80,9 @@ public class LogTenantStampingTests : IDisposable
 #endif
 
 #endif
-    // ------------------------------------------------------- SQLite, end to end
-
-    /// <summary>
-    /// Writes one event through the real sink into the real DDL, optionally inside an ambient user
-    /// context, and waits for the batch to land.
-    /// </summary>
-    /// <remarks>
-    /// Mirrors <c>SinkTimestampTests.WriteOneEventAsync</c>, including <c>batchSize: 1</c> - the
-    /// sink flushes when the batch fills or when its own timer fires, and waiting on the timer is
-    /// what once took this assembly from 4s to 21s - and including disposing the logger only AFTER
-    /// the row has landed, because Dispose halts the background batching thread and can beat the
-    /// event into the queue.
-    /// </remarks>
-    private async Task WriteOneEventAsync(string? tenantId)
-    {
-        using (var connection = new SqliteConnection($"Data Source={DatabasePath}"))
-        {
-            connection.Open();
-            foreach (var statement in LogTableDdl.Statements(DbProviderKeys.SqLite))
-            {
-                using var command = connection.CreateCommand();
-                command.CommandText = statement;
-                command.ExecuteNonQuery();
-            }
-        }
-
-        var logger = new LoggerConfiguration()
-            .MinimumLevel.Verbose()
-            .Enrich.WithUserInfo()
-            .WriteTo.SQLite(
-                DatabasePath,
-                "SystemLogs",
-                LogEventLevel.Information,
-                storeTimestampInUtc: true,
-                batchSize: 1,
-                needAutoCreateTable: false)
-            .CreateLogger();
-
-        // The accessor is constructed here, and a DIFFERENT one is constructed inside the enricher.
-        // That they agree is the point: the ambient value belongs to the call chain, not to either
-        // object. There is no HTTP request anywhere in this test.
-        IUserContextAccessor accessor = new UserContextAccessor();
-        using (tenantId is null
-                   ? null
-                   : accessor.Push(new UserContext("log-user", "logger", TenantId: tenantId)))
-        {
-            logger.Information("a probe row");
-        }
-
-        for (var attempt = 0; attempt < 100 && CountRows() == 0; attempt++)
-            await Task.Delay(100);
-
-        logger.Dispose();
-    }
-
-    private int CountRows()
-    {
-        if (!File.Exists(DatabasePath)) return 0;
-        using var connection = new SqliteConnection($"Data Source={DatabasePath}");
-        connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM SystemLogs";
-        try
-        {
-            return Convert.ToInt32(command.ExecuteScalar());
-        }
-        catch (SqliteException)
-        {
-            return 0;
-        }
-    }
-
-    private string? ReadTenant()
-    {
-        using var connection = new SqliteConnection($"Data Source={DatabasePath}");
-        connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT TenantId FROM SystemLogs LIMIT 1";
-        var value = command.ExecuteScalar();
-        return value is null or DBNull ? null : (string)value;
-    }
-
-    [Fact]
-    public async Task OnSqlite_TheRowLands_ButTheTenantColumnStaysNull_BecauseThatSinkCannotWriteIt()
-    {
-        // Measured, not assumed, and it is the reason SinkColumnDriftTests now names the SQLite
-        // sink's columns literally instead of defining them as "whatever the entity has".
-        //
-        // Blazor.Serilog.Sinks.SQLite writes a FIXED statement -
-        //   VALUES (@timeStamp, @level, @exception, @message, @properties, @messageTemplate,
-        //           @logEvent, @userName, @clientIP, @clientAgent)
-        // - with no AdditionalColumns and no writer dictionary. Unlike the SQL Server and PostgreSQL
-        // sinks, its column set is not configurable, so a new column cannot be given to it.
-        //
-        // The column still exists in the SQLite DDL, and it has to: EF reads SystemLog.TenantId on
-        // every provider, and a missing column would fail the read outright rather than return null.
-        // So on SQLite the value is permanently null - which is a real limitation, stated here and
-        // in the README rather than left for somebody to find in an empty column.
-        //
-        // SQLite is the no-server development and test provider. The two providers a GX installation
-        // runs on both record the tenant, which is asserted above against each sink's own
-        // configuration.
-        await WriteOneEventAsync(TenantId);
-
-        Assert.Equal(1, CountRows());
-        Assert.Null(ReadTenant());
-    }
-
-    [Fact]
-    public async Task OnSqlite_AnEventWithNoAmbientContext_AlsoLands()
-    {
-        // The startup case. Nothing here can distinguish it from the case above on this provider -
-        // that is the point of the test above - but the row landing at all is worth asserting: an
-        // added column that the sink does not know about must not break the INSERT it does issue.
-        await WriteOneEventAsync(tenantId: null);
-
-        Assert.Equal(1, CountRows());
-        Assert.Null(ReadTenant());
-    }
+    // End to end - the real PostgreSQL sink writing tenant_id into the real table, and NULL outside a
+    // context - is LogTablePostgresTests.TheSinkWritesTheAmbientTenant_IntoTenantId (pass 47, CO-157).
+    // It replaces the SQLite round trips that were here, which could only show the column staying NULL.
 
     // ------------------------------------------------------- the enricher, provider-independent
 

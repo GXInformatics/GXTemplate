@@ -25,7 +25,6 @@ using FluentAssertions;
 using Mapster;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -47,7 +46,7 @@ namespace CleanArchitecture.Blazor.Server.UI.IntegrationTests;
 /// An HTTP test cannot see this. The app renders at
 /// <c>InteractiveServerRenderMode(prerender: false)</c>, so a response carries the shell and none of
 /// the grid; the same reason Pass 16A's empty Security tab shipped green. This renders the real page
-/// against a real <c>UserManager</c> over SQLite and inspects the cell that is actually produced.
+/// against a real <c>UserManager</c> over PostgreSQL and inspects the cell that is actually produced.
 /// </para>
 /// <para>
 /// <b>The status is still SHOWN without the permission</b> - seeing whether an account is active is
@@ -61,20 +60,17 @@ public class UserDeactivationPermissionComponentTests
     private const string TenantId = "tenant-a";
 
     private BunitContext _ctx = null!;
-    private SqliteConnection _connection = null!;
 
     [TearDown]
     public async Task TearDown()
     {
         await _ctx.DisposeAsync();
-        await _connection.DisposeAsync();
     }
 
     /// <summary>Boots the page with a principal holding exactly the access rights given.</summary>
     private async Task ArrangeAsync(bool canDeactivate)
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
-        await _connection.OpenAsync();
+        UiTestDatabase.Reset();
 
         _ctx = new BunitContext();
         _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
@@ -93,11 +89,10 @@ public class UserDeactivationPermissionComponentTests
         //
         // Real, not stubbed: the grid's ServerData calls UserManager.Users, so a stub would render
         // no rows and these tests would pass without ever drawing the cell under test.
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<ApplicationDbContext>(o => o.UseNpgsql(UiTestDatabase.Business.ConnectionString));
         services.AddIdentityCore<ApplicationUser>()
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>();
-        services.AddSingleton(_connection);
         services.AddScoped<IApplicationDbContextFactory, TestDbContextFactory>();
         services.AddScoped<PermissionAssignmentService>();
         services.AddScoped<AdministratorProtectionService>();
@@ -148,7 +143,6 @@ public class UserDeactivationPermissionComponentTests
         // registered.
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.EnsureCreatedAsync();
         db.Tenants.Add(new Tenant { Id = TenantId, Name = "Tenant A" });
         db.Users.Add(new ApplicationUser
         {
@@ -167,15 +161,12 @@ public class UserDeactivationPermissionComponentTests
         return mock.Object;
     }
 
-    /// <summary>Creates contexts over the one open in-memory connection.</summary>
+    /// <summary>Creates contexts on the shared business database.</summary>
     private sealed class TestDbContextFactory : IApplicationDbContextFactory
     {
-        private readonly SqliteConnection _connection;
-        public TestDbContextFactory(SqliteConnection connection) => _connection = connection;
-
         public ValueTask<IApplicationDbContext> CreateAsync(CancellationToken ct = default) =>
             new(new ApplicationDbContext(
-                new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options));
+                new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(UiTestDatabase.Business.ConnectionString).Options));
     }
 
 

@@ -8,7 +8,7 @@ using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using NUnit.Framework;
@@ -51,7 +51,7 @@ public class PicklistSetTenantFilterTests
     private const int TenantABrand = 4;
     private const int TenantBStatus = 5;
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
 
     /// <summary>An ambient principal in one tenant, or none at all.</summary>
     private sealed class Ambient : IUserContextAccessor
@@ -67,13 +67,13 @@ public class PicklistSetTenantFilterTests
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
         // Seeded through a context with NO ambient principal, which is what the real seeding path
         // does - and the only way to write a shared row.
         await using var db = Context(tenantId: null);
-        await db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
 
         db.PicklistSets.AddRange(
             Row(SharedStatus, Picklist.Status, "shipped-status", null),
@@ -98,7 +98,7 @@ public class PicklistSetTenantFilterTests
     };
 
     private ApplicationDbContext Context(string? tenantId) =>
-        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options,
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options,
             new Ambient(tenantId));
 
     private async Task<int[]> VisibleAsync(string? tenantId)

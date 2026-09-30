@@ -1,5 +1,4 @@
 #nullable enable
-#if (UseSqlServer || UsePostgreSql)
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -8,12 +7,8 @@ using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using FluentAssertions;
-#if (UseSqlServer)
-using Microsoft.Data.SqlClient;
-#endif
-#if (UsePostgreSql)
 using Npgsql;
-#endif
+using CleanArchitecture.Blazor.TestSupport;
 using NUnit.Framework;
 using Serilog;
 using Serilog.Core;
@@ -22,14 +17,13 @@ using Serilog.Events;
 namespace CleanArchitecture.Blazor.Application.UnitTests.Logging;
 
 /// <summary>
-/// The UTC timestamp rule, written and read back through a real database server - SQL Server and/or
-/// PostgreSQL, whichever this project ships.
+/// The UTC timestamp rule, written and read back through a real PostgreSQL server.
 /// </summary>
 /// <remarks>
-/// <c>Infrastructure.UnitTests/Logging/SinkTimestampTests</c> pins each provider's CONFIGURATION and
-/// runs the full round trip on SQLite, which needs no server. These are the same round trip for the
-/// two providers that do, and they skip when the server is absent - the idiom
-/// <c>AzureBlobFileStorageTests</c> already uses for Azurite.
+/// <c>Infrastructure.UnitTests/Logging/SinkTimestampTests</c> pins the sink's CONFIGURATION.
+/// This is the round trip itself, on the server named by <c>GX_TEST_PG</c>, into this assembly's own
+/// log database <c>gx_test_&lt;project&gt;_unit_logs</c>: created if missing, never dropped (pass 47). Without
+/// <c>GX_TEST_PG</c> it fails naming the variable; it does not skip.
 /// <para>
 /// They matter because configuration and behaviour are not the same claim. <c>ConvertToUtc = true</c>
 /// and a writer named <c>TimeStamp</c> are both statements about intent; only writing a row and
@@ -47,22 +41,9 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Logging;
 [TestFixture]
 public class SinkTimestampAcceptanceTests
 {
-#if (UseSqlServer)
-    private const string SqlServerMaster =
-        @"Server=(localdb)\mssqllocaldb;Database=master;Trusted_Connection=True;";
+    /// <summary>This assembly's log database, on the GX_TEST_PG server.</summary>
+    private const string LogDatabaseName = TestDatabaseNames.UnitLogs;
 
-    private static string SqlServerLogDatabase(string name) =>
-        $@"Server=(localdb)\mssqllocaldb;Database={name};Trusted_Connection=True;";
-
-#endif
-#if (UsePostgreSql)
-    private const string PostgresMaintenance =
-        "Host=localhost;Port=5433;Database=postgres;Username=postgres;Password=postgres;Timeout=3";
-
-    private static string PostgresLogDatabase(string name) =>
-        $"Host=localhost;Port=5433;Database={name};Username=postgres;Password=postgres";
-
-#endif
     /// <summary>The window a UTC write lands in and a local write (in a non-UTC zone) does not.</summary>
     private static void AssertStoredInUtc(DateTime stored, DateTime before)
     {
@@ -102,161 +83,56 @@ public class SinkTimestampAcceptanceTests
         }
     }
 
-#if (UseSqlServer)
-    // ------------------------------------------------------------------ SQL Server
-
-    [Test]
-    public async Task TheSqlServerSink_RecordsTimestampsInUtc()
-    {
-        if (!CanConnect(() => new SqlConnection(SqlServerMaster)))
-        {
-            Assert.Ignore("SQL Server LocalDB is not available; the MSSQL sink is not exercised on this machine.");
-        }
-
-        var database = "GxSinkTs_" + Guid.NewGuid().ToString("N")[..8];
-        using (var master = new SqlConnection(SqlServerMaster))
-        {
-            master.Open();
-            using var create = master.CreateCommand();
-            create.CommandText = $"CREATE DATABASE [{database}]";
-            create.ExecuteNonQuery();
-        }
-
-        try
-        {
-            using (var target = new SqlConnection(SqlServerLogDatabase(database)))
-            {
-                target.Open();
-                RunDdl(target, DbProviderKeys.SqlServer);
-            }
-
-            var before = DateTime.UtcNow.AddMinutes(-1);
-
-            var logger = new LoggerConfiguration()
-                .MinimumLevel.Verbose()
-                .Enrich.WithUtcTime()
-                .WriteTo.MSSqlServer(
-                    SqlServerLogDatabase(database),
-                    new Serilog.Sinks.MSSqlServer.MSSqlServerSinkOptions
-                    {
-                        TableName = LogTableDdl.TableName,
-                        SchemaName = LogTableDdl.SqlServerSchema,
-                        AutoCreateSqlDatabase = false,
-                        AutoCreateSqlTable = false,
-                        BatchPostingLimit = 1,
-                        BatchPeriod = TimeSpan.FromMilliseconds(200)
-                    },
-                    columnOptions: SerilogExtensions.BuildSqlServerColumnOptions())
-                .CreateLogger();
-
-            var stored = await WriteAndReadBackAsync(logger, () =>
-            {
-                using var connection = new SqlConnection(SqlServerLogDatabase(database));
-                connection.Open();
-                using var command = connection.CreateCommand();
-                command.CommandText = $"SELECT TOP 1 [TimeStamp] FROM [{LogTableDdl.SqlServerSchema}].[{LogTableDdl.TableName}]";
-                return command.ExecuteScalar() as DateTime?;
-            });
-
-            stored.Should().NotBeNull("the sink must have written a row into the table the DDL created");
-            AssertStoredInUtc(stored!.Value, before);
-        }
-        finally
-        {
-            using var master = new SqlConnection(SqlServerMaster);
-            master.Open();
-            using var drop = master.CreateCommand();
-            drop.CommandText =
-                $"ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}];";
-            drop.ExecuteNonQuery();
-        }
-    }
-
-#endif
-#if (UsePostgreSql)
     // ------------------------------------------------------------------ PostgreSQL
 
     [Test]
     public async Task ThePostgresSink_RecordsTimestampsInUtc()
     {
-        if (!CanConnect(() => new NpgsqlConnection(PostgresMaintenance)))
+        var logs = PostgresTestDatabase.FromEnvironment(LogDatabaseName);
+        await logs.EnsureExistsAsync();
+        var table = $"\"{LogTableDdl.NpgsqlSchema}\".\"{SerilogExtensions.NpgsqlTableName}\"";
+
+        await using (var target = new NpgsqlConnection(logs.ConnectionString))
         {
-            Assert.Ignore("PostgreSQL is not listening on localhost:5433; the Npgsql sink is not exercised on this machine.");
+            await target.OpenAsync();
+            // The DDL is idempotent (IF NOT EXISTS), so the fixed database is prepared on every run.
+            RunDdl(target, DbProviderKeys.Npgsql);
+
+            // Emptied rather than dropped: the row read back below must be this run's.
+            await using var empty = target.CreateCommand();
+            empty.CommandText = $"DELETE FROM {table}";
+            await empty.ExecuteNonQueryAsync();
         }
 
-        var database = "gx_sink_ts_" + Guid.NewGuid().ToString("N")[..8];
-        using (var maintenance = new NpgsqlConnection(PostgresMaintenance))
+        var before = DateTime.UtcNow.AddMinutes(-1);
+
+        var logger = new LoggerConfiguration()
+            .MinimumLevel.Verbose()
+            .Enrich.WithUtcTime()
+            .WriteTo.PostgreSQL(
+                logs.ConnectionString,
+                SerilogExtensions.NpgsqlTableName,
+                SerilogExtensions.BuildNpgsqlColumnWriters(),
+                LogEventLevel.Information,
+                needAutoCreateTable: false,
+                schemaName: LogTableDdl.NpgsqlSchema,
+                useCopy: false)
+            .CreateLogger();
+
+        var stored = await WriteAndReadBackAsync(logger, () =>
         {
-            maintenance.Open();
-            using var create = maintenance.CreateCommand();
-            create.CommandText = $"CREATE DATABASE \"{database}\"";
-            create.ExecuteNonQuery();
-        }
-
-        try
-        {
-            using (var target = new NpgsqlConnection(PostgresLogDatabase(database)))
-            {
-                target.Open();
-                RunDdl(target, DbProviderKeys.Npgsql);
-            }
-
-            var before = DateTime.UtcNow.AddMinutes(-1);
-
-            var logger = new LoggerConfiguration()
-                .MinimumLevel.Verbose()
-                .Enrich.WithUtcTime()
-                .WriteTo.PostgreSQL(
-                    PostgresLogDatabase(database),
-                    SerilogExtensions.NpgsqlTableName,
-                    SerilogExtensions.BuildNpgsqlColumnWriters(),
-                    LogEventLevel.Information,
-                    needAutoCreateTable: false,
-                    schemaName: LogTableDdl.NpgsqlSchema,
-                    useCopy: false)
-                .CreateLogger();
-
-            var stored = await WriteAndReadBackAsync(logger, () =>
-            {
-                using var connection = new NpgsqlConnection(PostgresLogDatabase(database));
-                connection.Open();
-                using var command = connection.CreateCommand();
-                command.CommandText =
-                    $"SELECT time_stamp FROM \"{LogTableDdl.NpgsqlSchema}\".\"{SerilogExtensions.NpgsqlTableName}\" LIMIT 1";
-                return command.ExecuteScalar() as DateTime?;
-            });
-
-            stored.Should().NotBeNull("the sink must have written a row into the table the DDL created");
-
-            // The Pass 11D regression, caught where it actually shows: TimestampColumnWriter would
-            // have stored the host's local time here and this window would reject it.
-            AssertStoredInUtc(stored!.Value, before);
-        }
-        finally
-        {
-            NpgsqlConnection.ClearAllPools();
-            using var maintenance = new NpgsqlConnection(PostgresMaintenance);
-            maintenance.Open();
-            using var drop = maintenance.CreateCommand();
-            drop.CommandText = $"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)";
-            drop.ExecuteNonQuery();
-        }
-    }
-
-#endif
-    private static bool CanConnect(Func<DbConnection> factory)
-    {
-        try
-        {
-            using var connection = factory();
+            using var connection = new NpgsqlConnection(logs.ConnectionString);
             connection.Open();
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
+            using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT time_stamp FROM {table} LIMIT 1";
+            return command.ExecuteScalar() as DateTime?;
+        });
+
+        stored.Should().NotBeNull("the sink must have written a row into the table the DDL created");
+
+        // The Pass 11D regression, caught where it actually shows: TimestampColumnWriter would
+        // have stored the host's local time here and this window would reject it.
+        AssertStoredInUtc(stored!.Value, before);
     }
 }
-#endif
 #nullable restore

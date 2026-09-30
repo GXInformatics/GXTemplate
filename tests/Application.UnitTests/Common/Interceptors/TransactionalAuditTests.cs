@@ -1,7 +1,6 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,7 +12,7 @@ using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
@@ -27,8 +26,8 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Common.Interceptors;
 /// audit write in which a process kill lost the trail silently. They are now written in the same
 /// transaction: either both are durable or neither is.
 /// <para>
-/// Every "is it durable" assertion here reads through a SEPARATE connection to the same database
-/// file, because that is the only way to distinguish committed data from data merely staged on the
+/// Every "is it durable" assertion here reads through a SEPARATE connection to the same database,
+/// because that is the only way to distinguish committed data from data merely staged on the
 /// context under test.
 /// </para>
 /// </summary>
@@ -37,26 +36,18 @@ public class TransactionalAuditTests
 {
     private const string ActingUserId = "audit-user";
 
-    private string _dbPath = null!;
     private string _connectionString = null!;
 
     [SetUp]
     public async Task SetUp()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"gxaudit-{Guid.NewGuid():N}.db");
-        _connectionString = new SqliteConnectionStringBuilder { DataSource = _dbPath }.ToString();
+        // The shared test database, emptied, in place of a new database file per test.
+        _connectionString = UnitTestDatabase.ConnectionString;
+        await UnitTestDatabase.ResetAsync();
 
         await using var ctx = CreateContext();
-        await ctx.Database.EnsureCreatedAsync();
         ctx.Users.Add(new ApplicationUser { Id = ActingUserId, UserName = "auditor", Email = "auditor@example.com" });
         await ctx.SaveChangesAsync();
-    }
-
-    [TearDown]
-    public void TearDown()
-    {
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
     }
 
     // ---- harness -------------------------------------------------------------------------------
@@ -75,7 +66,7 @@ public class TransactionalAuditTests
         interceptors.AddRange(extra);
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(_connectionString)
+            .UseNpgsql(_connectionString)
             .AddInterceptors(interceptors)
             .Options;
         return new ApplicationDbContext(options);
@@ -84,7 +75,7 @@ public class TransactionalAuditTests
     /// <summary>Counts rows through an independent connection - i.e. only what is COMMITTED.</summary>
     private int CommittedCount(string sql, params (string name, object value)[] args)
     {
-        using var conn = new SqliteConnection(_connectionString);
+        using var conn = new NpgsqlConnection(_connectionString);
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
@@ -93,17 +84,17 @@ public class TransactionalAuditTests
     }
 
     private int CommittedPicklists(string name) =>
-        CommittedCount("SELECT COUNT(*) FROM PicklistSets WHERE Value = $n", ("$n", name));
+        CommittedCount("SELECT COUNT(*) FROM \"PicklistSets\" WHERE \"Value\" = @n", ("n", name));
 
     private int CommittedAuditRows() =>
-        CommittedCount("SELECT COUNT(*) FROM AuditTrails");
+        CommittedCount("SELECT COUNT(*) FROM \"AuditTrails\"");
 
     private (string primaryKey, string changes, string auditType) CommittedAuditRow()
     {
-        using var conn = new SqliteConnection(_connectionString);
+        using var conn = new NpgsqlConnection(_connectionString);
         conn.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT PrimaryKey, Changes, AuditType FROM AuditTrails ORDER BY Id DESC LIMIT 1";
+        cmd.CommandText = "SELECT \"PrimaryKey\", \"Changes\", \"AuditType\" FROM \"AuditTrails\" ORDER BY \"Id\" DESC LIMIT 1";
         using var r = cmd.ExecuteReader();
         r.Read();
         return (r.GetString(0), r.GetString(1), r.GetString(2));
@@ -205,7 +196,7 @@ public class TransactionalAuditTests
         dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(_connectionString)
+            .UseNpgsql(_connectionString)
             .AddInterceptors(new AuditableEntityInterceptor(userContext.Object, dateTime.Object))
             .Options;
 
@@ -248,7 +239,7 @@ public class TransactionalAuditTests
         var shared = new AuditableEntityInterceptor(userContext.Object, dateTime.Object);
 
         ApplicationDbContext Make() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(_connectionString).AddInterceptors(shared).Options);
+            .UseNpgsql(_connectionString).AddInterceptors(shared).Options);
 
         await using var a = Make();
         await using var b = Make();
@@ -287,7 +278,7 @@ public class TransactionalAuditTests
         dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
 
         using var ctx = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(_connectionString)
+            .UseNpgsql(_connectionString)
             .AddInterceptors(new AuditableEntityInterceptor(userContext.Object, dateTime.Object))
             .Options);
         ctx.PicklistSets.Add(NewPicklist("sync-doomed"));
@@ -337,7 +328,7 @@ public class TransactionalAuditTests
         ctx.Tenants.Add(tenant);
         await ctx.SaveChangesAsync();
 
-        CommittedCount("SELECT COUNT(*) FROM Tenants WHERE Name = $n", ("$n", "Contoso")).Should().Be(1);
+        CommittedCount("SELECT COUNT(*) FROM \"Tenants\" WHERE \"Name\" = @n", ("n", "Contoso")).Should().Be(1);
         CommittedAuditRows().Should().Be(1, "the tenant's audit row committed with the tenant");
 
         var row = CommittedAuditRow();
@@ -356,7 +347,7 @@ public class TransactionalAuditTests
         dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Utc));
 
         await using var ctx = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(_connectionString)
+            .UseNpgsql(_connectionString)
             .AddInterceptors(new AuditableEntityInterceptor(userContext.Object, dateTime.Object))
             .Options);
         ctx.Tenants.Add(new Tenant { Name = "doomed-tenant" });
@@ -364,7 +355,7 @@ public class TransactionalAuditTests
         var act = async () => await ctx.SaveChangesAsync();
 
         await act.Should().ThrowAsync<DbUpdateException>();
-        CommittedCount("SELECT COUNT(*) FROM Tenants WHERE Name = $n", ("$n", "doomed-tenant")).Should().Be(0);
+        CommittedCount("SELECT COUNT(*) FROM \"Tenants\" WHERE \"Name\" = @n", ("n", "doomed-tenant")).Should().Be(0);
         CommittedAuditRows().Should().Be(0);
     }
 

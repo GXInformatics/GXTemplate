@@ -25,7 +25,7 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Persistence;
 /// <b>Every shipped provider, not one.</b> They are regenerated together by the README's procedure,
 /// so a guard covering one is a guard that lets the others drift. The snapshots are not
 /// interchangeable either: each carries its own provider annotations and column types, so
-/// "SQLite is fine" says nothing about whether the PostgreSQL snapshot was rewritten.
+/// "the SQL Server snapshot is fine" says nothing about whether the PostgreSQL one was rewritten.
 /// </para>
 /// <para>
 /// <b>No database is touched.</b> <c>HasPendingModelChanges</c> compares the context's model with
@@ -47,23 +47,18 @@ public class ModelMatchesMigrationsTests
     /// A connection string that PARSES for each provider and is never opened. EF needs one to build
     /// the options; it does not need a server to compare two models.
     /// </summary>
-    private const string SqliteConnection = "DataSource=:memory:";
 #if (UseSqlServer)
     private const string SqlServerConnection = "Server=(local);Database=GxModelCheck;Trusted_Connection=True;";
 #endif
-#if (UsePostgreSql)
-    private const string PostgreSqlConnection = "Host=localhost;Database=GxModelCheck;Username=gx;Password=gx";
-#endif
+    // No password: this string is parsed, never opened (pass 47, CO-42).
+    private const string PostgreSqlConnection = "Host=localhost;Database=GxModelCheck";
 
     // Resolved by name at runtime, exactly as Infrastructure's UseDatabase resolves them - so a
     // renamed migrations assembly fails here rather than at a customer's first `database update`.
-    private const string SqliteMigrations = "CleanArchitecture.Blazor.Migrators.SqLite";
 #if (UseSqlServer)
     private const string SqlServerMigrations = "CleanArchitecture.Blazor.Migrators.MSSQL";
 #endif
-#if (UsePostgreSql)
     private const string PostgreSqlMigrations = "CleanArchitecture.Blazor.Migrators.PostgreSQL";
-#endif
 
     /// <summary>
     /// The application service provider the DbContext options must carry, and <b>the finding that
@@ -116,18 +111,6 @@ public class ModelMatchesMigrationsTests
         return services.BuildServiceProvider();
     }
 
-    [Fact]
-    public void TheSqliteMigrationsMatchTheModel() =>
-        AssertNoPendingChanges(
-            "SQLite",
-            "src/Migrators/Migrators.SqLite",
-            "sqlite",
-            new DbContextOptionsBuilder<ApplicationDbContext>()
-                .EnableServiceProviderCaching(false)
-                .UseApplicationServiceProvider(ApplicationServices())
-                .UseSqlite(SqliteConnection, o => o.MigrationsAssembly(SqliteMigrations))
-                .Options);
-
 #if (UseSqlServer)
     [Fact]
     public void TheSqlServerMigrationsMatchTheModel() =>
@@ -142,7 +125,6 @@ public class ModelMatchesMigrationsTests
                 .Options);
 
 #endif
-#if (UsePostgreSql)
     [Fact]
     public void ThePostgreSqlMigrationsMatchTheModel() =>
         AssertNoPendingChanges(
@@ -155,7 +137,6 @@ public class ModelMatchesMigrationsTests
                 .UseNpgsql(PostgreSqlConnection, o => o.MigrationsAssembly(PostgreSqlMigrations))
                 .Options);
 
-#endif
     /// <summary>
     /// The passkey table is in the model, so the setting above is doing something.
     /// </summary>
@@ -172,7 +153,7 @@ public class ModelMatchesMigrationsTests
             new DbContextOptionsBuilder<ApplicationDbContext>()
                 .EnableServiceProviderCaching(false)
                 .UseApplicationServiceProvider(ApplicationServices())
-                .UseSqlite(SqliteConnection, o => o.MigrationsAssembly(SqliteMigrations))
+                .UseNpgsql(PostgreSqlConnection, o => o.MigrationsAssembly(PostgreSqlMigrations))
                 .Options);
 
         Assert.Contains(

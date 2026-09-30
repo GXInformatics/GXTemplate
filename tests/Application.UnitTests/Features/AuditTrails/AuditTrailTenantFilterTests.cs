@@ -11,7 +11,7 @@ using CleanArchitecture.Blazor.Application.Features.AuditTrails;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using NUnit.Framework;
@@ -40,7 +40,7 @@ public class AuditTrailTenantFilterTests
     private const string TenantB = "tenant-b";
     private const string UserId = "user-1";
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
 
     /// <summary>An ambient principal in one tenant, or none at all.</summary>
     private sealed class Ambient : IUserContextAccessor
@@ -56,11 +56,11 @@ public class AuditTrailTenantFilterTests
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
         await using var db = Context(tenantId: null);
-        await db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
 
         db.AuditTrails.AddRange(
             Row(1, TenantA), Row(2, TenantA),      // two, so "narrowed" is distinguishable from "one"
@@ -82,7 +82,7 @@ public class AuditTrailTenantFilterTests
     };
 
     private ApplicationDbContext Context(string? tenantId) =>
-        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options,
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options,
             new Ambient(tenantId));
 
     private async Task<int[]> VisibleAsync(string? tenantId)

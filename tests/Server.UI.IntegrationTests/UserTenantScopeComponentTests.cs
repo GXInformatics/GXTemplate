@@ -27,7 +27,6 @@ using FluentAssertions;
 using Mapster;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -63,21 +62,18 @@ public class UserTenantScopeComponentTests
     private const string TenantB = "tenant-b";
 
     private BunitContext _ctx = null!;
-    private SqliteConnection _connection = null!;
     private List<ApplicationUserDto> _exported = new();
 
     [TearDown]
     public async Task TearDown()
     {
         await _ctx.DisposeAsync();
-        await _connection.DisposeAsync();
     }
 
     /// <param name="allowedTenantIds">null means no ambient principal at all.</param>
     private async Task ArrangeAsync(string[]? allowedTenantIds, bool viewAllTenants = false)
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
-        await _connection.OpenAsync();
+        UiTestDatabase.Reset();
         _exported = new List<ApplicationUserDto>();
 
         _ctx = new BunitContext();
@@ -88,11 +84,10 @@ public class UserTenantScopeComponentTests
         services.AddLocalization();
         services.AddMudServices();
 
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<ApplicationDbContext>(o => o.UseNpgsql(UiTestDatabase.Business.ConnectionString));
         services.AddIdentityCore<ApplicationUser>()
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>();
-        services.AddSingleton(_connection);
         services.AddScoped<IApplicationDbContextFactory, ScopeTestDbContextFactory>();
         services.AddScoped<PermissionAssignmentService>();
         services.AddScoped<AdministratorProtectionService>();
@@ -148,7 +143,6 @@ public class UserTenantScopeComponentTests
 
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.EnsureCreatedAsync();
         db.Tenants.Add(new Tenant { Id = TenantA, Name = "Tenant A" });
         db.Tenants.Add(new Tenant { Id = TenantB, Name = "Tenant B" });
         db.Users.Add(NewUser("a-one", TenantA));
@@ -174,12 +168,9 @@ public class UserTenantScopeComponentTests
 
     private sealed class ScopeTestDbContextFactory : IApplicationDbContextFactory
     {
-        private readonly SqliteConnection _connection;
-        public ScopeTestDbContextFactory(SqliteConnection connection) => _connection = connection;
-
         public ValueTask<IApplicationDbContext> CreateAsync(CancellationToken ct = default) =>
             new(new ApplicationDbContext(
-                new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options));
+                new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(UiTestDatabase.Business.ConnectionString).Options));
     }
 
     // ---- the two surfaces --------------------------------------------------------------------------

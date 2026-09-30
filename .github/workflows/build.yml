@@ -1,8 +1,14 @@
 # The one CI workflow: restore, build, run every test project.
 #
-# The integration tests need a real SQL Server, so the job runs one as a service container and
-# points the test settings at it through DatabaseSettings__ConnectionString. Without it those
-# tests fail at OneTimeSetUp rather than being skipped, which would look like a broken build.
+# The test suites run on PostgreSQL only (pass 47). The server is the PostgreSQL the ubuntu-latest
+# runner has preinstalled - no Docker, no service container. The job starts it, creates a login with a
+# password generated for this run (masked, and never written to the repository), and hands the server
+# to the suites through GX_TEST_PG: host, port, username and password, and NO database. Each test
+# assembly creates its own gx_test_<project>_* database on it. Without GX_TEST_PG the suites FAIL,
+# naming the variable; they never skip.
+#
+# GX_TEST_CREATE_DATABASES=1 also runs the two opt-in tests that create, and then drop, a database and a
+# role of their own: the runner's server is thrown away with the job, so there is nothing to protect.
 #
 # NOTE: GitHub Actions is currently disabled for this repository. This workflow is the definition
 # to run once Actions is re-enabled; until then it is inert.
@@ -18,24 +24,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    services:
-      sqlserver:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          ACCEPT_EULA: "Y"
-          MSSQL_SA_PASSWORD: "Your_password123"
-        ports:
-          - 1433:1433
-        options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P Your_password123 -Q 'SELECT 1'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 20
-
-    env:
-      DatabaseSettings__DBProvider: mssql
-      DatabaseSettings__ConnectionString: "Server=localhost,1433;Database=BlazorDashboard.Test;User Id=sa;Password=Your_password123;TrustServerCertificate=True;MultipleActiveResultSets=true;"
-
     steps:
       - uses: actions/checkout@v5
 
@@ -43,6 +31,16 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
+
+      - name: Start PostgreSQL and create the test login
+        run: |
+          sudo systemctl start postgresql.service
+          until pg_isready -h 127.0.0.1 -p 5432; do sleep 1; done
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE gx_ci LOGIN CREATEDB CREATEROLE PASSWORD '$password'"
+          echo "GX_TEST_PG=Host=127.0.0.1;Port=5432;Username=gx_ci;Password=$password" >> "$GITHUB_ENV"
+          echo "GX_TEST_CREATE_DATABASES=1" >> "$GITHUB_ENV"
 
       - name: Restore
         run: dotnet restore CleanArchitecture.Blazor.slnx

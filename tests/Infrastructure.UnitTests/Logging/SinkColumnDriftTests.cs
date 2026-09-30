@@ -149,6 +149,9 @@ public class SinkColumnDriftTests
     }
 #endif
 
+    /// <summary>The providers whose sink is allowed a gap (<see cref="SinkCannotWrite"/>): SQLite only.</summary>
+    public static TheoryData<string> ProvidersWithAcceptedGaps => new() { DbProviderKeys.SqLite };
+
     public static TheoryData<string> Providers =>
         new()
         {
@@ -202,12 +205,17 @@ public class SinkColumnDriftTests
     }
 
     [Theory]
-    [MemberData(nameof(Providers))]
+    [MemberData(nameof(ProvidersWithAcceptedGaps))]
     public void TheAcceptedSinkGaps_AreRealPropertiesAndReallyUnwritten(string provider)
     {
         // An allow-list that has gone stale is worse than none: it would keep excusing a column the
         // sink had since learned to write, or name a property that no longer exists. Both directions
         // fail here.
+        //
+        // Only the providers that HAVE a gap. The others' rows used to iterate an empty list and so
+        // asserted nothing at all (pass 47, CO-158); a provider named here with no gap fails instead.
+        Assert.NotEmpty(SinkCannotWrite(provider));
+
         foreach (var property in SinkCannotWrite(provider))
         {
             Assert.Contains(property, EntityProperties);

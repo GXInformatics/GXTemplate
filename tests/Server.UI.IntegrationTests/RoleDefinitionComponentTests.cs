@@ -26,7 +26,6 @@ using CleanArchitecture.Blazor.Server.UI.Services.UserPreferences;
 using FluentAssertions;
 using Mapster;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -43,7 +42,7 @@ namespace CleanArchitecture.Blazor.Server.UI.IntegrationTests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>These drive the real components against a real <see cref="RoleManager{TRole}"/> over SQLite
+/// <b>These drive the real components against a real <see cref="RoleManager{TRole}"/> over PostgreSQL
 /// and then read the role store back.</b> That is the point: role administration bypasses Mediator,
 /// so there is no handler to send a command to, and a test that only asserted which buttons render
 /// would prove the decoration and not the guard. Every assertion below is about what the ROLE TABLE
@@ -73,7 +72,6 @@ public class RoleDefinitionComponentTests
     private const string ExistingRole = "Editors";
 
     private BunitContext _ctx = null!;
-    private SqliteConnection _connection = null!;
     private MutableUserContextAccessor _contextAccessor = null!;
     private ConfigurablePermissionQueryService _permissionQuery = null!;
     private string _actorId = null!;
@@ -85,7 +83,6 @@ public class RoleDefinitionComponentTests
     public async Task TearDown()
     {
         await _ctx.DisposeAsync();
-        await _connection.DisposeAsync();
     }
 
     // ---- harness -------------------------------------------------------------------------------
@@ -108,7 +105,7 @@ public class RoleDefinitionComponentTests
     }
 
     /// <summary>
-    /// Registers the real Identity stack over an in-memory SQLite database, an ambient principal,
+    /// Registers the real Identity stack over the emptied business database, an ambient principal,
     /// and everything the two components inject. <paramref name="mayDefineRoles"/> is the one
     /// variable: every other right is granted, so a refusal below is attributable to it alone.
     /// </summary>
@@ -117,8 +114,7 @@ public class RoleDefinitionComponentTests
         _ctx = new BunitContext();
         _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
-        _connection = new SqliteConnection("DataSource=:memory:");
-        await _connection.OpenAsync();
+        UiTestDatabase.Reset();
         _contextAccessor = new MutableUserContextAccessor();
         _permissionQuery = new ConfigurablePermissionQueryService();
 
@@ -127,7 +123,7 @@ public class RoleDefinitionComponentTests
         services.AddLocalization();
         services.AddMudServices();
 
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<ApplicationDbContext>(o => o.UseNpgsql(UiTestDatabase.Business.ConnectionString));
         services.AddIdentityCore<ApplicationUser>(o =>
             {
                 o.Password.RequireDigit = false;
@@ -200,7 +196,6 @@ public class RoleDefinitionComponentTests
         // Schema, one seeded role, and the acting principal.
         using var scope = services.BuildServiceProvider().CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.EnsureCreatedAsync();
 
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
         (await roleManager.CreateAsync(new ApplicationRole { Name = ExistingRole })).Succeeded
@@ -253,7 +248,20 @@ public class RoleDefinitionComponentTests
         await dialog.InvokeAsync(async () => await (Task)submit.Invoke(dialog.Instance, null)!);
     }
 
-    private IRenderedComponent<RolesPage> RenderPage() => _ctx.Render<RolesPage>();
+    /// <summary>Renders the page and waits for the grid's first load to draw the seeded role.</summary>
+    /// <remarks>
+    /// The wait is not decoration (pass 47, CO-160). The grid loads through <c>ServerReload</c>, an
+    /// async query on the page's scoped context. The in-memory database used before completed it
+    /// inside the render; real PostgreSQL does not, so a test that invoked a page method at once ran it
+    /// on the same context while the load was still in flight ("a second operation was started on this
+    /// context"), and a test that read the markup at once read a grid with no rows.
+    /// </remarks>
+    private IRenderedComponent<RolesPage> RenderPage()
+    {
+        var page = _ctx.Render<RolesPage>();
+        page.WaitForAssertion(() => page.Markup.Should().Contain(ExistingRole), TimeSpan.FromSeconds(10));
+        return page;
+    }
 
     private static Task InvokePageAsync(
         IRenderedComponent<RolesPage> page, string method, params object?[] args)

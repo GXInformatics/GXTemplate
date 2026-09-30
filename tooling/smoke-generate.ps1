@@ -15,7 +15,7 @@
       3. `dotnet new gxblazor` generates - with the TEMPLATE'S DEFAULTS for every option not given
          on the command line - and the output:
            - carries no migrator, package, project reference or test code for a provider that was
-             not chosen (SQLite always ships: it is the database the test harnesses run on);
+             not chosen, and no test project that uses SQLite (pass 47: the suites run on PostgreSQL);
            - follows the GX configuration layout (Pass 45): appsettings.json is structure only, with
              every secret-bearing key present and empty; Staging and Production are committed with
              empty placeholders; appsettings.Development.json holds the local values - the chosen
@@ -27,10 +27,12 @@
            - carries no template conditional left unprocessed, no Docker artefact and no
              template-repository-only file;
            - does not carry the project name inside upstream attribution text.
-      4. The generated solution builds with 0 errors, and its three non-database test suites pass.
+      4. The generated solution builds with 0 errors. Without GX_TEST_PG its four test suites FAIL,
+         naming the variable; against the -TestServer (default GX_TEST_PG) they all pass, each on its
+         own gx_test_<project>_* database.
       5. In a fresh `git init` of the generated folder, appsettings.Development.json is ignored.
 
-    Generates into a SHORT path under %TEMP% on purpose: the SQLite native assets nest deeply
+    Generates into a SHORT path under %TEMP% on purpose: native assets can nest deeply
     enough under bin\ that a generated project in a long path fails to build with MSB3021
     (MAX_PATH), which is a property of the location, not of the template.
 
@@ -38,7 +40,7 @@
     powershell -ExecutionPolicy Bypass -File tooling\smoke-generate.ps1
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File tooling\smoke-generate.ps1 -Database mssql -KeepOutput
+    powershell -ExecutionPolicy Bypass -File tooling\smoke-generate.ps1 -TestServer "Host=localhost;Port=5434;Username=postgres;Password=<yours>" -KeepOutput
 #>
 [CmdletBinding()]
 param(
@@ -65,7 +67,12 @@ param(
     [switch] $NoBuild,
 
     # Build, but skip the generated project's test suites.
-    [switch] $NoTests
+    [switch] $NoTests,
+
+    # The PostgreSQL server the generated suites run against (pass 47): host, port, username and
+    # password, and NO database - the same form as GX_TEST_PG, which is the default. Each suite
+    # creates its own gx_test_<project>_* database there and never drops it. Never printed.
+    [string] $TestServer = $env:GX_TEST_PG
 )
 
 $ErrorActionPreference = 'Stop'
@@ -268,8 +275,25 @@ try {
         }
         else { Pass "no $key provider code in src/ or tests/" }
     }
-    if (Test-Path (Join-Path $out 'src\Migrators\Migrators.SqLite')) { Pass 'Migrators.SqLite present (always: the test harnesses run on SQLite)' }
-    else { Fail 'Migrators.SqLite missing - the HTTP integration harness needs it whatever the provider' }
+    # Pass 47: the test suites run on PostgreSQL only. Migrators.SqLite still ships in src/ until
+    # pass 48 removes the provider, but no test project may reach it or SQLite any more.
+    Step 'no test project uses SQLite (pass 47)'
+    $testFiles = @($files | Where-Object { $_.FullName -like "$out\tests\*" })
+    # Code only: comments may still say what the tests used to do.
+    $sqliteInTests = @($testFiles | Select-String -Pattern 'Migrators\.SqLite|Microsoft\.Data\.Sqlite|UseSqlite\(|SqliteConnection' |
+        Where-Object { $_.Line -notmatch '^\s*(//|\*|///|<!--)' })
+    if ($sqliteInTests.Count -gt 0) { foreach ($s in $sqliteInTests | Select-Object -First 10) { Fail "SQLite in $($s.Path.Substring($out.Length + 1)):$($s.LineNumber): $($s.Line.Trim())" } }
+    else { Pass "none in $($testFiles.Count) test files" }
+
+    Step 'the test databases are named after the project'
+    $expectedTestProject = ($ProjectName.ToLowerInvariant() -replace '[^a-z0-9_]', '')
+    if ($expectedTestProject.Length -gt 40) { $expectedTestProject = $expectedTestProject.Substring(0, 40) }
+    $namesFile = Join-Path $out 'tests\TestSupport\TestDatabaseNames.cs'
+    $namesText = if (Test-Path $namesFile) { [IO.File]::ReadAllText($namesFile) } else { '' }
+    Check ($namesText.Contains("public const string Project = `"$expectedTestProject`";")) "TestDatabaseNames.Project is '$expectedTestProject' (gx_test_${expectedTestProject}_*)" "not found in $namesFile"
+    $tokenLeft = @($files | Select-String -SimpleMatch -Pattern 'cleanarchitectureblazor')
+    if ($tokenLeft.Count -gt 0) { Fail "the test-database token survived in $($tokenLeft[0].Path.Substring($out.Length + 1)):$($tokenLeft[0].LineNumber)" }
+    else { Pass 'no cleanarchitectureblazor token anywhere' }
 
     Step 'no template conditional survived processing'
     $markers = @($files | Select-String -Pattern '#(if|elif|elseif) \(Use(SqlServer|PostgreSql)|<!--#(if|else|elif|endif)|^\s*//#(if|else|elseif|elif|endif)')
@@ -416,17 +440,43 @@ try {
         # Before `git init` below, on purpose: this is the state `dotnet new` leaves a project in,
         # and CommittedAppSettingsTests has a path for a folder that is not a repository yet.
         if ($built -and -not $NoTests) {
-            Step 'the non-database test suites pass'
-            foreach ($suite in 'Application.UnitTests', 'Infrastructure.UnitTests', 'Server.UI.IntegrationTests') {
-                $testLog = Join-Path $WorkRoot "test-$suite.log"
-                $exit = Invoke-Dotnet @('test', (Join-Path $out "tests\$suite"), '--no-build', '-nologo') $testLog
-                $line = Select-String -Path $testLog -Pattern '^(Passed|Failed|Skipped)!' | Select-Object -Last 1
-                $text = if ($line) { $line.Line.Trim() -replace '\s+', ' ' } else { 'no summary line' }
-                if ($exit -eq 0 -and $line -and $line.Line -match '^Passed!') { Pass "${suite}: $text" }
-                else {
-                    Select-String -Path $testLog -Pattern '^\s+Failed ' | Select-Object -First 10 | ForEach-Object { Write-Host "        $($_.Line.Trim())" }
-                    Fail "${suite}: $text (exit code $exit) - see $testLog"
+            $suites = 'Application.UnitTests', 'Infrastructure.UnitTests', 'Application.IntegrationTests', 'Server.UI.IntegrationTests'
+            $savedServer = $env:GX_TEST_PG
+            try {
+                # Without a server, every suite must FAIL and say why - never skip, never pass on a
+                # fallback (pass 47). Only the database tests fail; the summary must not be Passed.
+                Step 'without GX_TEST_PG the generated suites fail loud'
+                Remove-Item Env:GX_TEST_PG -ErrorAction SilentlyContinue
+                foreach ($suite in $suites) {
+                    $testLog = Join-Path $WorkRoot "test-noserver-$suite.log"
+                    $exit = Invoke-Dotnet @('test', (Join-Path $out "tests\$suite"), '--no-build', '-nologo') $testLog
+                    $line = Select-String -Path $testLog -Pattern '^(Passed|Failed|Skipped)!' | Select-Object -Last 1
+                    $text = if ($line) { $line.Line.Trim() -replace '\s+', ' ' } else { 'no summary line' }
+                    $named = [bool](Select-String -Path $testLog -SimpleMatch -Pattern 'GX_TEST_PG is not set' -Quiet)
+                    Check ($exit -ne 0 -and $line -and $line.Line -match '^Failed!' -and $named) "${suite}: $text, naming GX_TEST_PG" "exit code $exit, named: $named - see $testLog"
                 }
+
+                Step 'the test suites pass against the GX_TEST_PG server'
+                if (-not $TestServer) {
+                    Fail 'no test server: pass -TestServer or set GX_TEST_PG (host, port, username, password; no database)'
+                }
+                else {
+                    $env:GX_TEST_PG = $TestServer
+                    foreach ($suite in $suites) {
+                        $testLog = Join-Path $WorkRoot "test-$suite.log"
+                        $exit = Invoke-Dotnet @('test', (Join-Path $out "tests\$suite"), '--no-build', '-nologo') $testLog
+                        $line = Select-String -Path $testLog -Pattern '^(Passed|Failed|Skipped)!' | Select-Object -Last 1
+                        $text = if ($line) { $line.Line.Trim() -replace '\s+', ' ' } else { 'no summary line' }
+                        if ($exit -eq 0 -and $line -and $line.Line -match '^Passed!') { Pass "${suite}: $text" }
+                        else {
+                            Select-String -Path $testLog -Pattern '^\s+Failed ' | Select-Object -First 10 | ForEach-Object { Write-Host "        $($_.Line.Trim())" }
+                            Fail "${suite}: $text (exit code $exit) - see $testLog"
+                        }
+                    }
+                }
+            }
+            finally {
+                if ($null -ne $savedServer) { $env:GX_TEST_PG = $savedServer } else { Remove-Item Env:GX_TEST_PG -ErrorAction SilentlyContinue }
             }
         }
     }

@@ -1,99 +1,123 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Data.Common;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Infrastructure;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
+using CleanArchitecture.Blazor.TestSupport;
 using FluentAssertions;
-#if (UseSqlServer)
-using Microsoft.Data.SqlClient;
-#endif
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-#if (UsePostgreSql)
 using Npgsql;
-#endif
 using NUnit.Framework;
 
 namespace CleanArchitecture.Blazor.Application.UnitTests.Logging;
 
 /// <summary>
-/// The log database being brought into existence, against real servers.
+/// The log database being brought into existence, against a real PostgreSQL server.
 /// </summary>
 /// <remarks>
-/// Pass 15 established the mechanics by probe - that PostgreSQL denies with <c>42501</c>, SQL Server
-/// with <c>262</c>, that a race is <c>42P04</c> / <c>1801</c>, and that both catalogue checks run
-/// under a login that cannot create anything. These tests are what keep the code that acts on those
-/// facts honest, by re-establishing them through the production entry point rather than a probe.
+/// Pass 15 established the mechanics by probe: PostgreSQL denies with <c>42501</c>, a lost race is
+/// <c>42P04</c>, and the catalogue check runs under a login that cannot create anything. These tests
+/// keep the code that acts on those facts honest, by re-establishing them through the production
+/// entry point rather than a probe.
 /// <para>
-/// <c>Assert.Ignore</c> when the server is not installed, following
-/// <c>SinkTimestampAcceptanceTests</c>: a developer without PostgreSQL still gets a green suite, and
-/// a machine with one gets the real coverage.
+/// <b>The server comes from <c>GX_TEST_PG</c> only</b> (pass 47, CO-42; these tests used to hard-code a
+/// second server on port 5433, with its credentials, and skip when it was not listening).
 /// </para>
 /// <para>
-/// The three cases per provider are the ones that matter operationally: the fresh install where the
-/// database must appear, the provisioned install where nothing may be attempted, and the hardened
-/// install where the attempt is refused and must be explained rather than swallowed.
+/// <b>Two of them are opt-in.</b> The create-when-absent path can only be tested from a database, and
+/// a role, that does NOT exist, so each run has to create one and remove it again. Dropping a database
+/// on the shared local server waits for a checkpoint, and nothing else in the test suites ever drops
+/// one. So these two run only when <see cref="CreateDatabasesVariable"/> is <c>1</c>. Otherwise they
+/// are reported as SKIPPED (<c>Assert.Ignore</c>, never a pass). When they run they use
+/// <c>gx_test_&lt;project&gt;_ldb_</c> names and drop exactly what they created. The third needs only a database
+/// that already exists, so it runs every time against the fixed <c>gx_test_&lt;project&gt;_unit_logs</c>.
 /// </para>
 /// </remarks>
 [TestFixture]
 public class LogDatabaseCreationAcceptanceTests
 {
-#if (UsePostgreSql)
-    private const string PostgresMaintenance =
-        "Host=localhost;Port=5433;Database=postgres;Username=postgres;Password=postgres;Timeout=3";
+    /// <summary>Set to <c>1</c> to run the tests that create, and then drop, databases and roles.</summary>
+    public const string CreateDatabasesVariable = "GX_TEST_CREATE_DATABASES";
 
-    private static string PostgresDb(string name, string user = "postgres", string password = "postgres") =>
-        $"Host=localhost;Port=5433;Database={name};Username={user};Password={password};Timeout=3";
-#endif
+    /// <summary>This assembly's fixed log database: created if missing, never dropped.</summary>
+    private const string LogDatabaseName = TestDatabaseNames.UnitLogs;
 
-#if (UseSqlServer)
-    private const string SqlServerMaster =
-        @"Server=(localdb)\mssqllocaldb;Database=master;Trusted_Connection=True;";
+    /// <summary>Whether the opt-in value is set. Only exactly <c>1</c> opts in.</summary>
+    public static bool OptedIn(string? value) => value == "1";
 
-    private static string SqlServerDb(string name) =>
-        $@"Server=(localdb)\mssqllocaldb;Database={name};Trusted_Connection=True;";
+    /// <summary>
+    /// The only databases these tests may drop: the <c>gx_test_&lt;project&gt;_ldb_</c> ones they create themselves.
+    /// Never the fixed unit and unit_logs databases, and never anything outside that prefix.
+    /// </summary>
+    public static bool IsDroppable(string name) => name.StartsWith(DroppablePrefix, StringComparison.Ordinal);
 
-    private static string SqlServerDbAs(string name, string login, string password) =>
-        $@"Server=(localdb)\mssqllocaldb;Database={name};User Id={login};Password={password};TrustServerCertificate=True";
-#endif
+    private const string DroppablePrefix = TestDatabaseNames.ProjectPrefix + "ldb_";
 
-#if (UsePostgreSql)
-    // ------------------------------------------------------------------ PostgreSQL
+    private static void RequireOptIn()
+    {
+        if (!OptedIn(Environment.GetEnvironmentVariable(CreateDatabasesVariable)))
+        {
+            Assert.Ignore($"Creates and drops a database or role on the GX_TEST_PG server; set {CreateDatabasesVariable}=1 to run it.");
+        }
+    }
+
+    /// <summary>A fresh database name, under <see cref="DroppablePrefix"/>, that does not exist yet.</summary>
+    private static string NewDatabaseName() => DroppablePrefix + Guid.NewGuid().ToString("N")[..8];
+
+    // ------------------------------------------------------------------ the opt-in gate
+
+    [TestCase(null, false)]
+    [TestCase("", false)]
+    [TestCase("0", false)]
+    [TestCase("true", false)]
+    [TestCase("1", true)]
+    public void OnlyTheValueOne_OptsIn(string? value, bool expected)
+    {
+        OptedIn(value).Should().Be(expected);
+    }
+
+    [TestCase(DroppablePrefix + "1a2b3c4d", true)]
+    [TestCase(TestDatabaseNames.Unit, false)]
+    [TestCase(TestDatabaseNames.UnitLogs, false)]
+    [TestCase(TestDatabaseNames.AppInt, false)]
+    [TestCase("GXTemplateDatabase", false)]
+    [TestCase("gx_test_ldb_1a2b3c4d", false)]
+    [TestCase("postgres", false)]
+    public void OnlyTheDatabasesTheseTestsCreate_MayBeDropped(string name, bool expected)
+    {
+        IsDroppable(name).Should().Be(expected);
+    }
+
+    // ------------------------------------------------------------------ PostgreSQL (opt-in)
 
     [Test]
     public async Task OnPostgres_TheLogDatabaseIsCreatedWhenAbsent_AndNothingIsIssuedWhenPresent()
     {
-        if (!CanConnect(() => new NpgsqlConnection(PostgresMaintenance)))
-        {
-            Assert.Ignore("PostgreSQL is not listening on localhost:5433.");
-        }
-
-        var database = "gx_ldb_" + Guid.NewGuid().ToString("N")[..8];
-        DropPostgresDatabase(database);
+        // The server first: an unset GX_TEST_PG fails here, naming it, and is never reported as skipped.
+        var database = PostgresTestDatabase.FromEnvironment(NewDatabaseName());
+        RequireOptIn();
+        PostgresDatabaseExists(database.DatabaseName).Should().BeFalse("the name is new to this run");
 
         try
         {
-            PostgresDatabaseExists(database).Should().BeFalse("the fixture has not created it");
-
             // --- first start: absent, so it is created
-            var first = await RunStartupCheckAsync(DbProviderKeys.Npgsql, PostgresDb(database));
+            var first = await RunStartupCheckAsync(database.ConnectionString);
 
-            PostgresDatabaseExists(database).Should().BeTrue(
+            PostgresDatabaseExists(database.DatabaseName).Should().BeTrue(
                 "the application creates its log database, exactly as EF's Migrate() has always created the business one");
-            first.Should().Contain(l => l.Level == LogLevel.Information && l.Message.Contains(database),
+            first.Should().Contain(l => l.Level == LogLevel.Information && l.Message.Contains(database.DatabaseName),
                 "the third startup message names the database it is about to create");
             first.Should().NotContain(l => l.Level >= LogLevel.Error,
                 "creating a database the login is allowed to create is not an error");
 
             // --- second start: present, so NOTHING is attempted and NOTHING is said
-            var second = await RunStartupCheckAsync(DbProviderKeys.Npgsql, PostgresDb(database));
+            var second = await RunStartupCheckAsync(database.ConnectionString);
 
             second.Should().BeEmpty(
                 "a provisioned deployment must start silently - no maintenance connection, no catalogue " +
@@ -102,36 +126,40 @@ public class LogDatabaseCreationAcceptanceTests
         }
         finally
         {
-            DropPostgresDatabase(database);
+            // This test's run created it (the application did, on the first start).
+            DropDatabaseIfExists(database.DatabaseName);
         }
     }
 
     [Test]
     public async Task OnPostgres_ALoginWithoutCreatedb_GetsOneErrorNamingTheGrant_AndTheApplicationContinues()
     {
-        if (!CanConnect(() => new NpgsqlConnection(PostgresMaintenance)))
-        {
-            Assert.Ignore("PostgreSQL is not listening on localhost:5433.");
-        }
+        var database = PostgresTestDatabase.FromEnvironment(NewDatabaseName());
+        RequireOptIn();
+        // Not under the project prefix: a role name is limited to 63 bytes too, and this one needs 17 more.
+        var role = "gx_test_ldb_role_" + Guid.NewGuid().ToString("N")[..8];
+        // A throwaway secret for a throwaway role, generated per run: no credential in the source.
+        var rolePassword = Guid.NewGuid().ToString("N");
 
-        var database = "gx_ldb_" + Guid.NewGuid().ToString("N")[..8];
-        var role = "gx_ldb_role_" + Guid.NewGuid().ToString("N")[..8];
-
-        ExecPostgres(PostgresMaintenance, $"CREATE ROLE {role} LOGIN PASSWORD 'probe' NOCREATEDB");
+        Exec(Maintenance(), $"CREATE ROLE {role} LOGIN PASSWORD '{rolePassword}' NOCREATEDB");
         try
         {
             // The hardened production shape: the application's own login may connect, and may not
             // create databases. Pass 15 measured the 42501 this produces.
-            var records = await RunStartupCheckAsync(
-                DbProviderKeys.Npgsql, PostgresDb(database, role, "probe"));
+            var asRole = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+            {
+                Username = role,
+                Password = rolePassword
+            }.ConnectionString;
+            var records = await RunStartupCheckAsync(asRole);
 
-            PostgresDatabaseExists(database).Should().BeFalse("the role may not create databases");
+            PostgresDatabaseExists(database.DatabaseName).Should().BeFalse("the role may not create databases");
 
             var denials = records.Where(l =>
                 l.Level == LogLevel.Error && l.Message.Contains("may not create it")).ToList();
 
             denials.Should().ContainSingle("exactly one error explains the denial, not one per attempt");
-            denials[0].Message.Should().Contain(database).And.Contain(role).And.Contain("CREATEDB",
+            denials[0].Message.Should().Contain(database.DatabaseName).And.Contain(role).And.Contain("CREATEDB",
                 "the message has to name the database, the login and the exact grant, or the operator " +
                 "is left to work out which of the three is wrong");
 
@@ -142,168 +170,32 @@ public class LogDatabaseCreationAcceptanceTests
         }
         finally
         {
-            DropPostgresDatabase(database);
-            ExecPostgres(PostgresMaintenance, $"DROP ROLE IF EXISTS {role}");
+            // Only what this run created: the role, and the database only if the code under test
+            // created it despite the missing grant (the name is unique to this run).
+            DropDatabaseIfExists(database.DatabaseName);
+            NpgsqlConnection.ClearAllPools();
+            Exec(Maintenance(), $"DROP ROLE IF EXISTS {role}");
         }
     }
 
-    [Test]
-    public void OnPostgres_ALostRaceIsRecognisedAsAlreadyExisting()
-    {
-        if (!CanConnect(() => new NpgsqlConnection(PostgresMaintenance)))
-        {
-            Assert.Ignore("PostgreSQL is not listening on localhost:5433.");
-        }
+    // ------------------------------------------------------------------ PostgreSQL (always)
 
+    [Test]
+    public async Task OnPostgres_ALostRaceIsRecognisedAsAlreadyExisting()
+    {
         // A real 42P04 rather than a constructed one. This is what two instances starting together
-        // produce when both see "absent" and both issue CREATE - the loser gets this, and gets the
-        // outcome it wanted.
-        var database = "gx_ldb_" + Guid.NewGuid().ToString("N")[..8];
-        ExecPostgres(PostgresMaintenance, LogDatabaseDdl.CreateStatement(DbProviderKeys.Npgsql, database));
+        // produce when both see "absent" and both issue CREATE: the loser gets this, and gets the
+        // outcome it wanted. Issued against a database that already exists, so nothing is created
+        // and nothing needs dropping.
+        var logs = PostgresTestDatabase.FromEnvironment(LogDatabaseName);
+        await logs.EnsureExistsAsync();
 
-        try
-        {
-            var thrown = Assert.Catch(() =>
-                ExecPostgres(PostgresMaintenance, LogDatabaseDdl.CreateStatement(DbProviderKeys.Npgsql, database)))!;
+        var thrown = Assert.Catch(() =>
+            Exec(Maintenance(), LogDatabaseDdl.CreateStatement(DbProviderKeys.Npgsql, logs.DatabaseName)))!;
 
-            ((PostgresException)thrown).SqlState.Should().Be("42P04");
-            LogDatabaseDdl.IsAlreadyExists(thrown).Should().BeTrue();
-            LogDatabaseDdl.IsPermissionDenied(thrown).Should().BeFalse();
-        }
-        finally
-        {
-            DropPostgresDatabase(database);
-        }
-    }
-
-#endif
-#if (UseSqlServer)
-    // ------------------------------------------------------------------ SQL Server
-
-    [Test]
-    public async Task OnSqlServer_TheLogDatabaseIsCreatedWhenAbsent_AndNothingIsIssuedWhenPresent()
-    {
-        if (!CanConnect(() => new SqlConnection(SqlServerMaster)))
-        {
-            Assert.Ignore("SQL Server LocalDB is not available.");
-        }
-
-        var database = "GxLdb" + Guid.NewGuid().ToString("N")[..8];
-        DropSqlServerDatabase(database);
-
-        try
-        {
-            var first = await RunStartupCheckAsync(DbProviderKeys.SqlServer, SqlServerDb(database));
-
-            SqlServerDatabaseExists(database).Should().BeTrue();
-            first.Should().Contain(l => l.Level == LogLevel.Information && l.Message.Contains(database));
-            first.Should().NotContain(l => l.Level >= LogLevel.Error);
-
-            var second = await RunStartupCheckAsync(DbProviderKeys.SqlServer, SqlServerDb(database));
-            second.Should().BeEmpty();
-        }
-        finally
-        {
-            DropSqlServerDatabase(database);
-        }
-    }
-
-    [Test]
-    public async Task OnSqlServer_ALoginWithoutDbcreator_GetsOneErrorNamingTheGrant_AndTheApplicationContinues()
-    {
-        if (!CanConnect(() => new SqlConnection(SqlServerMaster)))
-        {
-            Assert.Ignore("SQL Server LocalDB is not available.");
-        }
-
-        var database = "GxLdb" + Guid.NewGuid().ToString("N")[..8];
-        var login = "gx_ldb_" + Guid.NewGuid().ToString("N")[..8];
-        const string password = "Pr0be-Pass!";
-
-        ExecSqlServer(SqlServerMaster,
-            $"CREATE LOGIN [{login}] WITH PASSWORD = '{password}', CHECK_POLICY = OFF");
-        try
-        {
-            var records = await RunStartupCheckAsync(
-                DbProviderKeys.SqlServer, SqlServerDbAs(database, login, password));
-
-            SqlServerDatabaseExists(database).Should().BeFalse();
-
-            var denials = records.Where(l =>
-                l.Level == LogLevel.Error && l.Message.Contains("may not create it")).ToList();
-
-            denials.Should().ContainSingle();
-            denials[0].Message.Should().Contain(database).And.Contain(login).And.Contain("dbcreator");
-
-            // This is the case ruling 4 exists for: without the messages above, the only diagnostic
-            // SQL Server offers for a missing database is 4060, whose text is "The login failed."
-            denials[0].Message.Should().Contain("does not exist",
-                "the operator must be told the database is missing, not that their password is wrong");
-        }
-        finally
-        {
-            DropSqlServerDatabase(database);
-            ExecSqlServerQuiet(SqlServerMaster, $"DROP LOGIN [{login}]");
-        }
-    }
-
-    [Test]
-    public void OnSqlServer_ALostRaceIsRecognisedAsAlreadyExisting()
-    {
-        if (!CanConnect(() => new SqlConnection(SqlServerMaster)))
-        {
-            Assert.Ignore("SQL Server LocalDB is not available.");
-        }
-
-        // The guarded statement this code issues cannot produce 1801, because T-SQL's own
-        // IF DB_ID(...) IS NULL suppresses it. The classifier still has to recognise it, so this
-        // provokes a real one with the UNguarded form - which is what a future edit dropping the
-        // guard would start producing.
-        var database = "GxLdb" + Guid.NewGuid().ToString("N")[..8];
-        ExecSqlServer(SqlServerMaster, $"CREATE DATABASE [{database}]");
-
-        try
-        {
-            var thrown = Assert.Catch(() =>
-                ExecSqlServer(SqlServerMaster, $"CREATE DATABASE [{database}]"))!;
-
-            ((SqlException)thrown).Number.Should().Be(1801);
-            LogDatabaseDdl.IsAlreadyExists(thrown).Should().BeTrue();
-            LogDatabaseDdl.IsPermissionDenied(thrown).Should().BeFalse();
-
-            // And the statement the code actually issues is silent about it.
-            Assert.DoesNotThrow(() => ExecSqlServer(
-                SqlServerMaster, LogDatabaseDdl.CreateStatement(DbProviderKeys.SqlServer, database)));
-        }
-        finally
-        {
-            DropSqlServerDatabase(database);
-        }
-    }
-
-#endif
-    // ------------------------------------------------------------------ SQLite
-
-    [Test]
-    public async Task OnSqlite_AConfiguredPathInAMissingDirectory_NowWorks()
-    {
-        // Pass 15 measured the failure this closes: SQLite creates the file but never the folder,
-        // so this configuration failed with "SQLite Error 14: unable to open database file".
-        var root = Path.Combine(Path.GetTempPath(), "gx-ldb-sqlite", Guid.NewGuid().ToString("N"));
-        var target = Path.Combine(root, "nested", "logs.db");
-
-        try
-        {
-            var records = await RunStartupCheckAsync(DbProviderKeys.SqLite, $"Data Source={target}");
-
-            File.Exists(target).Should().BeTrue("the directory is created, and SQLite then makes the file");
-            records.Should().NotContain(l => l.Level >= LogLevel.Error);
-        }
-        finally
-        {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
-        }
+        ((PostgresException)thrown).SqlState.Should().Be("42P04");
+        LogDatabaseDdl.IsAlreadyExists(thrown).Should().BeTrue();
+        LogDatabaseDdl.IsPermissionDenied(thrown).Should().BeFalse();
     }
 
     // ------------------------------------------------------------------ the harness
@@ -319,14 +211,14 @@ public class LogDatabaseCreationAcceptanceTests
     /// reached the way production reaches it - the same <c>ILogDbContextFactory</c>, the same
     /// <c>DatabaseSettings</c>, the same options lambda.
     /// </remarks>
-    private static async Task<List<LogRecord>> RunStartupCheckAsync(string provider, string logConnectionString)
+    private static async Task<List<LogRecord>> RunStartupCheckAsync(string logConnectionString)
     {
         var records = new List<LogRecord>();
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DatabaseSettings:DBProvider"] = provider,
+                ["DatabaseSettings:DBProvider"] = DbProviderKeys.Npgsql,
                 // The business database is never touched by this method; it only has to parse.
                 ["DatabaseSettings:ConnectionString"] = logConnectionString,
                 ["DatabaseSettings:LogConnectionString"] = logConnectionString,
@@ -386,22 +278,14 @@ public class LogDatabaseCreationAcceptanceTests
 
     // ------------------------------------------------------------------ server helpers
 
-    private static bool CanConnect(Func<DbConnection> factory)
-    {
-        try
+    /// <summary>The GX_TEST_PG server's maintenance database.</summary>
+    private static string Maintenance() =>
+        new NpgsqlConnectionStringBuilder(PostgresTestDatabase.FromEnvironment(LogDatabaseName).ConnectionString)
         {
-            using var connection = factory();
-            connection.Open();
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
+            Database = "postgres"
+        }.ConnectionString;
 
-#if (UsePostgreSql)
-    private static void ExecPostgres(string connectionString, string sql)
+    private static void Exec(string connectionString, string sql)
     {
         using var connection = new NpgsqlConnection(connectionString);
         connection.Open();
@@ -412,51 +296,28 @@ public class LogDatabaseCreationAcceptanceTests
 
     private static bool PostgresDatabaseExists(string name)
     {
-        using var connection = new NpgsqlConnection(PostgresMaintenance);
+        using var connection = new NpgsqlConnection(Maintenance());
         connection.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT COUNT(*) FROM pg_database WHERE datname = '{name}'";
+        command.CommandText = "SELECT COUNT(*) FROM pg_database WHERE datname = @name";
+        command.Parameters.AddWithValue("name", name);
         return Convert.ToInt32(command.ExecuteScalar()) > 0;
     }
 
-    private static void DropPostgresDatabase(string name)
+    /// <summary>
+    /// Drops a database this test run created. The only DROP in the test suites, and it runs only
+    /// inside the opt-in tests (pass 47, CO-150).
+    /// </summary>
+    private static void DropDatabaseIfExists(string name)
     {
+        if (!IsDroppable(name))
+        {
+            throw new InvalidOperationException($"Refusing to drop '{name}': only {DroppablePrefix} databases created by these tests.");
+        }
+
         NpgsqlConnection.ClearAllPools();
-        try { ExecPostgres(PostgresMaintenance, $"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"); }
-        catch (Exception) { /* a fixture teardown is not a test result */ }
+        if (!PostgresDatabaseExists(name)) return;
+        Exec(Maintenance(), $"DROP DATABASE \"{name}\" WITH (FORCE)");
     }
-
-#endif
-#if (UseSqlServer)
-    private static void ExecSqlServer(string connectionString, string sql)
-    {
-        using var connection = new SqlConnection(connectionString);
-        connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.ExecuteNonQuery();
-    }
-
-    private static void ExecSqlServerQuiet(string connectionString, string sql)
-    {
-        try { ExecSqlServer(connectionString, sql); } catch (Exception) { }
-    }
-
-    private static bool SqlServerDatabaseExists(string name)
-    {
-        using var connection = new SqlConnection(SqlServerMaster);
-        connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT CASE WHEN DB_ID('{name}') IS NULL THEN 0 ELSE 1 END";
-        return Convert.ToInt32(command.ExecuteScalar()) > 0;
-    }
-
-    private static void DropSqlServerDatabase(string name)
-    {
-        SqlConnection.ClearAllPools();
-        ExecSqlServerQuiet(SqlServerMaster,
-            $"IF DB_ID('{name}') IS NOT NULL BEGIN ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{name}]; END");
-    }
-#endif
 }
 #nullable restore

@@ -16,7 +16,6 @@ using CleanArchitecture.Blazor.Application.Features.Tenants.DTOs;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
-using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using CleanArchitecture.Blazor.Server.UI.Components.Inputs.Autocomplete;
 using CleanArchitecture.Blazor.Server.UI.Pages.Identity.Users.Components;
@@ -26,8 +25,6 @@ using CleanArchitecture.Blazor.Server.UI.Services.UserPreferences;
 using FluentAssertions;
 using Mediator;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using MudBlazor;
@@ -57,20 +54,12 @@ public class SuperiorBoundComponentTests
     private const string TenantB = "tenant-b";
 
     private BunitContext _ctx = null!;
-    private SqliteConnection _connection = null!;
 
     [TearDown]
-    public async Task TearDown()
-    {
-        await _ctx.DisposeAsync();
-        await _connection.DisposeAsync();
-    }
+    public async Task TearDown() => await _ctx.DisposeAsync();
 
-    private async Task ArrangeAsync()
+    private Task ArrangeAsync()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
-        await _connection.OpenAsync();
-
         _ctx = new BunitContext();
         _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
@@ -79,12 +68,14 @@ public class SuperiorBoundComponentTests
         services.AddLocalization();
         services.AddMudServices();
 
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        // In-memory stores and a stub context factory (pass 47, CO-160): the dialog resolves all three when
+        // it initialises, but the only store call it makes before the picker renders is listing the
+        // roles, and the store it read was always empty. Saving is not under test here.
         services.AddIdentityCore<ApplicationUser>()
-            .AddRoles<ApplicationRole>()
-            .AddEntityFrameworkStores<ApplicationDbContext>();
-        services.AddSingleton(_connection);
-        services.AddScoped<IApplicationDbContextFactory, BoundTestDbContextFactory>();
+            .AddRoles<ApplicationRole>();
+        services.AddSingleton<IUserStore<ApplicationUser>>(new InMemoryUserStore());
+        services.AddSingleton<IRoleStore<ApplicationRole>>(new InMemoryRoleStore());
+        services.AddSingleton(Mock.Of<IApplicationDbContextFactory>());
         services.AddScoped<AdministratorProtectionService>();
         services.AddSingleton(Mock.Of<IUserContextLoader>());
 
@@ -105,9 +96,7 @@ public class SuperiorBoundComponentTests
         services.AddSingleton(TenantSource());
         services.AddSingleton(UserSource());
 
-        using var scope = services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        return Task.CompletedTask;
     }
 
     private static IDataSourceService<TenantDto> TenantSource()
@@ -128,16 +117,6 @@ public class SuperiorBoundComponentTests
         mock.Setup(x => x.InitializeAsync()).Returns(Task.CompletedTask);
         mock.SetupGet(x => x.DataSource).Returns(Array.Empty<ApplicationUserDto>());
         return mock.Object;
-    }
-
-    private sealed class BoundTestDbContextFactory : IApplicationDbContextFactory
-    {
-        private readonly SqliteConnection _connection;
-        public BoundTestDbContextFactory(SqliteConnection connection) => _connection = connection;
-
-        public ValueTask<IApplicationDbContext> CreateAsync(CancellationToken ct = default) =>
-            new(new ApplicationDbContext(
-                new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options));
     }
 
     /// <summary>Shows the dialog and reports the tenant the superior picker was bounded by.</summary>

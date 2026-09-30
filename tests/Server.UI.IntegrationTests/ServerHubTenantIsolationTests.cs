@@ -562,8 +562,11 @@ public class ServerHubTenantIsolationTests
         {
             foreach (var group in groups)
             {
+                // A group nobody addressed has no proxy, and nothing was sent to it. Stated as an empty
+                // list rather than "mock?.Invocations.Should()", whose null-conditional skipped the
+                // assertion itself whenever the proxy was missing (pass 47, CO-158).
                 _groups.TryGetValue(group, out var mock);
-                mock?.Invocations.Should().BeEmpty(
+                (mock?.Invocations.ToList() ?? []).Should().BeEmpty(
                     $"nothing addressed to {group} may be raised by a connection outside it");
             }
         }

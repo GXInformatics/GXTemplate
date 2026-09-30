@@ -10,14 +10,11 @@ using CleanArchitecture.Blazor.Application.Common.Interfaces;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Caching;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Domain.Identity;
-using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Server.UI.Pages.Identity.Login;
 using CleanArchitecture.Blazor.Server.UI.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using CleanArchitecture.Blazor.Server.UI.Services.Layout;
 using CleanArchitecture.Blazor.Server.UI.Services.UserPreferences;
@@ -39,7 +36,8 @@ namespace CleanArchitecture.Blazor.Server.UI.IntegrationTests;
 /// lesson: a navigation decided inside the circuit never becomes an HTTP request, so no HTTP test
 /// can see it.
 /// <para>
-/// This renders the real page against a real Identity store and drives the real form.
+/// This renders the real page against a real <see cref="UserManager{TUser}"/> (over an in-memory store
+/// since pass 47) and drives the real form.
 /// </para>
 /// </remarks>
 [TestFixture]
@@ -51,16 +49,12 @@ public class ChangePasswordNavigationComponentTests
 
     private BunitContext _ctx = null!;
     private string _userId = null!;
-    private SqliteConnection _connection = null!;
 
     [SetUp]
     public async Task SetUp()
     {
         _ctx = new BunitContext();
         _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-
-        _connection = new SqliteConnection("DataSource=:memory:");
-        await _connection.OpenAsync();
 
         var services = _ctx.Services;
         services.AddLogging();
@@ -82,16 +76,12 @@ public class ChangePasswordNavigationComponentTests
         services.AddSingleton(Mock.Of<IUserPreferencesService>());
         services.AddScoped<LayoutService>();
 
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
-        services.AddIdentityCore<ApplicationUser>()
-            .AddRoles<ApplicationRole>()
-            .AddEntityFrameworkStores<ApplicationDbContext>();
+        // The real UserManager over an in-memory store (pass 47): the page's decision is what is
+        // under test, and the one user it needs is created below, so no database is involved.
+        services.AddIdentityCore<ApplicationUser>();
+        services.AddSingleton<IUserStore<ApplicationUser>>(new InMemoryUserStore());
 
         var provider = services.BuildServiceProvider();
-        await using (var db = provider.GetRequiredService<ApplicationDbContext>())
-        {
-            await db.Database.EnsureCreatedAsync();
-        }
 
         using (var scope = provider.CreateScope())
         {
@@ -109,11 +99,7 @@ public class ChangePasswordNavigationComponentTests
     }
 
     [TearDown]
-    public async Task TearDown()
-    {
-        await _ctx.DisposeAsync();
-        await _connection.DisposeAsync();
-    }
+    public async Task TearDown() => await _ctx.DisposeAsync();
 
     private void Fill(IRenderedComponent<ChangePassword> page)
     {

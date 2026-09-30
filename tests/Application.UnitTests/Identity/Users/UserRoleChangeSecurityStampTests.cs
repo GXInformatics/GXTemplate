@@ -12,7 +12,7 @@ using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -28,13 +28,13 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Identity.Users;
 ///
 /// The role-change logic lives inside a .razor component with no headless entry point and the project
 /// carries no bUnit reference, so these tests replay the component's exact sequence against a real
-/// UserManager on SQLite. <see cref="ApplyEditAsync"/> mirrors SubmitAsync step for step; the single
+/// UserManager on PostgreSQL (the shared test database). <see cref="ApplyEditAsync"/> mirrors SubmitAsync step for step; the single
 /// call site in the component is verified by inspection.
 /// </summary>
 [TestFixture]
 public class UserRoleChangeSecurityStampTests
 {
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
     private ServiceProvider _provider = null!;
 
     private const string TenantA = "tenant-a";
@@ -43,12 +43,12 @@ public class UserRoleChangeSecurityStampTests
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<ApplicationDbContext>(o => o.UseNpgsql(_connection));
         services.AddIdentityCore<ApplicationUser>(o =>
             {
                 o.Password.RequireDigit = false;
@@ -64,7 +64,7 @@ public class UserRoleChangeSecurityStampTests
 
         using var scope = _provider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
 
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
         foreach (var role in new[] { "Basic", "Admin" })

@@ -14,7 +14,7 @@ using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Server.UI.Endpoints;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -40,7 +40,7 @@ public class FileEndpointsAuthorizationTests
     private const string UserA = "user-a";
     private const string UserB = "user-b";
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
     private ApplicationDbContext _db = null!;
     private IApplicationDbContextFactory _factory = null!;
     private IAuthorizationService _permitAll = null!;
@@ -53,12 +53,12 @@ public class FileEndpointsAuthorizationTests
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options;
         _db = new ApplicationDbContext(options);
-        await _db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
 
         _db.Tenants.Add(new Tenant { Id = TenantId, Name = "One" });
         _db.Tenants.Add(new Tenant { Id = OtherTenantId, Name = "Two" });
@@ -74,7 +74,7 @@ public class FileEndpointsAuthorizationTests
         var factory = new Mock<IApplicationDbContextFactory>();
         factory.Setup(x => x.CreateAsync(It.IsAny<CancellationToken>()))
             .Returns(() => new ValueTask<IApplicationDbContext>(
-                new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options)));
+                new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options)));
         _factory = factory.Object;
 
         _permitAll = BuildAuthorizationService(grantDownload: true);

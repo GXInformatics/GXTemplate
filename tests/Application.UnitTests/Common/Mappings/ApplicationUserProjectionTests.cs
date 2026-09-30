@@ -7,7 +7,7 @@ using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using FluentAssertions;
 using Mapster;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 
@@ -18,15 +18,15 @@ public class ApplicationUserProjectionTests
     [Test]
     public async Task ProjectToType_Should_Project_UserTenants_From_RelationalQuery()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await using var connection = UnitTestDatabase.NewConnection();
         await connection.OpenAsync();
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(connection)
+            .UseNpgsql(connection)
             .Options;
 
         await using var context = new ApplicationDbContext(options);
-        await context.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
 
         var tenant = new Tenant
         {

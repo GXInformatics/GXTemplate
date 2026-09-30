@@ -1,27 +1,21 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Data.Common;
 using System.Linq;
 using System.Threading.Tasks;
-using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
+using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using FluentAssertions;
-#if (UseSqlServer)
-using Microsoft.Data.SqlClient;
-#endif
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-#if (UsePostgreSql)
+using Microsoft.Extensions.Options;
 using Npgsql;
-#endif
 using NUnit.Framework;
 
 namespace CleanArchitecture.Blazor.Server.UI.IntegrationTests;
@@ -47,19 +41,12 @@ public class LogDatabaseSeparationTests
 
     /// <summary>A message distinctive enough to find among whatever else the application logged.</summary>
     private static readonly string Marker = "gx-log-roundtrip-" + Guid.NewGuid().ToString("N");
-#if (!UseSqlServer)
 
     /// <summary>
-    /// The SQLite sink's flush timer, which is the slowest period left when SQL Server's is not
-    /// generated (PostgreSQL's is <c>LoggerConfigurationPostgreSqlExtensions.DefaultPeriod</c>, 5s).
+    /// The PostgreSQL sink's batch period: the application registers the sink without a
+    /// <c>period</c> (<c>SerilogExtensions.WriteToNpgsql</c>), so the package default applies.
     /// </summary>
-    /// <remarks>
-    /// Restated rather than referenced because Blazor.Serilog.Sinks.SQLite 1.1.0 exposes no constant:
-    /// it hard-codes 10 seconds in <c>BatchProvider._timerThresholdSpan</c>. Read from a constructed
-    /// sink by reflection in Pass 44, not guessed; re-read it if that package is upgraded.
-    /// </remarks>
-    private static readonly TimeSpan SqliteSinkTimerPeriod = TimeSpan.FromSeconds(10);
-#endif
+    private static readonly TimeSpan SinkPeriod = Serilog.LoggerConfigurationPostgreSqlExtensions.DefaultPeriod;
 
     [OneTimeSetUp]
     public async Task StartTheApplication()
@@ -87,16 +74,14 @@ public class LogDatabaseSeparationTests
     /// is not synchronous with the log call and polling is the honest way to observe it.
     /// </summary>
     /// <remarks>
-    /// The budget is derived from the slowest configured sink period - the SQL Server sink's
-    /// <c>SerilogExtensions.SqlServerBatchPeriod</c> where that provider ships - rather than
-    /// picked, and that is not fussiness. It was a flat 60 x 250ms = 15 seconds, which is comfortable
-    /// for SQLite and PostgreSQL and **shorter than the SQL Server sink's own 20-second BatchPeriod**
-    /// - so under <c>GX_TEST_DBPROVIDER=mssql</c> this test failed by giving up before the sink was
-    /// due to write. It reported "the message never arrived" for a message that was merely still in
-    /// the batch, which is the most misleading failure a round-trip test can produce.
+    /// The budget is derived from the sink's own period rather than picked, and that is not
+    /// fussiness. It was once a flat 15 seconds, shorter than another sink's 20-second batch period,
+    /// so on that sink this test gave up before it was due to write and reported "the message never
+    /// arrived" for a message that was merely still in the batch - the most misleading failure a
+    /// round-trip test can produce.
     /// <para>
-    /// Half as long again as the slowest configured period, so a tuning change to that period moves
-    /// this with it instead of silently eating the margin.
+    /// Half as long again as <see cref="SinkPeriod"/> (PostgreSQL's is the only sink the tests run), so a
+    /// tuning change to that period moves this with it instead of silently eating the margin.
     /// </para>
     /// </remarks>
     private async Task<bool> WaitForTheMarkerAsync()
@@ -105,16 +90,7 @@ public class LogDatabaseSeparationTests
         var factory = scope.ServiceProvider.GetRequiredService<ILogDbContextFactory>();
 
         var interval = TimeSpan.FromMilliseconds(250);
-#if (UseSqlServer)
-        var slowestPeriod = SerilogExtensions.SqlServerBatchPeriod;
-#elif (UsePostgreSql)
-        var slowestPeriod = SqliteSinkTimerPeriod > Serilog.LoggerConfigurationPostgreSqlExtensions.DefaultPeriod
-            ? SqliteSinkTimerPeriod
-            : Serilog.LoggerConfigurationPostgreSqlExtensions.DefaultPeriod;
-#else
-        var slowestPeriod = SqliteSinkTimerPeriod;
-#endif
-        var attempts = (int)Math.Ceiling(slowestPeriod * 1.5 / interval);
+        var attempts = (int)Math.Ceiling(SinkPeriod * 1.5 / interval);
 
         for (var attempt = 0; attempt < attempts; attempt++)
         {
@@ -132,69 +108,27 @@ public class LogDatabaseSeparationTests
     [OneTimeTearDown]
     public void StopTheApplication() => _factory.Dispose();
 
-    /// <summary>
-    /// Every table in the database the connection string points at, for whichever provider the
-    /// harness is running against.
-    /// </summary>
+    /// <summary>Every table in the PostgreSQL database the connection string points at.</summary>
     /// <remarks>
-    /// This is deliberately raw ADO.NET against each provider's own catalogue rather than anything
-    /// EF offers, because the claim under test is about what is IN the database - not about what a
-    /// model believes is in it. Asking EF would be asking the same source that produced the schema
-    /// whether it produced the schema.
-    /// <para>
-    /// Provider-aware since Pass 14B's anomaly 1. It previously opened every connection string with
-    /// <see cref="SqliteConnection"/>, which is correct for the harness's default and throws
-    /// "Connection string keyword 'host' is not supported" under
-    /// <c>GX_TEST_DBPROVIDER=postgresql</c> - so the four tests that most directly assert Pass 11's
-    /// central claim were the four that could not run on the provider the template ships pointed at.
-    /// </para>
-    /// <para>
-    /// An unrecognised provider throws rather than returning nothing: an empty list would make
-    /// <c>NotContain</c> pass and <c>Contain</c> fail, which is a confusing way to be told the
-    /// harness does not understand its own configuration.
-    /// </para>
+    /// This is deliberately raw ADO.NET against the catalogue rather than anything EF offers,
+    /// because the claim under test is about what is IN the database - not about what a model
+    /// believes is in it. Asking EF would be asking the same source that produced the schema whether
+    /// it produced the schema. PostgreSQL only since pass 47, when the harness lost its database files.
     /// </remarks>
-    private static List<string> TableNames(string provider, string connectionString)
+    private static List<string> TableNames(string connectionString)
     {
-        using DbConnection connection = provider.ToLowerInvariant() switch
-        {
-            DbProviderKeys.SqLite => new SqliteConnection(connectionString),
-#if (UsePostgreSql)
-            DbProviderKeys.Npgsql => new NpgsqlConnection(connectionString),
-#endif
-#if (UseSqlServer)
-            DbProviderKeys.SqlServer => new SqlConnection(connectionString),
-#endif
-            _ => throw new NotSupportedException(
-                $"LogDatabaseSeparationTests cannot inspect the schema of a '{provider}' database. " +
-                "Add its catalogue query here rather than letting these tests silently stop asserting.")
-        };
-
+        using var connection = new NpgsqlConnection(connectionString);
         connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = provider.ToLowerInvariant() switch
-        {
-            DbProviderKeys.SqLite => "SELECT name FROM sqlite_master WHERE type='table'",
 
-#if (UsePostgreSql)
-            // Excluding the two system schemas rather than filtering to 'public': the business
-            // database keeps Identity's tables and the snake_cased ones side by side, and pinning a
-            // schema name here would quietly stop finding them if either ever moved.
-            DbProviderKeys.Npgsql =>
-                """
-                SELECT table_name FROM information_schema.tables
-                WHERE table_type = 'BASE TABLE'
-                  AND table_schema NOT IN ('pg_catalog', 'information_schema')
-                """,
-
-#endif
-#if (UseSqlServer)
-            // sys.tables is already scoped to user tables in the connected database.
-            DbProviderKeys.SqlServer => "SELECT name FROM sys.tables",
-
-#endif
-            _ => throw new NotSupportedException(provider)
-        };
+        // Excluding the two system schemas rather than filtering to 'public': the business database
+        // keeps Identity's tables and the snake_cased ones side by side, and pinning a schema name
+        // here would quietly stop finding them if either ever moved.
+        using var command = new NpgsqlCommand(
+            """
+            SELECT table_name FROM information_schema.tables
+            WHERE table_type = 'BASE TABLE'
+              AND table_schema NOT IN ('pg_catalog', 'information_schema')
+            """, connection);
 
         using var reader = command.ExecuteReader();
         var names = new List<string>();
@@ -202,9 +136,9 @@ public class LogDatabaseSeparationTests
         return names;
     }
 
-    private List<string> BusinessTableNames() => TableNames(_factory.DbProvider, _factory.BusinessConnectionString);
+    private List<string> BusinessTableNames() => TableNames(_factory.BusinessConnectionString);
 
-    private List<string> LogTableNames() => TableNames(_factory.DbProvider, _factory.LogConnectionString);
+    private List<string> LogTableNames() => TableNames(_factory.LogConnectionString);
 
     /// <summary>
     /// Compares two table names ignoring case and underscores.
@@ -224,6 +158,22 @@ public class LogDatabaseSeparationTests
     // ------------------------------------------------------- the central claim
 
     [Test]
+    public void TheBusinessAndLogSettings_NameTwoDifferentDatabases()
+    {
+        // Every other test here is only evidence of separation if the host was actually given two
+        // databases. Pointed at one, "no log table in the business database" would be checking the
+        // log database's own table list against itself. Read from the settings the host bound, not
+        // from the harness, because that is what the application connects with (pass 47, CO-159).
+        var settings = _factory.Services.GetRequiredService<IOptions<DatabaseSettings>>().Value;
+        var business = new NpgsqlConnectionStringBuilder(settings.ConnectionString).Database;
+        var logs = new NpgsqlConnectionStringBuilder(settings.LogConnectionString).Database;
+
+        business.Should().NotBeNullOrEmpty();
+        logs.Should().NotBeNullOrEmpty();
+        logs.Should().NotBe(business, "the log database must be a different database from the business one");
+    }
+
+    [Test]
     public void TheBusinessDatabase_HasNoSystemLogsTable()
     {
         // This is what Pass 11 is for. If this table exists in the business database then log volume
@@ -232,7 +182,7 @@ public class LogDatabaseSeparationTests
         var tables = BusinessTableNames();
 
         tables.Should().NotBeEmpty("the business migration must have run");
-        Has(tables, LogTableDdl.TableName).Should().BeFalse(
+        Has(tables, SerilogExtensions.NpgsqlTableName).Should().BeFalse(
             "logs moved to their own database; the business schema must no longer carry the table " +
             $"(under any spelling - the tables found were: {string.Join(", ", tables)})");
     }
@@ -251,7 +201,7 @@ public class LogDatabaseSeparationTests
         // Nothing migrates the log database - it has no migration chain at all - and since Pass 11C
         // no sink creates it either. Its presence is entirely LogTableDdl's doing, run from
         // LogDatabaseStartupCheck before the business database is even touched.
-        Has(LogTableNames(), LogTableDdl.TableName).Should().BeTrue();
+        Has(LogTableNames(), SerilogExtensions.NpgsqlTableName).Should().BeTrue();
     }
 
     [Test]
@@ -285,10 +235,9 @@ public class LogDatabaseSeparationTests
 
         // Deliberately looser than an equality check, as it always has been: anything whose name
         // merely RESEMBLES a log table counts, so a "SystemLogs_backup" or a half-finished rename
-        // is caught too. It goes through the shared catalogue query now instead of carrying its own
-        // copy of SQLite's, which is what made this the second of the two dialect-bound tests.
+        // is caught too.
         var suspicious = BusinessTableNames()
-            .Where(t => Normalise(t).Contains(Normalise(LogTableDdl.TableName).TrimEnd('s')))
+            .Where(t => Normalise(t).Contains(Normalise(SerilogExtensions.NpgsqlTableName).TrimEnd('s')))
             .ToList();
 
         suspicious.Should().BeEmpty(

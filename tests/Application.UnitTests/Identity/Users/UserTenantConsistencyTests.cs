@@ -10,7 +10,7 @@ using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
@@ -34,7 +34,7 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Identity.Users;
 /// <para>
 /// The rule itself is <see cref="PrimaryTenantRule"/> and is tested directly in
 /// <c>PrimaryTenantRuleTests</c>. What is replayed here is the component's SEQUENCE - profile update,
-/// then membership rewrite - against a real <c>UserManager</c> on SQLite, following
+/// then membership rewrite - against a real <c>UserManager</c> on PostgreSQL, following
 /// <c>UserRoleChangeSecurityStampTests</c>, because the logic lives in a <c>.razor</c> file with no
 /// headless entry point. The replay calls the same <c>PrimaryTenantRule</c> the component calls, so
 /// only the ordering is mirrored and not the rule.
@@ -47,18 +47,18 @@ public class UserTenantConsistencyTests
     private const string TenantB = "tenant-b";
     private const string TenantC = "tenant-c";
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
     private ServiceProvider _provider = null!;
 
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<ApplicationDbContext>(o => o.UseNpgsql(_connection));
         services.AddIdentityCore<ApplicationUser>()
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>();
@@ -66,7 +66,7 @@ public class UserTenantConsistencyTests
 
         using var scope = _provider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
         db.Tenants.Add(new Tenant { Id = TenantA, Name = "Tenant A" });
         db.Tenants.Add(new Tenant { Id = TenantB, Name = "Tenant B" });
         db.Tenants.Add(new Tenant { Id = TenantC, Name = "Tenant C" });

@@ -10,7 +10,7 @@ using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using Mapster;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -33,22 +33,23 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Services;
 /// rather than restated here - the third consumer, and the reason it was extracted.
 /// </para>
 /// </remarks>
+[Collection(PostgresCollection.Name)]
 public class UserVisibilityTests : IDisposable
 {
     private const string TenantA = "tenant-a";
     private const string TenantB = "tenant-b";
 
-    private readonly SqliteConnection _connection;
+    private readonly NpgsqlConnection _connection;
     private readonly ServiceProvider _provider;
 
     public UserVisibilityTests()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = InfraTestDatabase.NewConnection();
         _connection.Open();
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<ApplicationDbContext>(o => o.UseNpgsql(_connection));
         services.AddIdentityCore<ApplicationUser>()
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>();
@@ -56,7 +57,7 @@ public class UserVisibilityTests : IDisposable
 
         using var scope = _provider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        db.Database.EnsureCreated();
+        InfraTestDatabase.Reset();
         db.Tenants.Add(new Tenant { Id = TenantA, Name = "Tenant A" });
         db.Tenants.Add(new Tenant { Id = TenantB, Name = "Tenant B" });
         db.Users.Add(User("a-one", TenantA));

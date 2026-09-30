@@ -27,11 +27,11 @@ public class LogModelSeparationTests
     // The provider only has to be enough to build a model; nothing here opens a connection.
     private static ApplicationDbContext BusinessContext() =>
         new(new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite("Data Source=:memory:").Options);
+            .UseNpgsql("Host=none").Options);
 
     private static LogDbContext LogContext() =>
         new(new DbContextOptionsBuilder<LogDbContext>()
-            .UseSqlite("Data Source=:memory:").Options);
+            .UseNpgsql("Host=none").Options);
 
     [Fact]
     public void TheBusinessModel_DoesNotContainSystemLog()
@@ -95,15 +95,6 @@ public class LogModelSeparationTests
 /// </remarks>
 public class LogTableNamingTests
 {
-    [Fact]
-    public void OnSqlite_TheModelReadsSystemLogs()
-    {
-        using var db = new LogDbContext(new DbContextOptionsBuilder<LogDbContext>()
-            .UseSqlite("Data Source=:memory:").Options);
-
-        Assert.Equal("SystemLogs", db.Model.FindEntityType(typeof(SystemLog))!.GetTableName());
-    }
-
 #if (UseSqlServer)
     [Fact]
     public void OnSqlServer_TheModelReadsSystemLogs()
@@ -115,7 +106,6 @@ public class LogTableNamingTests
     }
 #endif
 
-#if (UsePostgreSql)
     [Fact]
     public void OnPostgres_TheModelReadsTheSnakeCaseNameTheSinkWrites()
     {
@@ -129,5 +119,4 @@ public class LogTableNamingTests
             CleanArchitecture.Blazor.Infrastructure.Extensions.SerilogExtensions.NpgsqlTableName,
             db.Model.FindEntityType(typeof(SystemLog))!.GetTableName());
     }
-#endif
 }

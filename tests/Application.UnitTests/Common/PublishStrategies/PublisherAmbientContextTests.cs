@@ -14,7 +14,7 @@ using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using FluentAssertions;
 using Mediator;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -201,7 +201,7 @@ public class PublisherAmbientContextTests
     [Test]
     public async Task TheLandmine_AHandlerWritingToTheDatabaseStampsThePublishingTenant()
     {
-        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await using var connection = UnitTestDatabase.NewConnection();
         await connection.OpenAsync();
 
         var accessor = new UserContextAccessor();
@@ -210,14 +210,14 @@ public class PublisherAmbientContextTests
 
         ApplicationDbContext Build() => new(
             new DbContextOptionsBuilder<ApplicationDbContext>()
-                .UseSqlite(connection)
+                .UseNpgsql(connection)
                 .AddInterceptors(new AuditableEntityInterceptor(accessor, dateTime.Object))
                 .Options,
             accessor);
 
         await using (var seed = Build())
         {
-            await seed.Database.EnsureCreatedAsync();
+            await UnitTestDatabase.ResetAsync();
             // Pass 32 A5: the audit row has a real foreign key to AspNetUsers, so a successful write
             // needs its author to exist.
             seed.Users.Add(new ApplicationUser { Id = "u-b", UserName = "u-b", Email = "b@example.test" });

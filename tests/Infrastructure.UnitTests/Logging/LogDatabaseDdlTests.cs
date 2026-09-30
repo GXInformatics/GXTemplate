@@ -128,7 +128,7 @@ public class LogDatabaseDdlTests
     public void ThePostgresMaintenanceConnection_SwapsOnlyTheDatabase()
     {
         const string configured =
-            "Host=db.example.com;Port=6432;Database=gx_logs;Username=gx;Password=secret;Timeout=17";
+            "Host=db.example.com;Port=6432;Database=gx_logs;Username=gx;Timeout=17";
 
         using var connection = LogDatabaseDdl.CreateMaintenanceConnection(DbProviderKeys.Npgsql, configured);
         var b = new NpgsqlConnectionStringBuilder(connection.ConnectionString);
@@ -149,7 +149,7 @@ public class LogDatabaseDdlTests
     public void TheSqlServerMaintenanceConnection_SwapsOnlyTheCatalogue()
     {
         const string configured =
-            @"Server=db.example.com;Database=GxLogs;User Id=gx;Password=secret;Encrypt=True;Connect Timeout=17";
+            @"Server=db.example.com;Database=GxLogs;User Id=gx;Encrypt=True;Connect Timeout=17";
 
         using var connection = LogDatabaseDdl.CreateMaintenanceConnection(DbProviderKeys.SqlServer, configured);
         var b = new SqlConnectionStringBuilder(connection.ConnectionString);

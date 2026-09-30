@@ -22,7 +22,7 @@ using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services.Storage;
 using FluentAssertions;
 using Mapster;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Localization;
 using Moq;
@@ -54,7 +54,7 @@ public class DocumentTenantIsolationTests
     private const string UserA2 = "user-a2";
     private const string UserB = "user-b";
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
     private ApplicationDbContext _db = null!;
     private string _fileRoot = null!;
     private IFileStorage _fileStorage = null!;
@@ -67,12 +67,12 @@ public class DocumentTenantIsolationTests
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
         _db = new ApplicationDbContext(
-            new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options);
-        await _db.Database.EnsureCreatedAsync();
+            new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options);
+        await UnitTestDatabase.ResetAsync();
 
         _fileRoot = Path.Combine(Path.GetTempPath(), "gx-doc-isolation", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_fileRoot);
@@ -123,7 +123,7 @@ public class DocumentTenantIsolationTests
     }
 
     private ApplicationDbContext NewContext() =>
-        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options);
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options);
 
     private Mock<IApplicationDbContextFactory> Factory()
     {

@@ -42,6 +42,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\Server.UI\Server.UI.csproj" />
+        <ProjectReference Include="..\TestSupport\TestSupport.csproj" />
     </ItemGroup>
 
 </Project>

@@ -14,7 +14,7 @@ using CleanArchitecture.Blazor.Domain.Events;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
 using Mediator;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
@@ -153,16 +153,16 @@ public class SaveChangesInterceptorRegressionTests
 
     private static async Task<ApplicationDbContext> CreateContextAsync(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors)
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
+        // Reset first: it also creates and migrates the database on first use.
+        await UnitTestDatabase.ResetAsync();
 
+        // A connection string, not an opened connection: a context never disposes a connection it
+        // was handed, so each call used to leave one open for the rest of the run (pass 47, CO-160).
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(connection)
+            .UseNpgsql(UnitTestDatabase.ConnectionString)
             .AddInterceptors(interceptors)
             .Options;
 
-        var context = new ApplicationDbContext(options);
-        await context.Database.EnsureCreatedAsync();
-        return context;
+        return new ApplicationDbContext(options);
     }
 }

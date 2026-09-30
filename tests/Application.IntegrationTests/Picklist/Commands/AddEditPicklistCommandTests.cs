@@ -39,6 +39,7 @@ internal class AddEditPicklistCommandTests : TestBase
             { Name = Picklist.Brand, Text = "Test", Value = "Test", Description = "Description" };
         var result = await SendAsync(addCommand);
         var find = await FindAsync<PicklistSet>(result.Data);
+        find.Should().NotBeNull();
         var editCommand = new AddEditPicklistSetCommand
             { Id = find.Id, Name = Picklist.Brand, Text = "Test1", Value = "Test1", Description = "Description1" };
         await SendAsync(editCommand);

@@ -15,7 +15,7 @@ using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -62,7 +62,7 @@ public class RoleDefinitionRightTests
     private const string TargetRole = "Editors";
     private const string GrantablePermission = "Permissions.Documents.View";
 
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
     private ServiceProvider _provider = null!;
     private MutableUserContextAccessor _contextAccessor = null!;
     private ConfigurablePermissionQueryService _permissionQuery = null!;
@@ -70,14 +70,14 @@ public class RoleDefinitionRightTests
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
         _contextAccessor = new MutableUserContextAccessor();
         _permissionQuery = new ConfigurablePermissionQueryService();
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<ApplicationDbContext>(o => o.UseNpgsql(_connection));
         services.AddIdentityCore<ApplicationUser>(o =>
             {
                 o.Password.RequireDigit = false;
@@ -93,7 +93,7 @@ public class RoleDefinitionRightTests
 
         using var scope = _provider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await UnitTestDatabase.ResetAsync();
 
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
         foreach (var role in new[] { ConstantRoles.Admin, ConstantRoles.Basic, TargetRole })

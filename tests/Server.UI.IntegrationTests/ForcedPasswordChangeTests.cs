@@ -32,6 +32,7 @@ public class ForcedPasswordChangeTests
 
     private GxWebApplicationFactory _factory = null!;
     private HttpClient _flagged = null!;
+    private string _administratorId = null!;
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -40,7 +41,7 @@ public class ForcedPasswordChangeTests
 
         // The flag is SET ON explicitly: this is the state a brand-new deployment is in, and stating it
         // rather than relying on the bootstrap keeps this fixture independent of the ones before it.
-        await _factory.ResetAdministratorPasswordAsync(mustChangePassword: true);
+        _administratorId = (await _factory.ResetAdministratorPasswordAsync(mustChangePassword: true)).Id;
 
         _flagged = _factory.CreateNonRedirectingClient();
         await CookieLogin.SignInAndExpectSuccessAsync(
@@ -172,7 +173,7 @@ public class ForcedPasswordChangeTests
         // The paths are written as literals rather than through the route constants on purpose. This
         // pins an HTTP contract that the change-password page depends on, and a test that moved
         // automatically with a rename would not notice the page and the endpoint drifting apart.
-        using var factory = new GxWebApplicationFactory(Environments.Production);
+        using var factory = new GxWebApplicationFactory(Environments.Production, resetDatabase: false);
         await factory.ResetAdministratorPasswordAsync(mustChangePassword: true);
 
         using var client = factory.CreateNonRedirectingClient();
@@ -224,12 +225,28 @@ public class ForcedPasswordChangeTests
         }
         finally
         {
-            // This test genuinely changes the administrator's password, and against a SERVER
-            // database every fixture in the run shares one. Leaving it changed makes every later
-            // sign-in with KnownPassword fail - which is exactly what it did on PostgreSQL before
-            // this restore existed, while passing on SQLite where each fixture gets its own file.
+            // This test genuinely changes the administrator's password, and this nested host shares
+            // the fixture host's database (resetDatabase: false). Leaving it changed makes every
+            // later sign-in with KnownPassword fail - which is exactly what it did on PostgreSQL
+            // before this restore existed.
             await factory.ResetAdministratorPasswordAsync(mustChangePassword: false);
         }
+    }
+
+    [Test]
+    public async Task ANestedHost_SharesTheFixturesInstallation_RatherThanProvisioningItsOwn()
+    {
+        // The four nested hosts in this class boot beside the fixture's host, on the same database,
+        // with resetDatabase: false (pass 47). A reset there would delete the administrator the
+        // fixture's signed-in client belongs to, and the nested boot would provision a different
+        // one - so the "same account, two hosts" situation these tests describe would silently
+        // become "two accounts". The administrator's id is what tells the two apart.
+        using var factory = new GxWebApplicationFactory(Environments.Production, resetDatabase: false);
+
+        var administrator = await factory.ResetAdministratorPasswordAsync(mustChangePassword: true);
+
+        administrator.Id.Should().Be(_administratorId,
+            "a nested host must see the fixture's own administrator, not one its boot provisioned");
     }
 
     [Test]
@@ -238,7 +255,7 @@ public class ForcedPasswordChangeTests
         // The same guarantee stated as the claim itself rather than as a redirect, so a future
         // change that made "/" reachable for some other reason could not make the test above pass
         // while the claim was still being carried.
-        using var factory = new GxWebApplicationFactory(Environments.Production);
+        using var factory = new GxWebApplicationFactory(Environments.Production, resetDatabase: false);
         await factory.ResetAdministratorPasswordAsync(mustChangePassword: true);
 
         using var client = factory.CreateNonRedirectingClient();
@@ -272,7 +289,7 @@ public class ForcedPasswordChangeTests
         // It is on the middleware's AlwaysAllowed list, so it is worth pinning that it cannot be
         // used to LEAVE the gate while the flag is still set. It rebuilds the principal from the
         // user record, so a still-flagged user simply gets the claim back.
-        using var factory = new GxWebApplicationFactory(Environments.Production);
+        using var factory = new GxWebApplicationFactory(Environments.Production, resetDatabase: false);
         await factory.ResetAdministratorPasswordAsync(mustChangePassword: true);
 
         using var client = factory.CreateNonRedirectingClient();
@@ -294,7 +311,7 @@ public class ForcedPasswordChangeTests
         // What the old OnceTheFlagIsCleared_TheApplicationIsReachable covered: the gate lets go for
         // a user who never carried the flag. Kept, because it is the only test of that direction,
         // but it is no longer the flow's regression test - it cannot fail the way the flow failed.
-        using var factory = new GxWebApplicationFactory(Environments.Production);
+        using var factory = new GxWebApplicationFactory(Environments.Production, resetDatabase: false);
         await factory.ResetAdministratorPasswordAsync(mustChangePassword: false);
 
         using var client = factory.CreateNonRedirectingClient();

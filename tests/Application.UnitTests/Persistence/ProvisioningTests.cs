@@ -11,7 +11,7 @@ using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
@@ -31,18 +31,18 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Persistence;
 [TestFixture]
 public class ProvisioningTests
 {
-    private SqliteConnection _connection = null!;
+    private NpgsqlConnection _connection = null!;
     private ServiceProvider _provider = null!;
 
     [SetUp]
     public async Task SetUp()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection = UnitTestDatabase.NewConnection();
         await _connection.OpenAsync();
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContextFactory<ApplicationDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContextFactory<ApplicationDbContext>(o => o.UseNpgsql(_connection));
         services.AddIdentityCore<ApplicationUser>(o =>
             {
                 // Deliberately the strictest shape the template can be configured with, so the
@@ -63,12 +63,10 @@ public class ProvisioningTests
 
         _provider = services.BuildServiceProvider();
 
-        // InitialiseAsync runs migrations, which this provider-agnostic in-memory database does not
-        // carry; EnsureCreated builds the same schema for the paths under test.
-        using var scope = _provider.CreateScope();
-        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
-        await using var db = await factory.CreateDbContextAsync();
-        await db.Database.EnsureCreatedAsync();
+        // The shared test database is migrated through the real migrations once per run
+        // (UnitTestDatabase), so the schema under test is the migrated one; the reset gives each test
+        // an empty database.
+        await UnitTestDatabase.ResetAsync();
     }
 
     [TearDown]

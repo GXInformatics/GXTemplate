@@ -2,6 +2,7 @@
 using System.Net;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Constants;
+using CleanArchitecture.Blazor.Domain.Identity;
 using FluentAssertions;
 using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
@@ -16,12 +17,13 @@ namespace CleanArchitecture.Blazor.Server.UI.IntegrationTests;
 public class CookieLoginTests
 {
     private GxWebApplicationFactory _factory = null!;
+    private ApplicationUser _administrator = null!;
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
     {
         _factory = new GxWebApplicationFactory(Environments.Production);
-        await _factory.ResetAdministratorPasswordAsync(mustChangePassword: false);
+        _administrator = await _factory.ResetAdministratorPasswordAsync(mustChangePassword: false);
     }
 
     [OneTimeTearDown]
@@ -33,6 +35,15 @@ public class CookieLoginTests
         // Pass 7-3's finding: before it, Production came up with a correct, empty schema and no
         // account to sign in with. ResetAdministratorPasswordAsync throws if there is none, so
         // reaching OneTimeSetUp at all is the assertion; this states it explicitly.
+        //
+        // On a shared database "there is an administrator" no longer proves the bootstrap ran: an
+        // earlier fixture's boot, or an earlier run, may have left one. The bootstrap stamps
+        // CreatedAt when it provisions, and the factory resets the database before this host boots,
+        // so an account stamped after the factory was created is one THIS boot provisioned (pass 47).
+        _administrator.CreatedAt.Should().NotBeNull()
+            .And.BeOnOrAfter(_factory.ConstructedAtUtc,
+                "the administrator must have been provisioned by this boot, not left over from an earlier one");
+
         using var client = _factory.CreateNonRedirectingClient();
 
         var response = await CookieLogin.SignInAsync(client, Users.Administrator, GxWebApplicationFactory.KnownPassword);

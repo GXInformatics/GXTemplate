@@ -25,11 +25,9 @@ namespace CleanArchitecture.Blazor.Server.UI.IntegrationTests;
 /// rather than reasoned about. It would have caught the original defect.
 /// </para>
 /// <para>
-/// The harness runs on SQLite by default, so the Npgsql branch of <c>UseDatabase</c> is not even
-/// reached here - which makes this test WEAKER than it looks on its own, and is exactly why
-/// <c>TimestamptzModelInvariantTests</c> exists beside it: that one drives the Npgsql registration
-/// directly, and its source assertion catches a reintroduction in any branch, reached or not. Under
-/// <c>GX_TEST_DBPROVIDER=postgresql</c> this test additionally covers the reached case.
+/// The harness boots on PostgreSQL (pass 47), so the Npgsql branch of <c>UseDatabase</c> and the
+/// PostgreSQL sink are both on the path this test observes. <c>TimestamptzModelInvariantTests</c>
+/// stays beside it as the source-level check.
 /// </para>
 /// </remarks>
 [TestFixture]

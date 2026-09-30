@@ -1,7 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
@@ -10,7 +10,7 @@ using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using NUnit.Framework;
@@ -27,7 +27,7 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Common.Interceptors;
 /// permanent - because the column has to be right before anything is allowed to depend on it, and
 /// because it is far cheaper to get right now than after a customer database exists.
 /// <para>
-/// Durability is read through a SEPARATE connection to the same file, following
+/// Durability is read through a SEPARATE connection to the same database, following
 /// <c>TransactionalAuditTests</c>: only that distinguishes a committed row from one staged on the
 /// context under test.
 /// </para>
@@ -39,17 +39,16 @@ public class TenantStampingTests
     private const string TenantA = "tenant-a";
     private const string TenantB = "tenant-b";
 
-    private string _dbPath = null!;
     private string _connectionString = null!;
 
     [SetUp]
     public async Task SetUp()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"gxstamp-{Guid.NewGuid():N}.db");
-        _connectionString = new SqliteConnectionStringBuilder { DataSource = _dbPath }.ToString();
+        // The shared test database, emptied, in place of a new database file per test.
+        _connectionString = UnitTestDatabase.ConnectionString;
+        await UnitTestDatabase.ResetAsync();
 
         await using var ctx = CreateContext(tenantId: null);
-        await ctx.Database.EnsureCreatedAsync();
         ctx.Tenants.Add(new Tenant { Id = TenantA, Name = "Tenant A" });
         ctx.Tenants.Add(new Tenant { Id = TenantB, Name = "Tenant B" });
         ctx.Users.Add(new ApplicationUser
@@ -57,13 +56,6 @@ public class TenantStampingTests
             Id = ActingUserId, UserName = "stamper", Email = "stamper@example.com", TenantId = TenantA
         });
         await ctx.SaveChangesAsync();
-    }
-
-    [TearDown]
-    public void TearDown()
-    {
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
     }
 
     // ---- harness -------------------------------------------------------------------------------
@@ -83,7 +75,7 @@ public class TenantStampingTests
         dateTime.SetupGet(x => x.UtcNow).Returns(new DateTime(2026, 9, 3, 12, 0, 0, DateTimeKind.Utc));
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(_connectionString)
+            .UseNpgsql(_connectionString)
             .AddInterceptors(new AuditableEntityInterceptor(userContext.Object, dateTime.Object))
             .Options;
         return new ApplicationDbContext(options);
@@ -92,7 +84,7 @@ public class TenantStampingTests
     /// <summary>Reads one committed scalar through an independent connection.</summary>
     private object? CommittedScalar(string sql)
     {
-        using var conn = new SqliteConnection(_connectionString);
+        using var conn = new NpgsqlConnection(_connectionString);
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
@@ -101,10 +93,10 @@ public class TenantStampingTests
     }
 
     private string? CommittedAuditTenant() =>
-        (string?)CommittedScalar("SELECT TenantId FROM AuditTrails ORDER BY Id DESC LIMIT 1");
+        (string?)CommittedScalar("SELECT \"TenantId\" FROM \"AuditTrails\" ORDER BY \"Id\" DESC LIMIT 1");
 
     private string? CommittedPicklistTenant(string value) =>
-        (string?)CommittedScalar($"SELECT TenantId FROM PicklistSets WHERE Value = '{value}'");
+        (string?)CommittedScalar($"SELECT \"TenantId\" FROM \"PicklistSets\" WHERE \"Value\" = '{value}'");
 
     private static PicklistSet NewPicklist(string value) => new()
     {
@@ -143,7 +135,7 @@ public class TenantStampingTests
         ctx.Documents.Add(new Document { Title = "doc-a", DocumentType = DocumentType.Document });
         await ctx.SaveChangesAsync();
 
-        CommittedScalar("SELECT TenantId FROM Documents WHERE Title = 'doc-a'").Should().Be(TenantA);
+        CommittedScalar("SELECT \"TenantId\" FROM \"Documents\" WHERE \"Title\" = 'doc-a'").Should().Be(TenantA);
     }
 
     // ---- with no context at all ----------------------------------------------------------------
@@ -189,36 +181,43 @@ public class TenantStampingTests
             await ctx.SaveChangesAsync();
         }
 
-        CommittedScalar($"SELECT TenantId FROM AspNetUsers WHERE Id = '{ActingUserId}'")
+        CommittedScalar($"SELECT \"TenantId\" FROM \"AspNetUsers\" WHERE \"Id\" = '{ActingUserId}'")
             .Should().Be(TenantB, "the user really did move");
 
         CommittedScalar(
-                "SELECT TenantId FROM AuditTrails WHERE TableName = 'PicklistSet' ORDER BY Id LIMIT 1")
+                "SELECT \"TenantId\" FROM \"AuditTrails\" WHERE \"TableName\" = 'PicklistSet' ORDER BY \"Id\" LIMIT 1")
             .Should().Be(TenantA, "history records where the change happened, not where its author is now");
     }
+}
 
-    // ---- the schema itself ---------------------------------------------------------------------
+/// <summary>
+/// The tenant columns themselves, asserted on the EF model: the migrations are generated from it and
+/// <c>ModelMatchesMigrations</c> holds them to it.
+/// </summary>
+/// <remarks>
+/// A separate fixture because it needs no database (pass 47; these read a SQLite file database's pragma tables
+/// before). Under <see cref="TenantStampingTests"/>'s <c>[SetUp]</c>, any model change that breaks
+/// them fails first in the shared database's migration step, so these assertions would never be the
+/// ones that report it.
+/// </remarks>
+[TestFixture]
+public class TenantColumnSchemaTests
+{
+    private static ApplicationDbContext CreateContext() =>
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql("Host=none").Options);
 
     [Test]
     public void TheTenantColumnsExistAndAreNullable()
     {
-        // Nullable is not a detail: the null case above is a supported state, and a NOT NULL column
-        // would turn every seeding write into a startup failure.
-        foreach (var (table, column) in new[]
-                 {
-                     ("AuditTrails", "TenantId"),
-                     ("PicklistSets", "TenantId"),
-                     ("Documents", "TenantId")
-                 })
+        // Nullable is not a detail: a principal-less write is a supported state, and a NOT NULL
+        // column would turn every seeding write into a startup failure.
+        using var ctx = CreateContext();
+        foreach (var entity in new[] { typeof(AuditTrail), typeof(PicklistSet), typeof(Document) })
         {
-            using var conn = new SqliteConnection(_connectionString);
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"SELECT \"notnull\" FROM pragma_table_info('{table}') WHERE name = '{column}'";
-            var notNull = cmd.ExecuteScalar();
+            var tenantId = ctx.Model.FindEntityType(entity)!.FindProperty("TenantId");
 
-            notNull.Should().NotBeNull($"{table}.{column} should exist");
-            Convert.ToInt32(notNull).Should().Be(0, $"{table}.{column} must be nullable");
+            tenantId.Should().NotBeNull($"{entity.Name}.TenantId should exist");
+            tenantId!.IsNullable.Should().BeTrue($"{entity.Name}.TenantId must be nullable");
         }
     }
 
@@ -235,16 +234,12 @@ public class TenantStampingTests
     [Test]
     public void TheAuditTrailsTenantColumnCarriesNoForeignKey()
     {
-        using var conn = new SqliteConnection(_connectionString);
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT \"table\", \"from\" FROM pragma_foreign_key_list('AuditTrails')";
-        using var reader = cmd.ExecuteReader();
+        using var ctx = CreateContext();
+        var auditTrail = ctx.Model.FindEntityType(typeof(AuditTrail))!;
 
-        var keys = new List<string>();
-        while (reader.Read()) keys.Add($"{reader.GetString(0)}.{reader.GetString(1)}");
-
-        keys.Should().NotContain(k => k.EndsWith(".TenantId", StringComparison.Ordinal));
+        auditTrail.GetForeignKeys()
+            .Should().NotContain(fk => fk.Properties.Any(p => p.Name == "TenantId"),
+                "every delete behaviour a relationship could have is wrong for an audit row");
     }
 }
 #nullable restore

@@ -1,9 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Security.Claims;
+using System.Threading;
 using System.Threading.Tasks;
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
@@ -14,91 +15,86 @@ using CleanArchitecture.Blazor.Infrastructure;
 using CleanArchitecture.Blazor.Application.Common.Extensions;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Application.Common.PublishStrategies;
+using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
+using CleanArchitecture.Blazor.TestSupport;
 using Mediator;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Moq;
 using NUnit.Framework;
-using Respawn;
-using Respawn.Graph;
 using CleanArchitecture.Blazor.Application.Features.PicklistSets.DTOs;
 using CleanArchitecture.Blazor.Infrastructure.Services;
 using CleanArchitecture.Blazor.Application.Features.Tenants.DTOs;
-using CleanArchitecture.Blazor.Infrastructure.Services.MultiTenant;
-using System.Data.Common;
 
 namespace CleanArchitecture.Blazor.Application.IntegrationTests;
 
 [SetUpFixture]
 public class Testing
 {
-    private static IConfigurationRoot _configuration;
-    private static IServiceScopeFactory _scopeFactory;
-    private static Respawner _checkpoint;
-    private static string _currentUserId;
+    private static IConfigurationRoot _configuration = null!;
+    private static IServiceScopeFactory _scopeFactory = null!;
+    private static string? _currentUserId;
 
-    /// <summary>The variables that name the test database - the same three Server.UI.IntegrationTests reads.</summary>
-    public const string ProviderVariable = "GX_TEST_DBPROVIDER";
-    public const string ConnectionStringVariable = "GX_TEST_CONNECTIONSTRING";
-    public const string LogConnectionStringVariable = "GX_TEST_LOGCONNECTIONSTRING";
+    /// <summary>
+    /// True while the harness is loading the current user's context. The loader queries the database,
+    /// and a query that read the ambient user would call back into <c>Current</c> and recurse until the
+    /// stack overflowed, crashing the test host rather than failing a test. While it loads, the ambient
+    /// user is nobody, which is what the application's own accessor holds at that point.
+    /// </summary>
+    private static readonly AsyncLocal<bool> LoadingContext = new();
 
-    /// <summary>The server providers this project was generated with - the ones this suite can run on.</summary>
-#if (UseSqlServer && UsePostgreSql)
-    private const string ServerProviders = "postgresql or mssql";
-#elif (UsePostgreSql)
-    private const string ServerProviders = "postgresql";
-#elif (UseSqlServer)
-    private const string ServerProviders = "mssql";
-#else
-    // Respawn has no SQLite adapter, so in a project generated for SQLite alone this suite always skips.
-    private const string ServerProviders = "a server provider, which this SQLite-only project was not generated with";
-#endif
+    /// <summary>This assembly's own database on the GX_TEST_PG server. No other assembly uses it.</summary>
+    public const string DatabaseName = TestDatabaseNames.AppInt;
+
+    /// <summary>The shared test database: migrated once per run, emptied before every test.</summary>
+    public static PostgresTestDatabase Database { get; private set; } = null!;
+
+    /// <summary>The application's clock. <see cref="TestClock.Set"/> fixes it; <see cref="ResetState"/> frees it.</summary>
+    public static TestClock Clock { get; } = new();
 
     [OneTimeSetUp]
     public async Task RunBeforeAnyTests()
     {
-        // No default database. This suite used to fall back to a SQL Server LocalDB database named
-        // after upstream, so on any machine without LocalDB - and in every project generated for
-        // PostgreSQL - its tests FAILED rather than said why they could not run. Ignored here, they
-        // are reported as skipped, never as passed.
-        var provider = Environment.GetEnvironmentVariable(ProviderVariable);
-        var connectionString = Environment.GetEnvironmentVariable(ConnectionStringVariable);
-        if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(connectionString))
-        {
-            Assert.Ignore(
-                $"Application.IntegrationTests need a database: set {ProviderVariable} ({ServerProviders}) " +
-                $"and {ConnectionStringVariable}, and optionally {LogConnectionStringVariable}. " +
-                "The database named is emptied before every test, so it must be a throwaway one.");
-        }
+        // No default server, and no skipping. A run that reports these tests as skipped looks green
+        // in a summary while proving nothing, so a missing or malformed GX_TEST_PG, or a database name
+        // TestDatabaseGuard refuses, FAILS every test with the reason. Creating the database, the
+        // stale-history check (with its manual drop command) and the migration all happen in
+        // EnsureReadyAsync; see PostgresTestDatabase.
+        Database = PostgresTestDatabase.FromEnvironment(DatabaseName);
+        await Database.EnsureReadyAsync();
 
-        var adapter = RespawnAdapterFor(provider);
-
-        var builder = new ConfigurationBuilder()
+        _configuration = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
             .AddJsonFile("appsettings.json", true, true)
             .AddEnvironmentVariables()
-            .AddInMemoryCollection(new Dictionary<string, string>
+            .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DatabaseSettings:DBProvider"] = provider,
-                ["DatabaseSettings:ConnectionString"] = connectionString,
-                ["DatabaseSettings:LogConnectionString"] =
-                    Environment.GetEnvironmentVariable(LogConnectionStringVariable) ?? string.Empty
-            });
+                ["DatabaseSettings:DBProvider"] = DbProviderKeys.Npgsql,
+                ["DatabaseSettings:ConnectionString"] = Database.ConnectionString,
+                // No log database: this suite asserts on handlers, not on log rows, and the
+                // application runs normally without one (console and file logging only).
+                ["DatabaseSettings:LogConnectionString"] = string.Empty
+            })
+            .Build();
 
-        _configuration = builder.Build();
+        _scopeFactory = CreateServices().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+    }
 
-        //var startup = new Startup(_configuration);
-
+    /// <summary>The harness's registrations: the application's own, with the ambient user and the clock replaced.</summary>
+    private static ServiceCollection CreateServices()
+    {
         var services = new ServiceCollection();
 
         services.AddSingleton(Mock.Of<IWebHostEnvironment>(w =>
             w.EnvironmentName == "Development" &&
             w.ApplicationName == "Server.UI"));
+        // Options post-configuration reads IHostEnvironment (MailSettings today), as a real host provides it.
+        services.AddSingleton<IHostEnvironment>(p => p.GetRequiredService<IWebHostEnvironment>());
 
         services.AddInfrastructure(_configuration)
             .AddApplication();
@@ -110,157 +106,58 @@ public class Testing
             options.ServiceLifetime = ServiceLifetime.Scoped;
         });
 
-        //services.AddLogging();
-
-        //startup.ConfigureServices(services);
-
-        // 替换 IUserContextAccessor 的注册
-        var userContextServiceDescriptor = services.FirstOrDefault(d =>
-            d.ServiceType == typeof(IUserContextAccessor));
-        if (userContextServiceDescriptor != null)
-        {
-            services.Remove(userContextServiceDescriptor);
-        }
-
-        // 使用 Moq 创建 Mock 对象并配置 Current 属性
+        // The ambient user. Evaluated per call, not once at registration: this is a singleton, and
+        // _currentUserId is set by RunAsUserAsync after the container has been built.
+        //
+        // Loaded through the application's own IUserContextLoader, cache included, rather than built
+        // here (CO-162). The tenants a user may see, and the roles, are computed by the loader from the
+        // user's row and membership rows, and a membership change has to clear the loader's cache to
+        // show. A hand-built context carried only an id and a name, so every test of those rules would
+        // have been testing this file instead of the application.
+        services.RemoveAll<IUserContextAccessor>();
         services.AddSingleton<IUserContextAccessor>(provider =>
         {
-            var mockUserContextAccessor = new Mock<IUserContextAccessor>();
-            // Evaluated per call, not once at registration: this is a singleton, and _currentUserId
-            // is set by RunAsUserAsync after the container has already been built. Capturing it
-            // eagerly left Current null forever, which deny-by-default now turns into a denial.
-            mockUserContextAccessor.Setup(x => x.Current).Returns(() =>
-                string.IsNullOrEmpty(_currentUserId)
-                    ? null
-                    : new UserContext(
-                        UserId: _currentUserId,
-                        UserName: "admin",
-                        DisplayName: null,
-                        Email: "admin@example.com"));
-            return mockUserContextAccessor.Object;
+            var loader = provider.GetRequiredService<IUserContextLoader>();
+            var accessor = new Mock<IUserContextAccessor>();
+            accessor.Setup(x => x.Current).Returns(() => CurrentContext(loader));
+            return accessor.Object;
         });
 
-        _scopeFactory = services.BuildServiceProvider().GetService<IServiceScopeFactory>();
-        EnsureDatabase();
-        using var scope = services.BuildServiceProvider().CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var connection = context.Database.GetDbConnection();
-        await connection.OpenAsync();
+        // The clock, settable (CO-165). Scoped, as the application registers IDateTime, over one instance.
+        services.RemoveAll<IDateTime>();
+        services.AddScoped<IDateTime>(_ => Clock);
+        return services;
+    }
+
+    private static UserContext? CurrentContext(IUserContextLoader loader)
+    {
+        if (string.IsNullOrEmpty(_currentUserId) || LoadingContext.Value) return null;
+
+        LoadingContext.Value = true;
         try
         {
-            _checkpoint = await Respawner.CreateAsync(
-                connection,
-                new RespawnerOptions
-                {
-                    DbAdapter = adapter,
-                    TablesToIgnore = new Table[] { "__EFMigrationsHistory" }
-                });
+            return loader.LoadAsync(PrincipalFor(_currentUserId)).GetAwaiter().GetResult();
         }
         finally
         {
-            await connection.CloseAsync();
+            LoadingContext.Value = false;
         }
     }
+
+    /// <summary>A signed-in principal for <paramref name="userId"/>, as the cookie would produce.</summary>
+    private static ClaimsPrincipal PrincipalFor(string userId) =>
+        new(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, userId) }, "harness"));
 
     /// <summary>
-    /// The Respawn adapter for a provider key. Respawn defaults to SQL Server, which was only ever
-    /// right because the default database was LocalDB.
+    /// Acts as an existing user from now on, or as nobody with <c>null</c>, without creating one and
+    /// without touching their cached context, exactly as a user who has not signed out.
     /// </summary>
-    private static IDbAdapter RespawnAdapterFor(string provider)
-    {
-        switch (provider)
-        {
-#if (UsePostgreSql)
-            case DbProviderKeys.Npgsql:
-                return DbAdapter.Postgres;
-#endif
-#if (UseSqlServer)
-            case DbProviderKeys.SqlServer:
-                return DbAdapter.SqlServer;
-#endif
-            case DbProviderKeys.SqLite:
-                // Respawn has no SQLite adapter, and resetting between tests is what this suite is.
-                // Server.UI.IntegrationTests is the suite that runs on SQLite.
-                Assert.Ignore($"Application.IntegrationTests cannot run on SQLite ({ProviderVariable}={provider}): " +
-                              $"Respawn has no SQLite adapter. Use {ServerProviders}.");
-                return null;
-            default:
-                Assert.Fail($"{ProviderVariable}='{provider}' is not a provider this suite knows: use {ServerProviders}.");
-                return null;
-        }
-    }
-
-    /// <summary>
-    /// Brings the test database up to the current migrations, recreating it if its history no longer
-    /// matches them.
-    /// </summary>
-    /// <remarks>
-    /// This database persists between runs on a developer machine, so it outlives the migrations it
-    /// was built from. Regenerating <c>InitialCreate</c> - which Pass 7-2 and Pass 11B both did, and
-    /// which is the established way to change the business schema here - leaves a database whose
-    /// <c>__EFMigrationsHistory</c> names a migration that no longer exists. <c>Migrate()</c> then
-    /// tries to apply the new one from scratch and fails with "There is already an object named
-    /// 'AspNetRoles'", nine times, until somebody drops the database by hand. It cost exactly that in
-    /// Pass 11B and was recorded as an anomaly rather than fixed.
-    /// <para>
-    /// The fix compares what the database has applied against what the assembly defines, and starts
-    /// over only when they disagree. That is deliberately narrower than deleting unconditionally:
-    /// <c>EnsureDeleted</c> on every run would cost a full schema rebuild plus reseed each time the
-    /// suite starts, for a problem that occurs only when migrations are regenerated. As written, the
-    /// normal path is one extra metadata query - a few milliseconds - and the expensive path happens
-    /// exactly when it is the only thing that works.
-    /// </para>
-    /// </remarks>
-    private static void EnsureDatabase()
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetService<ApplicationDbContext>();
-
-        if (HasStaleMigrationHistory(context))
-        {
-            // Not a silent recovery: a developer who has just regenerated migrations should be told
-            // why their test database vanished, rather than wondering where their seed data went.
-            Console.WriteLine(
-                "Integration test database has a migration history that no longer matches this " +
-                "assembly's migrations - recreating it. This is expected after regenerating InitialCreate.");
-
-            context.Database.EnsureDeleted();
-        }
-
-        context.Database.Migrate();
-    }
-
-    /// <summary>
-    /// Whether the database claims migrations this assembly no longer defines.
-    /// </summary>
-    /// <remarks>
-    /// Only that direction is a problem. A database MISSING migrations the assembly defines is the
-    /// ordinary pending-migration case, and <c>Migrate()</c> handles it correctly.
-    /// </remarks>
-    private static bool HasStaleMigrationHistory(ApplicationDbContext context)
-    {
-        try
-        {
-            if (!context.Database.GetService<IRelationalDatabaseCreator>().Exists()) return false;
-
-            var applied = context.Database.GetAppliedMigrations().ToHashSet(StringComparer.Ordinal);
-            if (applied.Count == 0) return false;
-
-            var defined = context.Database.GetMigrations().ToHashSet(StringComparer.Ordinal);
-            return applied.Except(defined).Any();
-        }
-        catch (Exception)
-        {
-            // An unreachable or half-built database is not something to interpret here; let
-            // Migrate() fail with its own, better, message.
-            return false;
-        }
-    }
+    public static void UseUser(string? userId) => _currentUserId = userId;
 
     public static async Task<TResponse> SendAsync<TResponse>(IRequest<TResponse> request)
     {
         using var scope = _scopeFactory.CreateScope();
-        var mediator = scope.ServiceProvider.GetService<IMediator>();
+        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         return await mediator.Send(request);
     }
 
@@ -277,7 +174,7 @@ public class Testing
     public static async Task<string> RunAsUserAsync(string userName, string password, string[] roles)
     {
         using var scope = _scopeFactory.CreateScope();
-        var userManager = scope.ServiceProvider.GetService<UserManager<ApplicationUser>>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         // Email = userName produced a bare name, which Identity's EmailValidator rejects - this helper
         // could never succeed, which is why no test used it before deny-by-default required one.
         var user = new ApplicationUser { UserName = userName, Email = $"{userName}@example.com" };
@@ -339,18 +236,8 @@ public class Testing
 
     public static async Task ResetState()
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var connection = context.Database.GetDbConnection();
-        await connection.OpenAsync();
-        try
-        {
-            await _checkpoint.ResetAsync(connection);
-        }
-        finally
-        {
-            await connection.CloseAsync();
-        }
+        await Database.ResetAsync();
+        Clock.Reset();
         _currentUserId = null;
 
         // Re-establish an authenticated principal after the wipe: with deny-by-default in the
@@ -358,11 +245,11 @@ public class Testing
         await RunAsDefaultUserAsync();
     }
 
-    public static async Task<TEntity> FindAsync<TEntity>(params object[] keyValues)
+    public static async Task<TEntity?> FindAsync<TEntity>(params object[] keyValues)
         where TEntity : class
     {
         using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetService<ApplicationDbContext>();
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         return await context.FindAsync<TEntity>(keyValues);
     }
 
@@ -386,7 +273,7 @@ public class Testing
         where TEntity : class
     {
         using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetService<ApplicationDbContext>();
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         context.Add(entity);
         await context.SaveChangesAsync();
     }
@@ -394,7 +281,7 @@ public class Testing
     public static async Task<int> CountAsync<TEntity>() where TEntity : class
     {
         using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetService<ApplicationDbContext>();
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         return await context.Set<TEntity>().CountAsync();
     }
 
@@ -408,10 +295,5 @@ public class Testing
     {
         var scope = _scopeFactory.CreateScope();
         return scope.ServiceProvider.GetRequiredService<IDataSourceService<TenantDto>>();
-    }
-
-    [OneTimeTearDown]
-    public void RunAfterAnyTests()
-    {
     }
 }
