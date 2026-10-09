@@ -8,8 +8,6 @@
         <LangVersion>default</LangVersion>
     </PropertyGroup>
     <ItemGroup>
-    
-        <PackageReference Include="MaxMind.GeoIP2" Version="6.1.0" />
         <PackageReference Include="ClosedXML" Version="0.105.1" />
         <PackageReference Include="Scriban" Version="7.2.6" />
         <PackageReference Include="ZiggyCreatures.FusionCache" Version="2.7.1" />

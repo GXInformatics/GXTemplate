@@ -47,7 +47,6 @@ public class CommittedAppSettingsTests
         "Mail:Domain",
         "Mail:FromAddress",
         "Mail:ApiKey",
-        "MaxMind:LicenseKey",
         "Storage:ConnectionString",
         "AppConfigurationSettings:ApplicationUrl"
     ];

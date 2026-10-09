@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
     <metadata>
         <id>GX.Blazor.Template</id>
-        <version>1.0.0</version>
+        <version>1.1.0</version>
         <title>GX Blazor Server Solution Template</title>
         <authors>GX Informatics Limited</authors>
         <description>
@@ -22,6 +22,17 @@
             multi-tenant data model, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
+            1.1.0
+            - Nothing calls out by default. Removed: the unused MaxMind GeoIP web-service client, the
+              Google Fonts link, the qrcodejs CDN script loaded on every page, and the unreferenced
+              components and scripts that loaded Swiper, Fancybox, fabric.js and a second copy of
+              OpenSeadragon from CDNs. The document image viewer still loads OpenSeadragon from unpkg.
+              The upstream Seq sink and seeded Gravatar pictures were already removed.
+            - OutboundAddressTests: a hard-coded http(s) address in src/ fails the tests unless it is
+              on the test's allowed list with its reason.
+            - Every pass since 1.0.0 (test infrastructure on PostgreSQL, configuration layout, mail
+              over the Mailgun API); see the repository's pass reports.
+
             1.0.0
             - First GX release, derived from CleanArchitectureWithBlazorServer.
             - Deny-by-default request authorization with a startup assertion.

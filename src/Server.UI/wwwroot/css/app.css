@@ -5,7 +5,6 @@
     
     --nav-padding-x: 1.1em;
     --nav-padding-y: 0.75em;
-    --fancybox-bg: rgba(24, 24, 27, 0.85);
 }
 
 
@@ -151,12 +150,4 @@
 
 .mud-typography-subtitle2 {
     color: var(--mud-palette-text-secondary);
-}
-.fancybox__container {
-    z-index: 9999;
-}
-.fancybox__backdrop {
-    background-color: color-mix(in srgb, var(--mud-palette-overlay-dark) 70%, transparent) !important;
-    backdrop-filter: blur(10px) saturate(120%);
-    -webkit-backdrop-filter: blur(10px) saturate(120%);
 }

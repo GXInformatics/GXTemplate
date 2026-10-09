@@ -127,8 +127,12 @@ public class MailSettings : IValidatableObject
     /// <summary>
     ///     The Mailgun messages endpoint, composed rather than stored.
     /// </summary>
+    /// <remarks>
+    ///     The two hosts are written out whole so that <c>OutboundAddressTests</c> can name them: they
+    ///     are the only addresses the server itself calls, and only once mail delivery is configured.
+    /// </remarks>
     public string ApiEndpoint =>
-        $"https://api{(Region == MailRegion.EU ? ".eu" : string.Empty)}.mailgun.net/v3/{Domain}/messages";
+        $"{(Region == MailRegion.EU ? "https://api.eu.mailgun.net" : "https://api.mailgun.net")}/v3/{Domain}/messages";
 
     /// <summary>
     ///     Validates the entered configuration.

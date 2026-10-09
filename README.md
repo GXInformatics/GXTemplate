@@ -79,7 +79,7 @@ A generated project follows the **GX configuration layout**: four settings files
 
 | File | Committed | Holds |
 |---|---|---|
-| `src/Server.UI/appsettings.json` | yes | **Structure only.** Every key is present; every secret or environment-specific value is empty — both connection strings, `ApplicationUrl`, `Mail:Domain` / `FromAddress` / `ApiKey`, `MaxMind:LicenseKey`, `Storage:ConnectionString` and the external-login ids and secrets. Never delete a key: the file is the list of what a server has to supply. |
+| `src/Server.UI/appsettings.json` | yes | **Structure only.** Every key is present; every secret or environment-specific value is empty — both connection strings, `ApplicationUrl`, `Mail:Domain` / `FromAddress` / `ApiKey`, `Storage:ConnectionString` and the external-login ids and secrets. Never delete a key: the file is the list of what a server has to supply. |
 | `src/Server.UI/appsettings.Staging.json`, `appsettings.Production.json` | yes | Non-secret per-environment settings, with the same empty placeholders. |
 | `src/Server.UI/appsettings.Development.json` | **no — gitignored** | This machine's values. The wizard generates it with your provider's connection strings and your database names — for PostgreSQL `Host=localhost;Port=5434;Database=IMS;Username=postgres;Password=;` and the same for `IMS_Logs`. |
 | the server's `web.config` | on the server only | The deployed values, as ASP.NET Core Module `<environmentVariables>` such as `DatabaseSettings__ConnectionString`. Environment variables override every appsettings file. |
@@ -741,6 +741,24 @@ they hold, are guarded:
   administrators by existing.
 - Changing a user's roles or password refreshes their security stamp, so existing sessions do not
   keep the old permissions.
+
+### Nothing calls out by default
+
+The server talks only to what its configuration names: the two databases, the storage account, the
+mail transport and the external-login providers. The upstream starter also shipped every log event,
+at Verbose, to its author's Seq server, and seeded accounts with Gravatar pictures. Both were removed,
+along with an unused GeoIP web-service client.
+
+`OutboundAddressTests` keeps it that way. It reads every `.cs`, `.csproj`, `appsettings*.json` and
+`web.config` under `src/` (except your local `appsettings.Development.json`) and fails on any
+`http(s)://` address that is not on its allowed list. Each entry on that list names its file and the
+reason the server needs it. Today the list holds the two Mailgun API hosts and one documentation
+link in a comment. To add an address, add it to the list with its reason. An entry whose address
+has gone also fails, so the list cannot fall out of date.
+
+The guard does not read pages and scripts, which run in the visitor's browser. One of them still
+loads a library from a CDN: the document image viewer (`wwwroot/js/openseadragon.js`) loads
+OpenSeadragon from unpkg.com when it opens.
 
 ### Idle timeout and auto-logout
 

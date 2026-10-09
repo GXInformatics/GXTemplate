@@ -26,7 +26,9 @@
            - has a UserSecretsId of its own: not the template's, and not the next project's either;
            - carries no template conditional left unprocessed, no Docker artefact and no
              template-repository-only file;
-           - does not carry the project name inside upstream attribution text.
+           - does not carry the project name inside upstream attribution text;
+           - carries the outbound-address guard test, and no Seq sink, Gravatar address, MaxMind
+             client, Google Fonts link or qrcodejs script in src/ (pass 48); the guard passes alone.
       4. The generated solution builds with 0 errors. Without GX_TEST_PG its four test suites FAIL,
          naming the variable; against the -TestServer (default GX_TEST_PG) they all pass, each on its
          own gx_test_<project>_* database.
@@ -96,7 +98,7 @@ $requiredStructure = @(
     'DatabaseSettings:ConnectionString', 'DatabaseSettings:LogConnectionString',
     'AppConfigurationSettings:ApplicationUrl',
     'Mail:FromAddress', 'Mail:ApiKey', 'Mail:Domain',
-    'MaxMind:LicenseKey', 'Storage:ConnectionString')
+    'Storage:ConnectionString')
 
 function Fail([string] $message) { $failures.Add($message); Write-Host "  FAIL  $message" -ForegroundColor Red }
 function Pass([string] $message) { Write-Host "  ok    $message" -ForegroundColor Green }
@@ -424,6 +426,22 @@ try {
     if ($attribution.Count -gt 0) { foreach ($a in $attribution) { Fail "$($a.Path.Substring($out.Length + 1)):$($a.LineNumber): $($a.Line.Trim())" } }
     else { Pass 'none' }
 
+    # Pass 48: the upstream Seq sink, the seeded Gravatar pictures and every other default call-out
+    # stay gone, and the guard that keeps them gone ships with the project. src/ only: the guard
+    # test itself names the Seq host and Gravatar in its explanation.
+    Step 'nothing in the generated source calls out, and the guard ships'
+    $guard = @(Get-ChildItem -Path (Join-Path $out 'tests') -Recurse -File -Filter 'OutboundAddressTests.cs')
+    Check ($guard.Count -eq 1) 'OutboundAddressTests.cs is generated' "found $($guard.Count)"
+    $srcFiles = @($files | Where-Object { $_.FullName.StartsWith((Join-Path $out 'src') + '\') })
+    foreach ($probe in @(
+            @{ Name = 'Seq sink'; Pattern = 'WriteTo\.Seq|Serilog\.Sinks\.Seq|seq\.blazorserver' },
+            @{ Name = 'Gravatar address'; Pattern = 'gravatar\.com' },
+            @{ Name = 'MaxMind GeoIP client'; Pattern = 'MaxMind|GeoIP2' },
+            @{ Name = 'Google Fonts link or qrcodejs CDN script'; Pattern = 'fonts\.googleapis|qrcodejs' })) {
+        $hits = @($srcFiles | Select-String -Pattern $probe.Pattern)
+        Check ($hits.Count -eq 0) "no $($probe.Name) in src ($($srcFiles.Count) files)" $(if ($hits) { "$($hits[0].Path.Substring($out.Length + 1)):$($hits[0].LineNumber)" })
+    }
+
     # ------------------------------------------------------------------ 4. build and test
     if (-not $NoBuild) {
         Step 'the generated solution builds'
@@ -443,6 +461,16 @@ try {
             $suites = 'Application.UnitTests', 'Infrastructure.UnitTests', 'Application.IntegrationTests', 'Server.UI.IntegrationTests'
             $savedServer = $env:GX_TEST_PG
             try {
+                # Pass 48. Run alone and without a server, so its result is its own and not hidden
+                # in a suite total: it reads files, never a database.
+                Step 'the outbound-address guard passes in the generated project'
+                Remove-Item Env:GX_TEST_PG -ErrorAction SilentlyContinue
+                $testLog = Join-Path $WorkRoot 'test-outbound-guard.log'
+                $exit = Invoke-Dotnet @('test', (Join-Path $out 'tests\Application.UnitTests'), '--no-build', '-nologo', '--filter', 'FullyQualifiedName~OutboundAddressTests') $testLog
+                $line = Select-String -Path $testLog -Pattern '^(Passed|Failed|Skipped)!' | Select-Object -Last 1
+                $text = if ($line) { $line.Line.Trim() -replace '\s+', ' ' } else { 'no summary line' }
+                Check ($exit -eq 0 -and $line -and $line.Line -match '^Passed!.*Passed:\s+3,') "OutboundAddressTests: $text" "exit code $exit - see $testLog"
+
                 # Without a server, every suite must FAIL and say why - never skip, never pass on a
                 # fallback (pass 47). Only the database tests fail; the summary must not be Passed.
                 Step 'without GX_TEST_PG the generated suites fail loud'

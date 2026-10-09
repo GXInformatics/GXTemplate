@@ -14,7 +14,6 @@ using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using CleanArchitecture.Blazor.Infrastructure.Services.Mail;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Services.MultiTenant;
-using MaxMind.GeoIP2;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -337,14 +336,6 @@ public static class DependencyInjection
         services.AddDataSourceServices();
         services.AddScoped<ITenantSwitchService, TenantSwitchService>();
 
-
-
-
-        // Configure SecurityAnalysisService with options
-        services.Configure<WebServiceClientOptions>(configuration.GetSection("MaxMind"));
-        services.AddHttpClient<WebServiceClient>();
-
-       
         return services
             .AddScoped<IValidationService, ValidationService>()
             .AddScoped<IExcelService, ExcelService>()
