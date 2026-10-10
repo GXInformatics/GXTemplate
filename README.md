@@ -1325,6 +1325,45 @@ and offers no template; without `ide.host.json` the template appears in Visual S
 parameter page**, because VS hides every symbol unless a host file says otherwise — while the CLI
 shows them regardless, so CLI testing cannot catch it.
 
+**The package records the commit it was packed from (Pass 56).** The nuspec carries
+`<repository type="git" url="https://github.com/GXInformatics/GXTemplate.git" commit="…" />`, and
+`build/pack.csproj` fills `commit` from `git rev-parse HEAD`. Packing fails if git cannot answer, and
+the pack assertion reads the commit back out of the produced package. It records **HEAD**, while the
+content comes from the **working tree**, so pack a release from a clean tree. To see which commit an
+installed package came from, read `GX.Blazor.Template.nuspec` inside
+`%USERPROFILE%\.templateengine\packages\GX.Blazor.Template.<version>.nupkg`.
+
+**No editor or agent state ships.** The nuspec excludes `.claude\`, `.vscode\`, `.idea\`, `.cursor\`,
+`.DS_Store`, `Thumbs.db` and `*.swp`, and the pack assertion fails if `content/.claude/` is present.
+1.2.0 shipped `content/.claude/`, so every project generated from it got an empty `.claude` folder.
+
+**Smoking a release as installed.** After `dotnet new install`, run
+`powershell -ExecutionPolicy Bypass -File tooling\smoke-generate.ps1 -UseInstalled`. It does not pack.
+It checks that `dotnet new` reports exactly one `GX.Blazor.Template` at the nuspec's version
+(`-ExpectedVersion` overrides it), reads the content checks from the installed `.nupkg`, and generates
+from the machine's own template store.
+
+**What the template's suites run that a generated project does not.** The template repository
+compiles with every provider symbol defined (`Directory.Build.props`, which never ships). A generated
+project keeps only its own provider: `dotnet new` evaluates the `UseSqlServer` conditional blocks and drops
+them for `--Database postgresql`. So a PostgreSQL project runs **21 fewer** Infrastructure.UnitTests
+than the template does: 206 rather than 227 at Pass 55. That is deliberate, not loss. The nuspec and
+`template.json` exclude no Infrastructure test file. The 21:
+
+| File | Absent from a PostgreSQL project |
+|---|---|
+| `Logging/LogDatabaseDdlTests.cs` | `SqlServerStillGuardsItsOwnWay_BecauseTSqlOffersDbId`, `TheSqlServerMaintenanceConnection_SwapsOnlyTheCatalogue`, `ASqlServerNameContainingABracket_IsEscapedRatherThanRejected`, `TheSqlServerLiteralGuardIsEscapedToo`; the `mssql` rows of `AnOrdinaryNameIsQuotedInTheProvidersOwnForm`, `TheCreateStatementCarriesNoIfNotExists_BecauseNeitherServerHasOne` and `TheExistenceCheckIsParameterised_NotInterpolated` |
+| `Logging/LogTableDdlTests.cs` | `TheDdlNamesTheSameTableTheModelReads_OnSqlServer`, `TheSqlServerGuardsUseTSqlsOwnForm_BecauseTSqlHasNoCreateTableIfNotExists`; the `mssql` rows of `EveryStatementIsGuarded`, `TheExistenceQueryReadsOnlyTheCatalogue` and `TheIndexesSystemLogConfigurationDeclares_AreCreated` |
+| `Logging/LogTenantStampingTests.cs` | `TheSqlServerSink_WritesTheTenantColumn_AndAllowsItToBeNull` |
+| `Logging/SinkColumnDriftTests.cs` | the `mssql` rows of `EveryPropertyEfReads_HasAColumnInTheDdl`, `EveryPropertyEfReads_HasASinkWriter`, `EverySinkWriter_HasAColumnInTheDdl`, `TheDdlHasNoColumnsNobodyUses` and `TheDdlSuppliesTheKeyOnEveryProvider` |
+| `Logging/SinkTimestampTests.cs` | `TheSqlServerSink_ConvertsItsTimestampToUtc` |
+| `Persistence/LogModelSeparationTests.cs` | `LogTableNamingTests.OnSqlServer_TheModelReadsSystemLogs` |
+| `Persistence/ModelMatchesMigrationsTests.cs` | `TheSqlServerMigrationsMatchTheModel` |
+
+A test that mixes providers, such as `TheExistenceChecksReadTheCatalogue_WhichNeedsNoPrivilege`, keeps
+running and loses only its SQL Server assertion. If the gap ever differs from this list, something
+was lost in generation, and that is a defect.
+
 ### Installing for Visual Studio
 
 `dotnet new install .` from a clone registers the template as a **folder**, which is convenient for

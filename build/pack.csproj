@@ -30,6 +30,33 @@
   </PropertyGroup>
 
   <!--
+      The commit this package is packed from, into the nuspec's <repository commit="$commit$"> (Pass 56).
+
+      Read from git, never typed, so it cannot drift from what was actually packed. Refused outright
+      if git cannot answer - not a shallow fallback - because a package that names no commit, or the
+      literal "$commit$", is exactly the untraceable package this exists to prevent.
+
+      Note what it records: HEAD. Content still comes from the WORKING TREE (the nuspec packs files on
+      disk), so a pack from a tree with uncommitted changes names a commit that does not contain them.
+      Pack releases from a clean tree.
+  -->
+  <Target Name="StampRepositoryCommit" BeforeTargets="GenerateNuspec">
+    <Exec Command="git rev-parse HEAD" WorkingDirectory="$(NuspecBasePath)" ConsoleToMSBuild="true"
+          StandardOutputImportance="low" IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommit" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
+
+    <Error Condition="'$(_GitExitCode)' != '0' Or !$([System.Text.RegularExpressions.Regex]::IsMatch('$(_GitCommit)', '^[0-9a-f]{40}$'))"
+           Text="Could not resolve the git commit to record in the package (git rev-parse HEAD said: '$(_GitCommit)'). Pack from a git clone of the template with git on PATH; a package that cannot be traced to a commit is not shipped." />
+
+    <PropertyGroup>
+      <NuspecProperties Condition="'$(NuspecProperties)' == ''">commit=$(_GitCommit)</NuspecProperties>
+      <NuspecProperties Condition="'$(NuspecProperties)' != '' And !$(NuspecProperties.Contains('commit='))">$(NuspecProperties);commit=$(_GitCommit)</NuspecProperties>
+    </PropertyGroup>
+  </Target>
+
+  <!--
       Assert that the produced package actually contains what makes it a template package.
 
       This exists because "the package lacks what the repository has" has now bitten three times:
@@ -101,8 +128,25 @@
     <Error Condition="Exists('$(_PackageAssertDir)\content\src\Server.UI\appsettings.Development.json')"
            Text="The package CONTAINS content/src/Server.UI/appsettings.Development.json: the maintainer's own local settings file, with whatever password it holds. Check the nuspec exclude for **\src\Server.UI\appsettings.Development.json, and do not distribute this package." />
 
+    <!--
+        Editor and agent state (Pass 56). .claude is the one that has actually shipped - 1.2.0 carried
+        content/.claude/_._ - so it is asserted, not only excluded.
+    -->
+    <Error Condition="Exists('$(_PackageAssertDir)\content\.claude')"
+           Text="The package CONTAINS content/.claude/ - Claude Code's local state (scheduled_tasks.lock and the like). Every generated project would receive it. Check the nuspec exclude for **\.claude\**." />
+
+    <!--
+        The commit, read back out of the PACKED nuspec rather than trusted from the property: NuGet
+        leaves an unknown $token$ unreplaced without complaint, so only the output proves it.
+    -->
+    <PropertyGroup>
+      <_PackedNuspec>$([System.IO.File]::ReadAllText('$(_PackageAssertDir)\GX.Blazor.Template.nuspec'))</_PackedNuspec>
+    </PropertyGroup>
+    <Error Condition="!$(_PackedNuspec.Contains('commit=&quot;$(_GitCommit)&quot;'))"
+           Text="The packed nuspec does not record commit=&quot;$(_GitCommit)&quot; in its repository element. The package cannot be traced to its source; check the nuspec &lt;repository&gt; element and StampRepositoryCommit." />
+
     <Message Importance="high"
-             Text="Template package contents verified: template.json, ide.host.json, icon.png and local-settings/appsettings.Development.json are present under content/.template.config/, and no local src/Server.UI/appsettings.Development.json was packed." />
+             Text="Template package contents verified: template.json, ide.host.json, icon.png and local-settings/appsettings.Development.json are present under content/.template.config/, no local src/Server.UI/appsettings.Development.json and no .claude/ were packed, and the nuspec records commit $(_GitCommit)." />
 
     <RemoveDir Directories="$(_PackageAssertDir)" />
   </Target>

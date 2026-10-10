@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     Packs this template, installs it into a throwaway template hive, generates a project from it
-    and asserts that the wizard's choices actually reached the generated output.
+    and asserts that the wizard's choices actually reached the generated output. With -UseInstalled
+    it skips the pack and smokes the template installed in this machine's own store instead.
 
 .DESCRIPTION
     Template-repository tooling. Excluded from the package and from every generated project.
@@ -76,12 +77,23 @@ param(
     # The PostgreSQL server the generated suites run against (pass 47): host, port, username and
     # password, and NO database - the same form as GX_TEST_PG, which is the default. Each suite
     # creates its own gx_test_<project>_* database there and never drops it. Never printed.
-    [string] $TestServer = $env:GX_TEST_PG
+    [string] $TestServer = $env:GX_TEST_PG,
+
+    # Test the template INSTALLED in this machine's own template store instead of packing the
+    # source tree (Pass 56): no pack, no throwaway hive. The installed GX.Blazor.Template must be
+    # exactly -ExpectedVersion (default: the version in this repository's nuspec), and the content
+    # checks read the installed .nupkg, not the repository - so a release is smoked as it ships.
+    [switch] $UseInstalled,
+
+    [string] $ExpectedVersion = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $failures = New-Object System.Collections.Generic.List[string]
+if (-not $ExpectedVersion) {
+    $ExpectedVersion = ([xml][IO.File]::ReadAllText((Join-Path $repo 'GX.Blazor.Template.nuspec'))).package.metadata.version
+}
 
 # The template's defaults, which is what a generation that leaves an option out must produce.
 $expectedDatabase = if ($Database) { $Database } else { 'postgresql' }
@@ -199,16 +211,36 @@ try {
     $pkgDir = Join-Path $WorkRoot 'pkg'
     $hive = Join-Path $WorkRoot 'hive'
     $out = Join-Path $WorkRoot $ProjectName
+    # `dotnet new` arguments that select the template store: a throwaway hive when packing the
+    # source tree, the machine's own store with -UseInstalled.
+    # (Assigned, not `= if (...) { @() }`: an empty array returned from an if-expression comes back
+    # as $null in Windows PowerShell, which would reach dotnet as an empty argument.)
+    $hiveArgs = @()
+    if (-not $UseInstalled) { $hiveArgs = @('--debug:custom-hive', $hive) }
     Write-Host "Work folder: $WorkRoot"
 
+    # What the content checks read: the repository, or - with -UseInstalled - the content/ folder of
+    # the installed package itself, so nothing about the release is taken from the source tree.
+    $contentRoot = $repo
+    if ($UseInstalled) {
+        $installedPackage = Join-Path $env:USERPROFILE ".templateengine\packages\GX.Blazor.Template.$ExpectedVersion.nupkg"
+        if (-not (Test-Path $installedPackage)) {
+            throw "-UseInstalled: $installedPackage does not exist. Install GX.Blazor.Template $ExpectedVersion first."
+        }
+        $installedContent = Join-Path $WorkRoot 'installed'
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($installedPackage, $installedContent)
+        $contentRoot = Join-Path $installedContent 'content'
+    }
+
     # ------------------------------------------------------------------ 1. replaces literals
-    Step 'template.json replaces literals occur in the template content'
-    $templateJson = Get-Content -Raw (Join-Path $repo '.template.config\template.json') | ConvertFrom-Json
+    Step ('template.json replaces literals occur in the template content' + $(if ($UseInstalled) { ' (installed package)' } else { '' }))
+    $templateJson = Get-Content -Raw (Join-Path $contentRoot '.template.config\template.json') | ConvertFrom-Json
     # What the template instantiates: the repository minus its tooling, plus the files
     # .template.config/local-settings/ contributes (template.json's second source). The
     # maintainer's own src/Server.UI/appsettings.Development.json is excluded from generation, so
     # a literal found only there would be a false pass.
-    $contentText = (Get-ContentFiles $repo |
+    $contentText = (Get-ContentFiles $contentRoot |
         Where-Object { $_.FullName -notmatch '\\(GXTemplate-passes|docs|doc|build|tooling)\\' } |
         Where-Object { $_.FullName -notmatch '\\\.template\.config\\' -or $_.FullName -match '\\\.template\.config\\local-settings\\' } |
         Where-Object { $_.FullName -notmatch '\\src\\Server\.UI\\appsettings\.Development\.json$' } |
@@ -225,16 +257,31 @@ try {
     }
 
     # ------------------------------------------------------------------ 2. pack and install
-    Step 'pack and install into a custom hive'
-    if ((Invoke-Dotnet @('pack', (Join-Path $repo 'build\pack.csproj'), '-o', $pkgDir, '-nologo') (Join-Path $WorkRoot 'pack.log')) -ne 0) {
-        throw "dotnet pack failed - see $(Join-Path $WorkRoot 'pack.log')"
+    if ($UseInstalled) {
+        Step "the installed template is GX.Blazor.Template $ExpectedVersion"
+        $listLog = Join-Path $WorkRoot 'installed-list.log'
+        if ((Invoke-Dotnet @('new', 'uninstall') $listLog) -ne 0) { throw "dotnet new uninstall (list) failed - see $listLog" }
+        $listing = [IO.File]::ReadAllText($listLog)
+        $gxEntries = [regex]::Matches($listing, '(?m)^\s+GX\.Blazor\.Template\s*\r?\n\s+Version:\s*(\S+)')
+        Check ($gxEntries.Count -eq 1) "exactly one GX.Blazor.Template is installed" "found $($gxEntries.Count)"
+        if ($gxEntries.Count -ge 1) {
+            $installedVersion = $gxEntries[0].Groups[1].Value
+            Check ($installedVersion -eq $ExpectedVersion) "its version is $ExpectedVersion" "found $installedVersion"
+        }
+        Pass "content checks read $installedPackage"
     }
-    $package = Get-ChildItem $pkgDir -Filter 'GX.Blazor.Template.*.nupkg' | Select-Object -First 1
-    Pass "packed $($package.Name)"
-    if ((Invoke-Dotnet @('new', 'install', $package.FullName, '--debug:custom-hive', $hive) (Join-Path $WorkRoot 'install.log')) -ne 0) {
-        throw "dotnet new install failed - see $(Join-Path $WorkRoot 'install.log')"
+    else {
+        Step 'pack and install into a custom hive'
+        if ((Invoke-Dotnet @('pack', (Join-Path $repo 'build\pack.csproj'), '-o', $pkgDir, '-nologo') (Join-Path $WorkRoot 'pack.log')) -ne 0) {
+            throw "dotnet pack failed - see $(Join-Path $WorkRoot 'pack.log')"
+        }
+        $package = Get-ChildItem $pkgDir -Filter 'GX.Blazor.Template.*.nupkg' | Select-Object -First 1
+        Pass "packed $($package.Name)"
+        if ((Invoke-Dotnet @('new', 'install', $package.FullName, '--debug:custom-hive', $hive) (Join-Path $WorkRoot 'install.log')) -ne 0) {
+            throw "dotnet new install failed - see $(Join-Path $WorkRoot 'install.log')"
+        }
+        Pass "installed into $hive"
     }
-    Pass "installed into $hive"
 
     # ------------------------------------------------------------------ 3. generate
     $options = @()
@@ -242,7 +289,7 @@ try {
     if ($DefaultTimeZone) { $options += @('--DefaultTimeZone', $DefaultTimeZone) }
     if ($AllowSelfRegistration) { $options += @('--AllowSelfRegistration', $AllowSelfRegistration) }
     Step ("generate: -n $ProjectName " + $(if ($options) { $options -join ' ' } else { '(template defaults)' }))
-    $generate = @('new', 'gxblazor', '-n', $ProjectName, '-o', $out) + $options + @('--debug:custom-hive', $hive)
+    $generate = @('new', 'gxblazor', '-n', $ProjectName, '-o', $out) + $options + $hiveArgs
     if ((Invoke-Dotnet $generate (Join-Path $WorkRoot 'generate.log')) -ne 0) {
         throw "dotnet new gxblazor failed - see $(Join-Path $WorkRoot 'generate.log')"
     }
@@ -403,7 +450,7 @@ try {
     Check ([Guid]::TryParse($secretsId, [ref]$parsed)) "UserSecretsId is a GUID ($secretsId)"
     Check ($parsed -ne $templateUserSecretsId) "UserSecretsId differs from the template's $templateUserSecretsId" "found '$secretsId'"
     $twin = Join-Path $WorkRoot 'twin'
-    if ((Invoke-Dotnet (@('new', 'gxblazor', '-n', $ProjectName, '-o', $twin) + $options + @('--debug:custom-hive', $hive)) (Join-Path $WorkRoot 'generate-twin.log')) -ne 0) {
+    if ((Invoke-Dotnet (@('new', 'gxblazor', '-n', $ProjectName, '-o', $twin) + $options + $hiveArgs) (Join-Path $WorkRoot 'generate-twin.log')) -ne 0) {
         Fail "the second generation failed - see $(Join-Path $WorkRoot 'generate-twin.log')"
     }
     else {

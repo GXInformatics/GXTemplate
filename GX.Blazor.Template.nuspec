@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
     <metadata>
         <id>GX.Blazor.Template</id>
-        <version>1.2.0</version>
+        <version>1.3.0</version>
         <title>GX Blazor Server Solution Template</title>
         <authors>GX Informatics Limited</authors>
         <description>
@@ -22,6 +22,21 @@
             multi-tenant data model, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
+            1.3.0
+            - Tenancy by marker: every IMustHaveTenant / IMayHaveTenant entity is tenant-filtered and
+              stamped from its marker, and startup fails if a marked entity ends up unfiltered.
+              Documents are now filtered too: a principal with no tenant sees only tenantless ones.
+              ITenantSeeder seeds each tenant on creation and reconciles every tenant on start;
+              ISystemContext runs background work as the gx-system account inside one tenant.
+              TenantUsers gets a unique (TenantId, UserId) index; tenant Create and Update are
+              separate commands with separate rights.
+            - BaseEntity&lt;TKey&gt; and BaseAuditableEntity&lt;TKey&gt;: any key type, with domain events and
+              audit stamping kept. IApplicationDbContext.Database lets a handler own a transaction.
+              The startup authorization check covers commands and queries and refuses struct
+              requests. Table naming handles TPT, TPC, many-to-many joins and [Table].
+            - The package carries no editor or agent state (.claude, .vscode, .idea, .cursor), and
+              records the git commit it was packed from in its repository element.
+
             1.2.0
             - The theme drawer is gone. One light/dark toggle sits in the app bar; with no saved choice
               the device's preference decides, and no page paints in the wrong theme first. The drawer's
@@ -60,6 +75,14 @@
         <icon>icon.png</icon>
         <readme>README.md</readme>
 
+        <!--
+            The commit this package was packed from, so an installed template can always be traced
+            back to its source. $commit$ is filled at pack time by build/pack.csproj from
+            `git rev-parse HEAD`; packing fails if it cannot be resolved, and the pack assertion reads
+            it back out of the produced package.
+        -->
+        <repository type="git" url="https://github.com/GXInformatics/GXTemplate.git" commit="$commit$" />
+
         <packageTypes>
             <packageType name="Template"/>
         </packageTypes>
@@ -92,9 +115,21 @@
             Generated projects get theirs from .template.config\local-settings\, whose path does not
             end in src\Server.UI\, so this pattern cannot exclude it too. build/pack.csproj asserts
             both halves on the produced package.
+
+            Editor and agent state never ships (Pass 56): .claude\ (Claude Code - its
+            scheduled_tasks.lock appears and disappears while a session runs, and 1.2.0 shipped the
+            folder itself as content/.claude/_._, so every generated project got an empty .claude),
+            .vscode\, .idea\, .cursor\, and OS litter (.DS_Store, Thumbs.db, *.swp). None of it is
+            tracked; it is on disk in a maintainer's working tree, which is what the nuspec packs.
+
+            EACH FOLDER IS LISTED TWICE, and both are needed: **\.claude\** excludes the files inside,
+            and **\.claude excludes the folder itself. With only the first, an EMPTY .claude folder -
+            its usual state between sessions - is still packed, as the _._ placeholder NuGet writes
+            for an empty directory. That is exactly how 1.2.0 shipped it; Pass 56's first pack did the
+            same until the assertion in build/pack.csproj refused it.
         -->
         <file src=".\**" target="content"
-              exclude="**\*.exe;**\*.nuspec;**\*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;**\docs\**;**\doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;**\src\Server.UI\Files\**;**\src\Server.UI\log\**;**\src\Server.UI\appsettings.Development.json;**\GXTemplate-passes\**;**\build\**;**\tooling\**;**\Directory.Build.props"/>
+              exclude="**\*.exe;**\*.nuspec;**\*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;**\docs\**;**\doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;**\src\Server.UI\Files\**;**\src\Server.UI\log\**;**\src\Server.UI\appsettings.Development.json;**\GXTemplate-passes\**;**\build\**;**\tooling\**;**\Directory.Build.props;**\.claude\**;**\.claude;**\.vscode\**;**\.vscode;**\.idea\**;**\.idea;**\.cursor\**;**\.cursor;**\.DS_Store;**\Thumbs.db;**\*.swp"/>
     </files>
 
 </package>
