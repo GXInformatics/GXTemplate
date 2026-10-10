@@ -71,7 +71,7 @@ public class SharedPicklistWriteTests
         public Ambient(string? userId, string? tenantId) =>
             Current = userId is null ? null : new UserContext(userId, userId, TenantId: tenantId);
         public UserContext? Current { get; private set; }
-        public IDisposable Push(UserContext context) => throw new NotSupportedException();
+        public IDisposable Push(UserContext? context) => throw new NotSupportedException();
         public void Clear() => Current = null;
     }
 

@@ -30,7 +30,7 @@ public class DataSourceScopeTests
     private sealed class MutableUserContextAccessor : IUserContextAccessor
     {
         public UserContext? Current { get; set; }
-        public IDisposable Push(UserContext context) => throw new NotSupportedException();
+        public IDisposable Push(UserContext? context) => throw new NotSupportedException();
         public void Clear() => Current = null;
     }
 

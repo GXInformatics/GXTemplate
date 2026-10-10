@@ -2,7 +2,9 @@
 @using CleanArchitecture.Blazor.Application.Features.Tenants.DTOs
 @using CleanArchitecture.Blazor.Application.Features.Tenants.Queries.Pagination
 @using CleanArchitecture.Blazor.Application.Features.Tenants.Caching
-@using CleanArchitecture.Blazor.Application.Features.Tenants.Commands.AddEdit
+@using CleanArchitecture.Blazor.Application.Features.Tenants.Commands
+@using CleanArchitecture.Blazor.Application.Features.Tenants.Commands.Create
+@using CleanArchitecture.Blazor.Application.Features.Tenants.Commands.Update
 @using CleanArchitecture.Blazor.Application.Features.Tenants.Commands.Delete
 
 @attribute [Authorize(Policy = Permissions.Tenants.View)]
@@ -203,14 +205,14 @@
 	// Create tenant event handler
 	private Task OnCreateTenant()
 	{
-		return ShowEditTenantDialog(new AddEditTenantCommand(), L["Create a new Tenant"]);
+		return ShowTenantDialog(new CreateTenantCommand(), L["Create a new Tenant"]);
 	}
 
 	// Edit tenant event handler
 	private Task OnEditTenant(TenantDto dto)
 	{
-		var command = ObjectMapper.Map<AddEditTenantCommand>(dto);
-		return ShowEditTenantDialog(command, L["Edit the Tenant"]);
+		var command = new UpdateTenantCommand { Id = dto.Id, Name = dto.Name, Description = dto.Description };
+		return ShowTenantDialog(command, L["Edit the Tenant"]);
 	}
 
 	// Delete tenant event handler
@@ -243,10 +245,11 @@
 		});
 	}
 
-	// Helper method: Show edit dialog for tenant
-	private Task ShowEditTenantDialog(AddEditTenantCommand command, string title)
+	// One dialog for both commands; which one is sent is decided here, by the caller's operation.
+	private Task ShowTenantDialog<TCommand>(TCommand command, string title)
+		where TCommand : class, ITenantForm, IRequest<Result<string>>
 	{
-		return DialogServiceHelper.ShowFormDialogAsync<TenantFormDialog, AddEditTenantCommand>(
+		return DialogServiceHelper.ShowFormDialogAsync<TenantFormDialog<TCommand>, TCommand>(
 			title,
 			async (res) =>
 			{

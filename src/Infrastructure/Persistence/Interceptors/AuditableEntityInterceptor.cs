@@ -302,7 +302,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
             switch (entry.State)
             {
                 case EntityState.Added:
-                    SetCreationAuditInfo(entry.Entity, userId, tenantId, now);
+                    SetCreationAuditInfo(entry.Entity, userId, now);
                     break;
 
                 case EntityState.Modified:
@@ -318,14 +318,56 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
                     break;
             }
         }
+
+        // Tenant stamping is its own pass over EVERY added row, not part of the audit-field pass
+        // above. Until Pass 54 it lived in SetCreationAuditInfo, so it only reached entities that
+        // were also IAuditableEntity: a plain BaseEntity implementing IMustHaveTenant was inserted
+        // with whatever tenant the caller remembered to set - which, now that the tenant filter is
+        // registered by marker, would leave the row with no tenant at all - invisible to the tenant
+        // that wrote it. The marker is the whole contract; nothing else is required to earn stamping.
+        foreach (var entry in context.ChangeTracker.Entries())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                StampTenant(entry.Entity, tenantId);
+            }
+        }
     }
 
-    private static void SetCreationAuditInfo(IAuditableEntity entity, string userId, string tenantId, DateTime now)
+    private static void SetCreationAuditInfo(IAuditableEntity entity, string userId, DateTime now)
     {
         entity.CreatedById = userId;
         entity.CreatedAt = now;
-        if (entity is IMustHaveTenant mustTenant && mustTenant.TenantId==null) mustTenant.TenantId = tenantId;
-        if (entity is IMayHaveTenant mayTenant && mayTenant.TenantId==null && !IsDeliberatelyShared(entity))
+    }
+
+    /// <summary>
+    /// Gives a new row the ambient principal's tenant when it has none of its own. An explicitly set
+    /// tenant is never overwritten - that is how a tenant seeder, which runs with no principal,
+    /// writes rows for the tenant it was given.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// An <see cref="IMustHaveTenant"/> row has no tenant and there is no ambient one to give it.
+    /// Refused HERE, naming the type, rather than left to the database: a NOT NULL violation names a
+    /// column, arrives after the transaction has started, and reads like a schema problem rather
+    /// than "this was written from a place with no tenant". Background work should run inside
+    /// <c>ISystemContext</c>; a seeder should set the tenant it was handed.
+    /// </exception>
+    private static void StampTenant(object entity, string tenantId)
+    {
+        if (entity is IMustHaveTenant mustTenant)
+        {
+            if (mustTenant.TenantId == null) mustTenant.TenantId = tenantId;
+            if (string.IsNullOrEmpty(mustTenant.TenantId))
+            {
+                throw new InvalidOperationException(
+                    $"A new {entity.GetType().Name} must have a tenant, but none was set and there is no ambient " +
+                    "tenant to stamp it with. Set TenantId explicitly (tenant seeders), or run the work inside " +
+                    "ISystemContext (background jobs).");
+            }
+            return;
+        }
+
+        if (entity is IMayHaveTenant mayTenant && mayTenant.TenantId == null && !IsDeliberatelyShared(entity))
             mayTenant.TenantId = tenantId;
     }
 
@@ -334,7 +376,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The problem this solves.</b> The line above stamps when <c>TenantId</c> is null, so null
+    /// <b>The problem this solves.</b> <see cref="StampTenant"/> stamps when <c>TenantId</c> is null, so null
     /// is the sentinel for "not set yet" - and it is also the value that means "installation-wide".
     /// A tenant-scoped principal therefore had no way to create a shared row, however many rights
     /// they held; Pass 32 §2.5 found exactly that and left it.
@@ -343,7 +385,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
     /// <b>Why this is not a general escape.</b> It is opt-in by TYPE - only
     /// <see cref="IMayBeShared"/> implementers, today just <c>PicklistSet</c> - per INSTANCE, with no
     /// ambient switch to flip, and the flag is <c>[NotMapped]</c> so it cannot arrive from a client
-    /// or from the database. <c>IMustHaveTenant</c> is untouched above and stays unconditional:
+    /// or from the database. <c>IMustHaveTenant</c> is never consulted and stays unconditional:
     /// "may have no tenant" and "must have one" are different contracts, and only the first has a
     /// shared partition to opt into. See <see cref="IMayBeShared"/> for the full reasoning.
     /// </para>
@@ -355,7 +397,7 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
     /// <c>SharedPicklistCreationTests</c> runs the real interceptor rather than asserting the rule.
     /// </para>
     /// </remarks>
-    private static bool IsDeliberatelyShared(IAuditableEntity entity) =>
+    private static bool IsDeliberatelyShared(object entity) =>
         entity is IMayBeShared shared && shared.CreateAsShared;
 
     private static void SetModificationAuditInfo(IAuditableEntity entity, string userId, DateTime now)

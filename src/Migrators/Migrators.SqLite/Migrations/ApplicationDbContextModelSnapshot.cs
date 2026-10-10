@@ -243,9 +243,10 @@ namespace CleanArchitecture.Blazor.Migrators.SqLite.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId");
-
                     b.HasIndex("UserId");
+
+                    b.HasIndex("TenantId", "UserId")
+                        .IsUnique();
 
                     b.ToTable("TenantUsers");
                 });

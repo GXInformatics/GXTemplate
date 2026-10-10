@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using CleanArchitecture.Blazor.Application.Common.Constants;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.MultiTenant;
 using CleanArchitecture.Blazor.Application.Common.Security;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
@@ -30,13 +31,15 @@ public class ApplicationDbContextInitializer
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IdentityOptions _identityOptions;
     private readonly IApplicationSettings _applicationSettings;
+    private readonly ITenantSeedRunner _tenantSeedRunner;
 
     public ApplicationDbContextInitializer(ILogger<ApplicationDbContextInitializer> logger,
         IDbContextFactory<ApplicationDbContext> dbContextFactory,
         UserManager<ApplicationUser> userManager,
         RoleManager<ApplicationRole> roleManager,
         IOptions<IdentityOptions> identityOptions,
-        IApplicationSettings applicationSettings)
+        IApplicationSettings applicationSettings,
+        ITenantSeedRunner tenantSeedRunner)
     {
         _logger = logger;
         _context = dbContextFactory.CreateDbContext();
@@ -44,12 +47,17 @@ public class ApplicationDbContextInitializer
         _roleManager = roleManager;
         _identityOptions = identityOptions.Value;
         _applicationSettings = applicationSettings;
+        _tenantSeedRunner = tenantSeedRunner;
     }
 
     public async Task InitialiseAsync()
     {
         try
         {
+            // FIRST, before the database is touched: a model in which a tenant-marked entity is not
+            // tenant-filtered must never serve a request. See TenantFilterGuard.
+            TenantFilterGuard.AssertEveryTenantEntityIsFiltered(_context.Model);
+
             if (_context.Database.IsRelational())
                 await _context.Database.MigrateAsync();
         }
@@ -62,7 +70,8 @@ public class ApplicationDbContextInitializer
 
     /// <summary>
     /// Everything the application needs to be usable at all, in EVERY environment: the roles its own
-    /// gates name, one organisation for users to belong to, and an administrator to sign in as.
+    /// gates name, one organisation for users to belong to, an administrator to sign in as, the
+    /// system account background work acts as, and every tenant's own seeded data.
     /// </summary>
     public async Task ProvisionAsync()
     {
@@ -71,6 +80,8 @@ public class ApplicationDbContextInitializer
             await EnsureRolesAsync();
             await EnsureDefaultTenantAsync();
             await EnsureAdministratorAsync();
+            await EnsureSystemAccountAsync();
+            await SeedEveryTenantAsync();
             _context.ChangeTracker.Clear();
         }
         catch (Exception ex)
@@ -290,6 +301,101 @@ public class ApplicationDbContextInitializer
     }
 
     /// <summary>
+    /// The account <c>ISystemContext</c> runs background work as: created when absent, and its
+    /// permissions reconciled grant-only on every start, exactly as a role's are.
+    /// </summary>
+    /// <remarks>
+    /// <b>Nobody can sign in as it.</b> No password hash (password sign-in has nothing to check
+    /// against), no external logins, an email at <c>localhost</c> that is never confirmed, inactive,
+    /// and locked out until the end of time. The lockout is re-asserted on every start, so an
+    /// operator who unlocked it gets it back locked rather than silently usable.
+    /// <para>
+    /// <b>Its permissions are the administrator registry's</b>, held as user claims rather than through
+    /// the Admin role. Through the role it would count as an administrator, and
+    /// <see cref="EnsureAdministratorAsync"/> - which provisions an administrator only when nobody
+    /// holds that role - would then never create the person who has to sign in.
+    /// </para>
+    /// <para>
+    /// <b>It refuses to adopt a real account.</b> If an account with this name already has a password
+    /// or an external login, a person has been using it; granting it every permission would hand them
+    /// the installation. Provisioning stops with that reason instead.
+    /// </para>
+    /// </remarks>
+    private async Task EnsureSystemAccountAsync()
+    {
+        var account = await _userManager.FindByNameAsync(Users.System);
+        if (account is null)
+        {
+            account = new ApplicationUser
+            {
+                UserName = Users.System,
+                DisplayName = "System",
+                Provider = "System",
+                Email = $"{Users.System}@localhost",
+                EmailConfirmed = false,
+                IsActive = false,
+                LockoutEnabled = true,
+                LockoutEnd = DateTimeOffset.MaxValue,
+                LanguageCode = "en-US",
+                TimeZoneId = _applicationSettings.DefaultTimeZone,
+                CreatedAt = DateTime.UtcNow
+            };
+            var created = await _userManager.CreateAsync(account);
+            if (!created.Succeeded)
+            {
+                throw new InvalidOperationException(
+                    "Could not provision the system account: " +
+                    string.Join("; ", created.Errors.Select(e => e.Description)));
+            }
+            _logger.LogInformation("Provisioned the system account {UserName}.", Users.System);
+        }
+        else
+        {
+            if (account.PasswordHash is not null || (await _userManager.GetLoginsAsync(account)).Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"An account named '{Users.System}' exists and can be signed in to (it has a password or an external " +
+                    "login). Provisioning will not grant it the system account's permissions. Rename or remove that " +
+                    "account and restart.");
+            }
+
+            if (!account.LockoutEnabled || account.LockoutEnd != DateTimeOffset.MaxValue)
+            {
+                account.LockoutEnabled = true;
+                account.LockoutEnd = DateTimeOffset.MaxValue;
+                await _userManager.UpdateAsync(account);
+                _logger.LogWarning("The system account {UserName} was not locked out; the lockout was restored.", Users.System);
+            }
+        }
+
+        var held = (await _userManager.GetClaimsAsync(account))
+            .Where(c => c.Type == ApplicationClaimTypes.Permission)
+            .Select(c => c.Value)
+            .ToHashSet(StringComparer.Ordinal);
+        var missing = AdministratorPermissionRegistry.Granted.Where(p => !held.Contains(p)).ToArray();
+        if (missing.Length > 0)
+        {
+            await _userManager.AddClaimsAsync(account,
+                missing.Select(p => new Claim(ApplicationClaimTypes.Permission, p)));
+            _logger.LogInformation("Granted {Count} permission(s) to the system account: {Permissions}",
+                missing.Length, string.Join(", ", missing));
+        }
+    }
+
+    /// <summary>
+    /// Runs every <c>ITenantSeeder</c> for every tenant - the reconcile half of the seeder contract,
+    /// which is how a row a later release adds reaches tenants created before it.
+    /// </summary>
+    private async Task SeedEveryTenantAsync()
+    {
+        var tenantIds = await _context.Tenants.AsNoTracking().OrderBy(t => t.Id).Select(t => t.Id).ToListAsync();
+        foreach (var tenantId in tenantIds)
+        {
+            await _tenantSeedRunner.SeedAsync(tenantId);
+        }
+    }
+
+    /// <summary>
     /// A password that satisfies the configured Identity policy by construction rather than by
     /// retrying until one happens to pass.
     /// <para>
@@ -359,6 +465,11 @@ public class ApplicationDbContextInitializer
         }
 
         await _context.SaveChangesAsync();
+
+        // A tenant was created, so its seeders run now - the same contract CreateTenantCommand
+        // keeps. In Development this runs after ProvisionAsync, so without this line the sample
+        // tenant would only be seeded on the NEXT start.
+        await _tenantSeedRunner.SeedAsync(tenant.Id);
     }
 
     /// <summary>

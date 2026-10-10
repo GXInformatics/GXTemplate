@@ -53,7 +53,7 @@ public class AuthorizationBehaviourTests
     {
         public StubUserContextAccessor(UserContext? current) => Current = current;
         public UserContext? Current { get; }
-        public IDisposable Push(UserContext context) => throw new NotSupportedException();
+        public IDisposable Push(UserContext? context) => throw new NotSupportedException();
         public void Clear() => throw new NotSupportedException();
     }
 

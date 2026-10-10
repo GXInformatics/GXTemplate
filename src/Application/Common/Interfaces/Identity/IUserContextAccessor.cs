@@ -55,9 +55,14 @@ public interface IUserContextAccessor
     /// <summary>
     /// Pushes a new user context onto the stack.
     /// </summary>
-    /// <param name="context">The user context to push.</param>
+    /// <param name="context">
+    /// The user context to push, or <c>null</c> to mean "no principal for this scope" - which
+    /// HIDES any context an outer scope pushed, rather than falling through to it. Pass 54: tenant
+    /// seeding runs this way from inside an administrator's circuit, so that it behaves exactly as
+    /// it does at startup, where there is no principal at all.
+    /// </param>
     /// <returns>A disposable object that will pop the context when disposed.</returns>
-    IDisposable Push(UserContext context);
+    IDisposable Push(UserContext? context);
 
     void Clear();
 }

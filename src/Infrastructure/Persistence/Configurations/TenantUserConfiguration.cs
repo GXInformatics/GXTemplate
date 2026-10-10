@@ -16,6 +16,12 @@ public class TenantUserConfiguration : IEntityTypeConfiguration<TenantUser>
         builder.HasOne(tu => tu.User).WithMany(x=>x.TenantUsers)
                 .HasForeignKey(tu => tu.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
-      
+
+        // One membership row per (tenant, user) - Pass 54. Nothing stopped a second one, and every
+        // reader of TenantUsers (the loader's AllowedTenantIds, the switcher's list, the user grid)
+        // had to Distinct() or double-count. Tenant first, so it also serves "members of tenant X"
+        // and replaces the TenantId-only index EF created for the foreign key. The migration removes
+        // any duplicates an existing database already holds before creating it.
+        builder.HasIndex(tu => new { tu.TenantId, tu.UserId }).IsUnique();
     }
 }

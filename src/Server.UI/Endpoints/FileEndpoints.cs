@@ -6,6 +6,7 @@ using CleanArchitecture.Blazor.Application.Common.Security;
 using CleanArchitecture.Blazor.Application.Features.Documents.Specifications;
 using CleanArchitecture.Blazor.Domain.Common.Enums;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
@@ -68,10 +69,12 @@ public static class FileEndpoints
         IApplicationDbContextFactory dbContextFactory,
         IAuthorizationService authorizationService,
         IUserContextLoader userContextLoader,
+        IUserContextAccessor userContextAccessor,
         CancellationToken cancellationToken)
     {
         if (!await IsPermittedAsync(
-                key, httpContext.User, dbContextFactory, authorizationService, userContextLoader, cancellationToken))
+                key, httpContext.User, dbContextFactory, authorizationService, userContextLoader,
+                userContextAccessor, cancellationToken))
         {
             // Refused and missing are reported identically, so keys cannot be probed by comparing
             // the two responses.
@@ -127,6 +130,7 @@ public static class FileEndpoints
         IApplicationDbContextFactory dbContextFactory,
         IAuthorizationService authorizationService,
         IUserContextLoader userContextLoader,
+        IUserContextAccessor userContextAccessor,
         CancellationToken cancellationToken)
     {
         var firstSegment = key.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
@@ -189,10 +193,20 @@ public static class FileEndpoints
         // the specification's documented behaviour: confined by ownership and publicity alone. That
         // branch is sound - it is written for exactly this case - so the specification is left
         // untouched, as the other four consumers require.
-        await using var db = await dbContextFactory.CreateAsync(cancellationToken);
-        return await db.Documents
-            .Where(x => x.StorageKey == key)
-            .WithSpecification(new VisibleDocumentSpecification(userId, context.TenantId ?? string.Empty))
-            .AnyAsync(cancellationToken);
+        //
+        // PUSHED, since Pass 54. Document is now under the global tenant filter, which reads the
+        // tenant from the AMBIENT context - and on an HTTP request there is none, so without this
+        // the filter would reduce to "TenantId IS NULL" and every tenant's documents would be
+        // refused here. The context loaded above is the right one to scope by, for the same reason
+        // it is the right one to hand the specification: it comes from the user row. The push
+        // covers the query and nothing after it.
+        using (userContextAccessor.Push(context))
+        {
+            await using var db = await dbContextFactory.CreateAsync(cancellationToken);
+            return await db.Documents
+                .Where(x => x.StorageKey == key)
+                .WithSpecification(new VisibleDocumentSpecification(userId, context.TenantId ?? string.Empty))
+                .AnyAsync(cancellationToken);
+        }
     }
 }

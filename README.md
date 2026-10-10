@@ -464,8 +464,11 @@ separately rather than under one word.
 to which. `ApplicationUser` carries a current `TenantId`; `Document`, `PicklistSet`, `AuditTrail` and
 `SystemLog` each carry the tenant the row was written in. Business entities get theirs from
 `AuditableEntityInterceptor`, which fills any `IMayHaveTenant`/`IMustHaveTenant` property from the
-ambient principal on insert — so **an entity your project adds is stamped automatically the moment it
-implements one of those interfaces**, with no query changes and no per-feature code.
+ambient principal on insert — so **an entity your project adds is stamped automatically, and filtered
+automatically, the moment it implements one of those interfaces**, with no query changes and no
+per-feature code. Since Pass 54 the marker is the whole contract: stamping no longer requires the
+entity to be auditable too, and the read filter is registered from the marker (see
+[Tenant-owned entities](#tenant-owned-entities-tenant-seeders-and-background-work)).
 
 An audit row's tenant is **stored, not derived**. Switching tenants rewrites
 `ApplicationUser.TenantId` in place, so reconstructing history by joining an audit row to its author
@@ -473,8 +476,8 @@ would re-attribute every past change the moment somebody switched. The column ex
 happen.
 
 **A null tenant is a real value, not a gap.** Startup logging, database seeding, the bootstrap
-administrator banner and background work all run with no ambient principal, and their rows belong to
-the installation rather than to a tenant. Any future per-tenant view has to surface that partition
+administrator banner and background work that does not use `ISystemContext` all run with no ambient
+principal, and their rows belong to the installation rather than to a tenant. Any future per-tenant view has to surface that partition
 rather than quietly dropping it: a tenant administrator who cannot see that the application restarted
 is being shown an edited log.
 
@@ -517,7 +520,7 @@ subsequently creates.
 
 | Surface | Tenant-scoped? |
 |---|---|
-| Documents — list, download, edit, delete | **Yes** |
+| Documents — list, download, edit, delete | **Yes — and by default since Pass 54.** The named global filter (`IMayHaveTenant`: own tenant plus tenantless rows) sits under `VisibleDocumentSpecification`, which still applies the owner/public rule. A principal with no tenant now sees only tenantless documents |
 | Users grid and user **export** | **Yes** — bounded by `AllowedTenantIds`, widened by `Users.ViewAllTenants` |
 | Tenant filter dropdown and `TenantSelect` | **Yes** — same bound, so a user cannot be assigned into a tenant the administrator cannot see |
 | "Superior" user search | **Yes** — the list it searches is bounded by the same rule as the grid, and it then narrows to the edited user's own tenant; empty when no tenant is supplied |
@@ -531,6 +534,46 @@ subsequently creates.
 
 If you are deploying several customers into one installation, **treat everything below the Picklists
 row as installation-wide** until that changes.
+
+#### Tenant-owned entities, tenant seeders and background work
+
+Pass 54 made tenancy something a project entity inherits rather than re-implements.
+
+- **Implement the marker and the entity is isolated.** `ApplicationDbContext` walks the model and
+  registers the named `QueryFilters.Tenant` filter on every hierarchy root implementing
+  `IMustHaveTenant` (`TenantId == current`: no principal, no rows) or `IMayHaveTenant`
+  (`TenantId == null || TenantId == current`: the null tenant is the shared partition). There is no
+  list to add the entity to. `AuditTrail`, which carries a tenant without a marker, is the one
+  explicit registration. Put the marker on the **root** of a TPH hierarchy; EF filters roots only.
+- **Startup refuses a model that would leak.** `TenantFilterGuard` runs first in
+  `InitialiseAsync` and fails the start, naming the entity, if any marked entity (or `AuditTrail`)
+  has no tenant filter — a marker on a TPH leaf, a configuration that removed the filter, an edited
+  walk. Cross-tenant reads still go through `IgnoreQueryFilters([QueryFilters.Tenant])` after a
+  permission check, as `AuditTrailTenantScope` does.
+- **Stamping follows the marker.** A new row gets the ambient tenant when it has none; an explicit
+  `TenantId` is never overwritten. An `IMustHaveTenant` row with no tenant and no principal is refused
+  by the interceptor with the entity's name, before the database is asked.
+- **`ITenantSeeder` gives each tenant its own starting data.** Register implementations with
+  `services.AddScoped<ITenantSeeder, MySeeder>()`. Every seeder runs for a tenant when
+  `CreateTenantCommand` creates it, and for **every** tenant on every start from `ProvisionAsync` — so a
+  seeder must reconcile per item, grant-only, exactly like the role grants (see the seeding rule
+  below). Seeders run with **no ambient principal**, even when an administrator created the tenant:
+  set `TenantId` explicitly on what you add, and read with the tenant filter lifted and the tenant
+  stated (`IgnoreQueryFilters([QueryFilters.Tenant]).Where(x => x.TenantId == tenantId)`).
+- **Background work runs inside `ISystemContext`.** Outside a SignalR invocation there is no ambient
+  principal, so `AuthorizationBehaviour` refuses every request and the tenant filter shows only
+  installation rows. `await systemContext.RunAsync(tenantId, ct => mediator.Send(..., ct))` runs the
+  work as the provisioned `gx-system` account inside that tenant: requests are authorized against its
+  permissions (the administrator registry, as user claims — it is deliberately not in the Admin role),
+  reads are filtered to that tenant, and writes are stamped with it and attributed to `gx-system`.
+  Nobody can sign in as the account: it has no password, an unconfirmed `localhost` email, and a
+  permanent lockout that every start re-asserts. An unknown tenant, or a missing account, throws before
+  the work runs. It is a callback rather than a disposable scope because the context lives in an
+  `AsyncLocal`, which an `async` "begin" method could not hand back.
+- **Tenant commands are split.** `CreateTenantCommand` needs `Tenants.Create` and never updates;
+  `UpdateTenantCommand` needs `Tenants.Edit` and never creates. The old `AddEditTenantCommand`
+  accepted either right for both. `TenantUsers` now has a unique `(TenantId, UserId)` index; the
+  migration deletes existing duplicates (keeping the lowest `Id`) before creating it.
 
 ### What a `Logs.View` holder can see
 
@@ -684,11 +727,11 @@ afterwards, and it supports no administrative task that asking the person would 
 installation genuinely needs one, the extension point is `ServerHub.GroupFor` together with
 `GetOnlineUsers` — they must change together or the roster and the events will disagree.
 
-**Audit trails and picklists are scoped by default rather than by remembering; the rest are not.**
-Documents, the Users area and the pickers above them are filtered because each of their queries was
-found and given a predicate — a query added tomorrow would be unscoped until someone noticed. Audit
-trails and picklists are filtered in the model, so a new query over either starts scoped and an
-exemption has to be written down. That is the property to prefer when you extend this — and the
+**Audit trails, picklists, documents and every tenant-marked project entity are scoped by default
+rather than by remembering; the rest are not.** The Users area and the pickers above it are filtered
+because each of their queries was found and given a predicate — a query added tomorrow would be
+unscoped until someone noticed. The others are filtered in the model, so a new query over any of them
+starts scoped and an exemption has to be written down. That is the property to prefer when you extend this — and the
 reason `QueryFilters.Tenant` is a constant rather than a literal.
 
 **A filtered query behind a shared cache key is a leak no query test can see, so the two always move
@@ -1004,7 +1047,8 @@ Four consequences, because they are not obvious and they bite late:
    deployment; and a start that changes nothing logs nothing, so a line in the log means a grant
    genuinely appeared. `ProvisioningTests` covers the provision → revoke behind the initializer's
    back → provision → restored cycle, on both roles, plus a deleted role and an operator's extra
-   grant. Follow the same pattern for anything you seed.
+   grant. Follow the same pattern for anything you seed — including an `ITenantSeeder`, which runs
+   again for every tenant on every start.
 
 **On SQLite the schema is ignored, not honoured.** The provider drops it and creates a bare
 `TBL_STOCK_MOVEMENT`; PostgreSQL and SQL Server both emit `EnsureSchema("core")` and a qualified
@@ -1051,8 +1095,9 @@ Stated plainly, because finding these out later is worse than reading them now.
   Treat the coarse feature permission as the real boundary.
 - **Tenant isolation covers Documents, the Users area, audit trails, online presence and picklists.**
   Rows are tenant-stamped throughout. Documents and the Users area are filtered at every entry point -
-  including the user export, which shares its predicate with the grid - audit trails and picklists are
-  filtered in the model by a global query filter, so they are scoped by default rather than per query,
+  including the user export, which shares its predicate with the grid - audit trails, picklists,
+  documents and every `IMustHaveTenant`/`IMayHaveTenant` entity a project adds are filtered in the
+  model by a global query filter, so they are scoped by default rather than per query,
   and presence is bounded at the SignalR connection by a per-tenant group. **System logs and roles
   remain installation-wide**, and for roles that is now a named right (`Roles.ManageDefinitions`)
   rather than an absence of code. See [Tenancy](#tenancy) for the full table, the cross-tenant right,

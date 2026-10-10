@@ -49,7 +49,7 @@ public class AuditTrailTenantFilterTests
         public Ambient(string? tenantId) =>
             _context = tenantId is null ? null : new UserContext(UserId, "u", TenantId: tenantId);
         public UserContext? Current => _context;
-        public IDisposable Push(UserContext context) => throw new NotSupportedException();
+        public IDisposable Push(UserContext? context) => throw new NotSupportedException();
         public void Clear() { }
     }
 

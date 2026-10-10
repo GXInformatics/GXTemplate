@@ -45,9 +45,9 @@ public class UserContextAccessor : IUserContextAccessor
     /// <summary>
     /// Pushes a new user context onto the stack.
     /// </summary>
-    /// <param name="context">The user context to push.</param>
+    /// <param name="context">The user context to push, or <c>null</c> for "no principal here".</param>
     /// <returns>A disposable object that will pop the context when disposed.</returns>
-    public IDisposable Push(UserContext context)
+    public IDisposable Push(UserContext? context)
     {
         var node = new Node
         {

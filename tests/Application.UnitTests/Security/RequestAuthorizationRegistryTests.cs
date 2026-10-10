@@ -30,7 +30,10 @@ public class RequestAuthorizationRegistryTests
     // UpdateSecurityPolicyCommand (SecuritySettings.Edit). Both carry their own permission rather
     // than a general administration right - changing how long a session may sit unattended is a
     // security control, and the people who should hold it are not the people who edit picklists.
-    private const int ExpectedRequestTypeCount = 24;
+    //
+    // 25 in Pass 54: AddEditTenantCommand (Create OR Edit, which let either right do both) split into
+    // CreateTenantCommand (Tenants.Create) and UpdateTenantCommand (Tenants.Edit).
+    private const int ExpectedRequestTypeCount = 25;
 
     private static Assembly ApplicationAssembly =>
         typeof(CleanArchitecture.Blazor.Application.DependencyInjection).Assembly;

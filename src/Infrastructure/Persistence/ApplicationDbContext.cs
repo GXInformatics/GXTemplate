@@ -1,6 +1,7 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Linq.Expressions;
 using System.Reflection;
 using CleanArchitecture.Blazor.Domain.Common.Entities;
 using CleanArchitecture.Blazor.Domain.Identity;
@@ -110,44 +111,43 @@ public class ApplicationDbContext : IdentityDbContext<
         builder.ApplyGlobalFilters<ISoftDelete>(
             QueryFilters.SoftDelete, s => s.DeletedAt == null);
 
-        // The tenant filter, by EXPLICIT ENTITY LIST rather than by marker interface.
+        // THE TENANT FILTER, BY MARKER INTERFACE (Pass 54). Before this pass it was an explicit list
+        // of two entities, so a project entity implementing IMustHaveTenant was stamped on insert and
+        // then readable by every tenant - the marker promised isolation the model did not deliver.
+        // Now implementing the marker IS the decision, and TenantFilterGuard fails startup if any
+        // marked entity ends up without the filter.
         //
-        // IMayHaveTenant looks like the right key and is not. AuditTrail does not implement it -
-        // the interceptor CONSTRUCTS audit rows with a TenantId rather than stamping them through
-        // the marker - so a marker-driven filter would have missed the one entity this exists for.
-        // And it would have caught Document, which VisibleDocumentSpecification already scopes by
-        // an owner-or-tenant rule a global filter cannot express; scoping it twice would be two
-        // rules free to disagree, not additive safety.
+        // ONE FILTER NAME, TWO PREDICATES, because a null TenantId means different things:
         //
-        // So the list is written out, and adding to it is a deliberate act rather than a side
-        // effect of implementing an interface.
+        //   IMustHaveTenant - TenantId == current. A row belongs to exactly one tenant. With no
+        //                     principal (current is null) EF's null semantics make this
+        //                     TenantId IS NULL, which a must-have row never is: no principal, no rows.
+        //   IMayHaveTenant  - TenantId == null || TenantId == current. A null tenant is the SHARED,
+        //                     installation-level partition (IMayBeShared is how a row is put there
+        //                     deliberately), visible to everyone beside the caller's own rows.
         //
-        // ONE FILTER NAME, TWO PREDICATES - and that is correct, not an oversight.
-        //
-        // There is no shared expression to reuse here: HasQueryFilter takes a lambda per entity, so
-        // each entry below states its own rule. That matters because a null TenantId means opposite
-        // things for the two entities on the list, and a single shared predicate would have forced
-        // one of them to be wrong.
-        //
-        //   AuditTrail    - a row is an EVENT that happened in exactly one tenant. A null tenant is
-        //                   an installation-level event (seeding, bootstrap, background work) and
-        //                   belongs to nobody, so strict equality is right: a tenant sees its own
-        //                   events and a context with no principal sees the installation's.
-        //   PicklistSet   - a row is REFERENCE DATA. A null tenant means "everyone's", so the
-        //                   predicate admits it alongside the caller's own rows. Shared plus
-        //                   per-tenant additions: every shipped picklist stays visible to every
-        //                   tenant with no per-tenant seeding path, and a tenant's own additions
-        //                   stay private to it.
+        // Document joined the filter here. It used to be left out because VisibleDocumentSpecification
+        // scopes it by owner-or-tenant and "two rules free to disagree" was the worry; they cannot
+        // disagree in the permissive direction, since a global filter only ever narrows. For a
+        // principal WITH a tenant the conjunction is exactly the specification's rule. For one
+        // WITHOUT, the filter confines them to tenantless documents - closing the specification's
+        // no-tenant branch, which served every tenant's public documents (pass 46, F1) - without
+        // touching the specification, which pass 49 owns.
         //
         // The NAME is shared deliberately: QueryFilters.Tenant is what an exemption names, and an
-        // exemption means the same thing for both - "read across tenants, having checked a right".
+        // exemption means the same thing everywhere - "read across tenants, having checked a right".
+        ApplyTenantFilters(builder);
+
+        // AuditTrail is the ONE explicit registration left, and it is not an oversight. Its rows are
+        // CONSTRUCTED by AuditableEntityInterceptor with the tenant the change was made in; they are
+        // not stamped through a marker, so it implements neither. Its rule is strict equality on a
+        // NULLABLE column - a null tenant is an installation-level EVENT (seeding, bootstrap,
+        // background work) that belongs to nobody, so it must not be shown to every tenant the way
+        // IMayHaveTenant's null-or-equal would show it, and IMustHaveTenant's non-null column would
+        // forbid recording it at all. TenantFilterGuard checks this registration too.
         builder.Entity<AuditTrail>().HasQueryFilter(
             QueryFilters.Tenant,
             (AuditTrail a) => a.TenantId == CurrentTenantId);
-
-        builder.Entity<PicklistSet>().HasQueryFilter(
-            QueryFilters.Tenant,
-            (PicklistSet p) => p.TenantId == null || p.TenantId == CurrentTenantId);
 
         // LAST, and after ApplyConfigurationsFromAssembly: the GX naming standard yields to an
         // explicit ToTable, so the configurations have to have been applied before it runs. It maps
@@ -156,6 +156,65 @@ public class ApplicationDbContext : IdentityDbContext<
         // AuditTrails, Documents, PicklistSets, DataProtectionKeys, __EFMigrationsHistory) in the
         // default schema under their existing names. See GxNamingConventions.
         builder.ApplyGxTableNaming();
+    }
+
+    /// <summary>
+    /// Registers <see cref="QueryFilters.Tenant"/> on every hierarchy root implementing
+    /// <see cref="IMustHaveTenant"/> (strict) or <see cref="IMayHaveTenant"/> (null-or-equal).
+    /// </summary>
+    /// <remarks>
+    /// <b>The comparison is built against <c>this</c>, not a captured value.</b> The expression
+    /// below is exactly what the compiler emits for <c>e =&gt; e.TenantId == CurrentTenantId</c>
+    /// written in an instance method: a property read on a constant holding the context. EF
+    /// recognises that constant and rebinds it to the executing context on every query, which is
+    /// what keeps the cached model from baking in the first request's tenant (see
+    /// <see cref="CurrentTenantId"/>). Built by hand only because the entity type is not known at
+    /// compile time.
+    /// <para>
+    /// Owned types are skipped because they cannot carry a filter (their owner's applies), and TPH
+    /// leaves because EF only accepts a filter on the root. A marked leaf under an unmarked root is
+    /// therefore NOT filtered - <see cref="TenantFilterGuard"/> refuses that model at startup and says
+    /// to move the marker to the root.
+    /// </para>
+    /// </remarks>
+    private void ApplyTenantFilters(ModelBuilder builder)
+    {
+        var self = Expression.Constant(this, typeof(ApplicationDbContext));
+        var current = Expression.Property(self, CurrentTenantIdProperty);
+
+        foreach (var entityType in builder.Model.GetEntityTypes().ToList())
+        {
+            if (entityType.IsOwned() || entityType.BaseType is not null) continue;
+
+            var clr = entityType.ClrType;
+            var mustHave = typeof(IMustHaveTenant).IsAssignableFrom(clr);
+            if (!mustHave && !typeof(IMayHaveTenant).IsAssignableFrom(clr)) continue;
+
+            var e = Expression.Parameter(clr, "e");
+            var tenant = TenantIdOf(e, mustHave ? typeof(IMustHaveTenant) : typeof(IMayHaveTenant));
+            Expression body = Expression.Equal(tenant, current);
+            if (!mustHave)
+            {
+                body = Expression.OrElse(Expression.Equal(tenant, Expression.Constant(null, typeof(string))), body);
+            }
+
+            builder.Entity(clr).HasQueryFilter(QueryFilters.Tenant, Expression.Lambda(body, e));
+        }
+    }
+
+    private static readonly PropertyInfo CurrentTenantIdProperty =
+        typeof(ApplicationDbContext).GetProperty(nameof(CurrentTenantId), BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+    /// <summary>
+    /// <c>e.TenantId</c> through the class's own property when it has one - what the filter would say
+    /// if written by hand - and through the marker otherwise (an explicit interface implementation).
+    /// </summary>
+    private static Expression TenantIdOf(ParameterExpression e, Type marker)
+    {
+        var own = e.Type.GetProperty(nameof(IMayHaveTenant.TenantId), BindingFlags.Instance | BindingFlags.Public);
+        return own is not null
+            ? Expression.Property(e, own)
+            : Expression.Property(Expression.Convert(e, marker), marker.GetProperty(nameof(IMayHaveTenant.TenantId))!);
     }
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

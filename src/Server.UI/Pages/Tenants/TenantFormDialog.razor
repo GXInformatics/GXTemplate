@@ -1,4 +1,5 @@
-﻿@using CleanArchitecture.Blazor.Application.Features.Tenants.Commands.AddEdit
+﻿@using CleanArchitecture.Blazor.Application.Features.Tenants.Commands
+@typeparam TCommand where TCommand : class, ITenantForm, IRequest<Result<string>>
 @inherits MudComponentBase
 @inject IStringLocalizer<Tenants> L
 
@@ -43,7 +44,8 @@
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
 
-    [EditorRequired] [Parameter] public AddEditTenantCommand _model { get; set; } = default!;
+    // Create or Update - the page decides which, so this dialog cannot turn one into the other.
+    [EditorRequired] [Parameter] public TCommand _model { get; set; } = default!;
 
     private MudForm _form = new();
 

@@ -103,19 +103,21 @@ public class GetFileStreamQueryHandlerTests
         return document.Id;
     }
 
-    private ApplicationDbContext NewContext() =>
-        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options);
+    // Built over the handler's own accessor, as the application's factory builds every context:
+    // since Pass 54 Document is tenant-filtered, and the filter reads the ambient tenant from it.
+    private ApplicationDbContext NewContext(IUserContextAccessor accessor) =>
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options, accessor);
 
     private GetFileStreamQueryHandler CreateHandler(UserContext? ambientUser)
     {
         // The handler owns and disposes the context it is handed, so every call gets a fresh one over
         // the same open connection to the shared test database.
-        var factory = new Mock<IApplicationDbContextFactory>();
-        factory.Setup(x => x.CreateAsync(It.IsAny<CancellationToken>()))
-            .Returns(() => new ValueTask<IApplicationDbContext>(NewContext()));
-
         var accessor = new Mock<IUserContextAccessor>();
         accessor.SetupGet(x => x.Current).Returns(ambientUser);
+
+        var factory = new Mock<IApplicationDbContextFactory>();
+        factory.Setup(x => x.CreateAsync(It.IsAny<CancellationToken>()))
+            .Returns(() => new ValueTask<IApplicationDbContext>(NewContext(accessor.Object)));
 
         return new GetFileStreamQueryHandler(factory.Object, accessor.Object, _fileStorage);
     }

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ardalis.Specification.EntityFrameworkCore;
+using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Storage;
@@ -122,16 +123,33 @@ public class DocumentTenantIsolationTests
         return (document.Id, document.StorageKey!);
     }
 
-    private ApplicationDbContext NewContext() =>
-        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options);
+    /// <summary>
+    /// A context that reads as <paramref name="accessor"/>'s principal, or as nobody.
+    /// </summary>
+    /// <remarks>
+    /// Since Pass 54 Document is under the global tenant filter, which reads the tenant from the
+    /// context's accessor. The application's factory hands every context the same ambient accessor
+    /// the handler sees, so the handlers below are given contexts built over THEIR accessor - a
+    /// context without one is a principal-less read, which sees only tenantless documents.
+    /// </remarks>
+    private ApplicationDbContext NewContext(IUserContextAccessor? accessor = null) =>
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options, accessor);
 
-    private Mock<IApplicationDbContextFactory> Factory()
+    private Mock<IApplicationDbContextFactory> Factory(IUserContextAccessor accessor)
     {
         var factory = new Mock<IApplicationDbContextFactory>();
         factory.Setup(x => x.CreateAsync(It.IsAny<CancellationToken>()))
-            .Returns(() => new ValueTask<IApplicationDbContext>(NewContext()));
+            .Returns(() => new ValueTask<IApplicationDbContext>(NewContext(accessor)));
         return factory;
     }
+
+    /// <summary>
+    /// Every document, across tenants - how the ASSERTIONS look at the database. "The other tenant's
+    /// document is still there" is a question about the table, not about what any principal may see,
+    /// so it lifts the tenant filter by name, as a deliberate cross-tenant read must.
+    /// </summary>
+    private static IQueryable<Document> AllDocuments(ApplicationDbContext db) =>
+        db.Documents.IgnoreQueryFilters([QueryFilters.Tenant]);
 
     private static Mock<IUserContextAccessor> Accessor(string userId, string tenantId)
     {
@@ -153,7 +171,7 @@ public class DocumentTenantIsolationTests
             CurrentUser = Profile(userId, tenantId)
         };
 
-        await using var db = NewContext();
+        await using var db = NewContext(Accessor(userId, tenantId).Object);
         var titles = await db.Documents
             .WithSpecification(new AdvancedDocumentsSpecification(filter))
             .Select(x => x.Title!)
@@ -192,7 +210,7 @@ public class DocumentTenantIsolationTests
         // VisibleDocumentSpecification - the rule the download button and the /files endpoint
         // enforce - would refuse to serve. A page that lists what it cannot open is the symptom the
         // three tests above are each one instance of.
-        await using var db = NewContext();
+        await using var db = NewContext(Accessor(UserA, TenantA).Object);
         var downloadable = await db.Documents
             .WithSpecification(new VisibleDocumentSpecification(UserA, TenantA))
             .Select(x => x.Title!)
@@ -217,8 +235,11 @@ public class DocumentTenantIsolationTests
 
     // ---- B.2: delete ---------------------------------------------------------------------------
 
-    private DeleteDocumentCommandHandler DeleteHandler(string userId, string tenantId) =>
-        new(Factory().Object, Accessor(userId, tenantId).Object);
+    private DeleteDocumentCommandHandler DeleteHandler(string userId, string tenantId)
+    {
+        var accessor = Accessor(userId, tenantId).Object;
+        return new(Factory(accessor).Object, accessor);
+    }
 
     [Test]
     public async Task ATenantsDocumentCannotBeDeletedFromAnotherTenant_AndItsStoredObjectSurvives()
@@ -238,7 +259,7 @@ public class DocumentTenantIsolationTests
         result.Succeeded.Should().BeTrue();
 
         await using var db = NewContext();
-        (await db.Documents.AnyAsync(x => x.Id == _publicDocOfB))
+        (await AllDocuments(db).AnyAsync(x => x.Id == _publicDocOfB))
             .Should().BeTrue("the other tenant's document is still there");
 
         var stored = await _fileStorage.ReadAsync(_storageKeyOfB);
@@ -254,7 +275,7 @@ public class DocumentTenantIsolationTests
         result.Succeeded.Should().BeTrue();
 
         await using var db = NewContext();
-        (await db.Documents.AnyAsync(x => x.Id == _publicDocOfA)).Should().BeFalse();
+        (await AllDocuments(db).AnyAsync(x => x.Id == _publicDocOfA)).Should().BeFalse();
     }
 
     // ---- B.3: edit -----------------------------------------------------------------------------
@@ -265,10 +286,11 @@ public class DocumentTenantIsolationTests
         localizer.Setup(x => x[It.IsAny<string>()])
             .Returns((string name) => new LocalizedString(name, name));
 
+        var accessor = Accessor(userId, tenantId).Object;
         return new AddEditDocumentCommandHandler(
-            Factory().Object,
+            Factory(accessor).Object,
             new MapsterObjectMapper(new TypeAdapterConfig()),
-            Accessor(userId, tenantId).Object,
+            accessor,
             localizer.Object);
     }
 
@@ -284,7 +306,7 @@ public class DocumentTenantIsolationTests
         result.Succeeded.Should().BeFalse();
 
         await using var db = NewContext();
-        var document = await db.Documents.FindAsync(_publicDocOfB);
+        var document = await AllDocuments(db).SingleOrDefaultAsync(x => x.Id == _publicDocOfB);
         document!.Title.Should().Be("b-public", "nothing about the other tenant's document changed");
     }
 
@@ -304,7 +326,7 @@ public class DocumentTenantIsolationTests
         result.Succeeded.Should().BeTrue("editing one's own document is allowed");
 
         await using var db = NewContext();
-        var document = await db.Documents.FindAsync(_publicDocOfA);
+        var document = await AllDocuments(db).SingleOrDefaultAsync(x => x.Id == _publicDocOfA);
         document!.TenantId.Should().Be(TenantA, "the tenant is not the caller's to set");
     }
 
@@ -318,7 +340,7 @@ public class DocumentTenantIsolationTests
         result.Succeeded.Should().BeTrue();
 
         await using var db = NewContext();
-        var document = await db.Documents.FindAsync(_publicDocOfA);
+        var document = await AllDocuments(db).SingleOrDefaultAsync(x => x.Id == _publicDocOfA);
         document!.Title.Should().Be("renamed");
         document.TenantId.Should().Be(TenantA);
     }

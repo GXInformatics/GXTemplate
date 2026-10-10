@@ -9,6 +9,10 @@ using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Application.Common.Interfaces;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.MultiTenant;
+using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
+using CleanArchitecture.Blazor.Infrastructure.Services.MultiTenant;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Npgsql;
@@ -60,6 +64,10 @@ public class ProvisioningTests
         // the defaults of AppConfigurationSettings are what a project with no configuration gets.
         services.AddSingleton<IApplicationSettings>(new AppConfigurationSettings());
         services.AddScoped<ApplicationDbContextInitializer>();
+        // Pass 54: provisioning runs every tenant seeder for every tenant, through the runner, which
+        // hides the ambient principal. None are registered here, so the runner runs nothing.
+        services.AddSingleton<IUserContextAccessor, UserContextAccessor>();
+        services.AddScoped<ITenantSeedRunner, TenantSeedRunner>();
 
         _provider = services.BuildServiceProvider();
 
@@ -108,11 +116,27 @@ public class ProvisioningTests
             .ToArray();
     }
 
+    /// <summary>
+    /// The accounts a PERSON can sign in as - every account except the system one.
+    /// </summary>
+    /// <remarks>
+    /// Pass 54 provisions <see cref="Users.System"/> in every environment, so "the users" now
+    /// includes an account nobody can sign in as. The assertions below are about people - exactly one
+    /// administrator, no Demo account, the administrator's password and memberships - so they read
+    /// through this, and the system account has its own tests further down.
+    /// </remarks>
     private async Task<ApplicationUser[]> UsersAsync()
     {
         using var scope = _provider.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        return await userManager.Users.ToArrayAsync();
+        return await userManager.Users.Where(u => u.UserName != Users.System).ToArrayAsync();
+    }
+
+    private async Task<ApplicationUser?> SystemAccountAsync()
+    {
+        using var scope = _provider.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        return await userManager.FindByNameAsync(Users.System);
     }
 
     private async Task<T> WithContextAsync<T>(Func<ApplicationDbContext, Task<T>> read)
@@ -359,6 +383,91 @@ public class ProvisioningTests
         var users = await UsersAsync();
         users.Should().HaveCount(1);
         users[0].UserName.Should().Be("root");
+    }
+
+    // ---- the system account (Pass 54) ----------------------------------------------------------
+
+    [Test]
+    public async Task Provisioning_CreatesTheSystemAccount_AndNothingCanSignInAsIt()
+    {
+        await ProvisionAsync();
+
+        var account = await SystemAccountAsync();
+        account.Should().NotBeNull();
+        account!.PasswordHash.Should().BeNull("password sign-in must have nothing to check against");
+        account.LockoutEnabled.Should().BeTrue();
+        account.LockoutEnd.Should().Be(DateTimeOffset.MaxValue);
+        account.IsActive.Should().BeFalse();
+        account.EmailConfirmed.Should().BeFalse();
+
+        using var scope = _provider.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        (await userManager.GetRolesAsync(account)).Should().BeEmpty(
+            "in the Admin role it would suppress provisioning of the administrator a person signs in as");
+        (await userManager.GetLoginsAsync(account)).Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task TheSystemAccount_HoldsTheAdministratorRegistryAsUserClaims()
+    {
+        await ProvisionAsync();
+
+        using var scope = _provider.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var claims = (await userManager.GetClaimsAsync((await SystemAccountAsync())!))
+            .Where(c => c.Type == ApplicationClaimTypes.Permission)
+            .Select(c => c.Value);
+
+        claims.Should().BeEquivalentTo(AdministratorPermissionRegistry.Granted);
+    }
+
+    [Test]
+    public async Task ProvisioningTwice_DoesNotDuplicateTheSystemAccountOrItsGrants()
+    {
+        await ProvisionAsync();
+        await ProvisionAsync();
+
+        using var scope = _provider.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        (await userManager.Users.CountAsync(u => u.UserName == Users.System)).Should().Be(1);
+        (await userManager.GetClaimsAsync((await SystemAccountAsync())!))
+            .Select(c => c.Value).Should().OnlyHaveUniqueItems();
+    }
+
+    [Test]
+    public async Task Provisioning_RestoresTheSystemAccountsLockout()
+    {
+        await ProvisionAsync();
+        using (var scope = _provider.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var account = (await userManager.FindByNameAsync(Users.System))!;
+            await userManager.SetLockoutEndDateAsync(account, null);
+        }
+
+        await ProvisionAsync();
+
+        (await SystemAccountAsync())!.LockoutEnd.Should().Be(DateTimeOffset.MaxValue);
+    }
+
+    [Test]
+    public async Task Provisioning_RefusesToAdoptAnAccountOfThatNameThatHasAPassword()
+    {
+        // Somebody registered "gx-system" as a person. Granting it every permission would hand them
+        // the installation, so provisioning stops instead - and grants nothing.
+        using (var scope = _provider.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var person = new ApplicationUser { UserName = Users.System, Email = "someone@example.com" };
+            (await userManager.CreateAsync(person, "A-Strong-Passw0rd!")).Succeeded.Should().BeTrue();
+        }
+
+        var provisioning = async () => await ProvisionAsync();
+
+        await provisioning.Should().ThrowAsync<InvalidOperationException>().WithMessage($"*'{Users.System}'*");
+        using var check = _provider.CreateScope();
+        var users = check.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        (await users.GetClaimsAsync((await SystemAccountAsync())!)).Should().BeEmpty();
     }
 
     // ---- the environment split -----------------------------------------------------------------

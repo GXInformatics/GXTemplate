@@ -30,6 +30,8 @@ using NUnit.Framework;
 using CleanArchitecture.Blazor.Application.Features.PicklistSets.DTOs;
 using CleanArchitecture.Blazor.Infrastructure.Services;
 using CleanArchitecture.Blazor.Application.Features.Tenants.DTOs;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.MultiTenant;
+using CleanArchitecture.Blazor.Application.IntegrationTests.MultiTenant;
 
 namespace CleanArchitecture.Blazor.Application.IntegrationTests;
 
@@ -114,16 +116,22 @@ public class Testing
         // user's row and membership rows, and a membership change has to clear the loader's cache to
         // show. A hand-built context carried only an id and a name, so every test of those rules would
         // have been testing this file instead of the application.
+        //
+        // PUSHES ARE HONOURED (Pass 54). This was a Moq double whose Push did nothing, which was
+        // harmless while nothing in the application pushed outside a hub. ISystemContext and the
+        // tenant seed runner now do - the first pushes the system account, the second pushes "no
+        // principal" - and a harness that ignored both would report the harness user throughout,
+        // so the tests of those two would be testing this file again. A pushed context, including a
+        // pushed null, wins; with nothing pushed the harness user is the ambient one, as before.
         services.RemoveAll<IUserContextAccessor>();
         services.AddSingleton<IUserContextAccessor>(provider =>
-        {
-            var loader = provider.GetRequiredService<IUserContextLoader>();
-            var accessor = new Mock<IUserContextAccessor>();
-            accessor.Setup(x => x.Current).Returns(() => CurrentContext(loader));
-            return accessor.Object;
-        });
+            new HarnessUserContextAccessor(provider.GetRequiredService<IUserContextLoader>()));
 
         // The clock, settable (CO-165). Scoped, as the application registers IDateTime, over one instance.
+        // The one test tenant seeder (Pass 54), inert unless a test enables it - see
+        // RecordingTenantSeeder. Registered the way a project registers its own.
+        services.AddScoped<ITenantSeeder, RecordingTenantSeeder>();
+
         services.RemoveAll<IDateTime>();
         services.AddScoped<IDateTime>(_ => Clock);
         return services;
@@ -145,6 +153,37 @@ public class Testing
     }
 
     /// <summary>A signed-in principal for <paramref name="userId"/>, as the cookie would produce.</summary>
+    /// <summary>The harness user, under a stack of explicit pushes that take precedence over it.</summary>
+    private sealed class HarnessUserContextAccessor : IUserContextAccessor
+    {
+        private sealed class Node
+        {
+            public UserContext? Value;
+            public Node? Parent;
+        }
+
+        private static readonly AsyncLocal<Node?> Pushed = new();
+        private readonly IUserContextLoader _loader;
+
+        public HarnessUserContextAccessor(IUserContextLoader loader) => _loader = loader;
+
+        public UserContext? Current => Pushed.Value is { } node ? node.Value : CurrentContext(_loader);
+
+        public IDisposable Push(UserContext? context)
+        {
+            var parent = Pushed.Value;
+            Pushed.Value = new Node { Value = context, Parent = parent };
+            return new Pop(parent);
+        }
+
+        public void Clear() => Pushed.Value = null;
+
+        private sealed class Pop(Node? restore) : IDisposable
+        {
+            public void Dispose() => Pushed.Value = restore;
+        }
+    }
+
     private static ClaimsPrincipal PrincipalFor(string userId) =>
         new(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, userId) }, "harness"));
 
@@ -238,6 +277,7 @@ public class Testing
     {
         await Database.ResetAsync();
         Clock.Reset();
+        RecordingTenantSeeder.Reset();
         _currentUserId = null;
 
         // Re-establish an authenticated principal after the wipe: with deny-by-default in the

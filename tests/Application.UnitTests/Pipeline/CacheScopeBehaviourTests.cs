@@ -223,7 +223,7 @@ public class CacheScopeBehaviourTests
     {
         public StubAccessor(UserContext? current) => Current = current;
         public UserContext? Current { get; }
-        public IDisposable Push(UserContext context) => throw new NotSupportedException();
+        public IDisposable Push(UserContext? context) => throw new NotSupportedException();
         public void Clear() { }
     }
 

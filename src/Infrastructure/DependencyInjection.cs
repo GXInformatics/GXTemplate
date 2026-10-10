@@ -10,6 +10,7 @@ using CleanArchitecture.Blazor.Application.Pipeline;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.MultiTenant;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using CleanArchitecture.Blazor.Infrastructure.Services.Mail;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
@@ -335,6 +336,13 @@ public static class DependencyInjection
         // Auto-discover and register all IDataSourceService<T> implementations
         services.AddDataSourceServices();
         services.AddScoped<ITenantSwitchService, TenantSwitchService>();
+
+        // Pass 54. The runner is always registered; ITenantSeeder implementations are the project's
+        // to add (AddScoped<ITenantSeeder, X>()), and with none registered it runs nothing.
+        services.AddScoped<ITenantSeedRunner, TenantSeedRunner>();
+        // Singleton: it holds no state of its own - the context it pushes lives in the accessor's
+        // AsyncLocal - and a hosted service, which is a singleton, must be able to take it.
+        services.AddSingleton<ISystemContext, SystemContext>();
 
         return services
             .AddScoped<IValidationService, ValidationService>()

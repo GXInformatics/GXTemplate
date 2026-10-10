@@ -45,6 +45,7 @@ public class FileEndpointsAuthorizationTests
     private IApplicationDbContextFactory _factory = null!;
     private IAuthorizationService _permitAll = null!;
     private IAuthorizationService _denyAll = null!;
+    private readonly IUserContextAccessor _accessor = new UserContextAccessor();
 
     private const string PrivateKeyOfA = "Documents/private-of-a.png";
     private const string PublicKeyOfA = "Documents/public-of-a.png";
@@ -71,10 +72,17 @@ public class FileEndpointsAuthorizationTests
         Add(KeyInOtherTenant, isPublic: true, owner: UserB, tenant: OtherTenantId);
         await _db.SaveChangesAsync();
 
+        // The contexts this factory hands out read the ambient tenant from the real accessor, as
+        // the application's factory does. Since Pass 54 Document is under the global tenant filter,
+        // so a context built without one would see only tenantless documents - and the endpoint's
+        // push of the loaded user context, which is what makes it see the caller's tenant, would go
+        // untested.
         var factory = new Mock<IApplicationDbContextFactory>();
         factory.Setup(x => x.CreateAsync(It.IsAny<CancellationToken>()))
             .Returns(() => new ValueTask<IApplicationDbContext>(
-                new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options)));
+                new ApplicationDbContext(
+                    new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(_connection).Options,
+                    _accessor)));
         _factory = factory.Object;
 
         _permitAll = BuildAuthorizationService(grantDownload: true);
@@ -181,7 +189,7 @@ public class FileEndpointsAuthorizationTests
     private Task<bool> IsPermitted(
         string key, ClaimsPrincipal user, IAuthorizationService authorization, IUserContextLoader? loader = null) =>
         FileEndpoints.IsPermittedAsync(
-            key, user, _factory, authorization, loader ?? RealTenants(), CancellationToken.None);
+            key, user, _factory, authorization, loader ?? RealTenants(), _accessor, CancellationToken.None);
 
     [Test]
     public async Task AProfilePictureKey_NeedsOnlyAuthentication()
@@ -308,18 +316,34 @@ public class FileEndpointsAuthorizationTests
     }
 
     [Test]
-    public async Task AGenuinelyTenantlessPrincipal_KeepsTheSpecificationsDocumentedBehaviour()
+    public async Task AGenuinelyTenantlessPrincipal_IsConfinedToTenantlessDocuments()
     {
-        // A resolvable user who genuinely has no tenant is a different thing from an unresolvable
-        // one, and VisibleDocumentSpecification's no-tenant branch is written for exactly this case:
-        // confined by ownership and publicity alone. The specification is deliberately unchanged -
-        // four other consumers depend on that branch - so this asserts the distinction the fix
-        // draws rather than a behaviour it invented.
+        // CHANGED IN PASS 54, deliberately. This used to be
+        // AGenuinelyTenantlessPrincipal_KeepsTheSpecificationsDocumentedBehaviour and asserted that a
+        // user with no tenant was served tenant-1's documents - by ownership, and by publicity, which
+        // is every public document in every tenant (pass 46, finding F1). Document is now under the
+        // global tenant filter (IMayHaveTenant: null-or-equal), and with no tenant that reduces to
+        // "TenantId IS NULL". The specification's no-tenant branch is untouched (pass 49 owns it);
+        // the filter beneath it is what now confines this principal.
+        //
+        // Still distinct from an UNRESOLVABLE principal, which is refused everything: a tenantless
+        // one is served what belongs to no tenant.
+        const string tenantlessKey = "Documents/tenantless-public.png";
+        _db.Documents.Add(new Document
+        {
+            Title = tenantlessKey, IsPublic = true, CreatedById = UserB, TenantId = null,
+            StorageKey = tenantlessKey, PublicUrl = "/files/" + tenantlessKey
+        });
+        await _db.SaveChangesAsync();
         var tenantless = new Loader(new Dictionary<string, string?> { [UserA] = null });
 
-        (await IsPermitted(PublicKeyOfA, Principal(UserA), _permitAll, tenantless)).Should().BeTrue();
-        (await IsPermitted(PrivateKeyOfA, Principal(UserA), _permitAll, tenantless)).Should().BeTrue(
-            "their own private document, by ownership");
+        (await IsPermitted(tenantlessKey, Principal(UserA), _permitAll, tenantless)).Should().BeTrue(
+            "a public document that belongs to no tenant");
+        (await IsPermitted(PublicKeyOfA, Principal(UserA), _permitAll, tenantless)).Should().BeFalse(
+            "tenant-1's public document is tenant-1's");
+        (await IsPermitted(PrivateKeyOfA, Principal(UserA), _permitAll, tenantless)).Should().BeFalse(
+            "nor is their own document reachable once it is in a tenant they are not in");
+        (await IsPermitted(KeyInOtherTenant, Principal(UserA), _permitAll, tenantless)).Should().BeFalse();
     }
 
     [Test]
