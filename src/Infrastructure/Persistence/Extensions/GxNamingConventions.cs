@@ -45,35 +45,44 @@ public static class GxNamingConventions
     /// </summary>
     public static ModelBuilder ApplyGxTableNaming(this ModelBuilder modelBuilder)
     {
-        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        // Snapshot first: naming does not add or remove entity types, but the loop must not depend
+        // on that, and the join pass below reads the names this pass has just set.
+        var entityTypes = modelBuilder.Model.GetEntityTypes().ToList();
+
+        foreach (var entityType in entityTypes)
         {
             var clr = entityType.ClrType;
 
             // A type test, not a namespace string. A namespace test fails SILENTLY the day entities
             // are moved or a generated project renames its root namespace, and the tables quietly
-            // revert to public."Items" with nothing to notice.
-            if (!typeof(IBusinessEntity).IsAssignableFrom(clr))
+            // revert to public."Items" with nothing to notice. (Join entities are property bags with
+            // no CLR type of their own; they are named in the second pass.)
+            if (!typeof(IBusinessEntity).IsAssignableFrom(clr) || entityType.IsPropertyBag)
             {
                 continue;
             }
 
-            // An owned type shares its owner's table by default (table splitting), and a derived
-            // type in a TPH hierarchy shares its root's. Naming either one moves it into a table of
-            // its own - turning TPH into TPT, or splitting an owned value object out into a
-            // separate table - which is a mapping-strategy change disguised as a rename. Both are
-            // skipped: the owner and the hierarchy root carry the name for them.
-            if (entityType.IsOwned() || entityType.BaseType is not null)
+            // An owned type shares its owner's table by default (table splitting); naming it would
+            // split the value object out into a table of its own. Skipped: the owner carries the name.
+            if (entityType.IsOwned())
             {
                 continue;
             }
 
-            // An explicit ToTable(...) / [Table] wins over the convention, and gates the schema too:
-            // a template entity that pins ToTable("Documents") must stay in the default schema, not
-            // keep its name and move to core.
-            // (In EF Core 10 ConfigurationSource is public API in Metadata - no internal-API
-            //  escape hatch is needed to ask "did someone configure this by hand?".)
-            if (((IConventionEntityType)entityType).GetTableNameConfigurationSource()
-                == ConfigurationSource.Explicit)
+            // Only types that HAVE a table of their own are named - see HasOwnTable for the
+            // TPH / TPT / TPC rules. Naming a TPH leaf would turn the hierarchy into TPT, and
+            // naming an abstract TPC root would give a type that is never stored a table.
+            if (!HasOwnTable(entityType))
+            {
+                continue;
+            }
+
+            // A table name chosen by hand - ToTable(...) in a configuration OR [Table] on the class -
+            // wins over the convention, and gates the schema too: a template entity that pins
+            // ToTable("Documents") must stay in the default schema, not keep its name and move to
+            // core. Until Pass 55 only ToTable was honoured; [Table] (ConfigurationSource
+            // DataAnnotation) was renamed into core.
+            if (IsNamedByHand(entityType))
             {
                 continue;
             }
@@ -84,8 +93,88 @@ public static class GxNamingConventions
             entityType.SetTableName(prefix + ToUpperSnake(clr.Name));
         }
 
+        // Second pass: many-to-many JOIN tables. EF creates them as shared-type property-bag entities
+        // ("SampleCourseSampleStudent") with no CLR type to test, so the first pass never saw them and
+        // they landed in the default schema - a project's own data outside core. A join is named when
+        // at least one side it links lives in core: TBL_ + the upper-snake of EF's join name.
+        foreach (var join in entityTypes.Where(IsJoinEntity))
+        {
+            if (IsNamedByHand(join))
+            {
+                continue;
+            }
+
+            var linksCore = SkipNavigationsUsing(modelBuilder.Model, join)
+                .Any(s => s.DeclaringEntityType.GetRootType().GetSchema() == BusinessSchema
+                          || s.TargetEntityType.GetRootType().GetSchema() == BusinessSchema);
+            if (!linksCore)
+            {
+                continue;
+            }
+
+            join.SetSchema(BusinessSchema);
+            join.SetTableName(TablePrefix + ToUpperSnake(join.ShortName()));
+        }
+
         return modelBuilder;
     }
+
+    /// <summary>
+    /// Whether <paramref name="entityType"/> is mapped to a table of its own under its hierarchy's
+    /// mapping strategy.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><description><b>TPH</b> (EF's default): only the root has a table; every derived type
+    /// shares it.</description></item>
+    /// <item><description><b>TPT</b>: every type has a table, root and derived alike - each needs its
+    /// own <c>TBL_</c> name (until Pass 55 derived types were skipped and kept EF's default name in
+    /// the default schema).</description></item>
+    /// <item><description><b>TPC</b>: every CONCRETE type has a table holding all of its columns; an
+    /// abstract type has none, root or not.</description></item>
+    /// </list>
+    /// </remarks>
+    private static bool HasOwnTable(IMutableEntityType entityType)
+    {
+        var strategy = entityType.GetRootType().GetMappingStrategy();
+
+        if (strategy == RelationalAnnotationNames.TpcMappingStrategy)
+        {
+            return !entityType.ClrType.IsAbstract;
+        }
+
+        if (strategy == RelationalAnnotationNames.TptMappingStrategy)
+        {
+            return true;
+        }
+
+        // TPH, configured or by default.
+        return entityType.BaseType is null;
+    }
+
+    /// <summary>
+    /// A table name set by hand: <c>ToTable(...)</c> (Explicit) or <c>[Table]</c> (DataAnnotation).
+    /// </summary>
+    /// <remarks>
+    /// The convention's own <c>SetTableName</c> also records Explicit, which is what makes a second
+    /// application a no-op rather than <c>TBL_TBL_...</c>.
+    /// (In EF Core 10 ConfigurationSource is public API in Metadata - no internal-API escape hatch is
+    /// needed to ask "did someone configure this by hand?".)
+    /// </remarks>
+    private static bool IsNamedByHand(IMutableEntityType entityType) =>
+        ((IConventionEntityType)entityType).GetTableNameConfigurationSource()
+            is ConfigurationSource.Explicit or ConfigurationSource.DataAnnotation;
+
+    /// <summary>An implicit many-to-many join: a shared-type property bag that skip navigations use.</summary>
+    private static bool IsJoinEntity(IMutableEntityType entityType) =>
+        entityType.IsPropertyBag
+        && entityType.HasSharedClrType
+        && SkipNavigationsUsing(entityType.Model, entityType).Any();
+
+    private static IEnumerable<IMutableSkipNavigation> SkipNavigationsUsing(IMutableModel model, IMutableEntityType join) =>
+        model.GetEntityTypes()
+            .SelectMany(e => e.GetDeclaredSkipNavigations())
+            .Where(s => s.JoinEntityType == join);
 
     /// <summary>
     /// <c>StockMovement</c> → <c>STOCK_MOVEMENT</c>; <c>UomConversion</c> → <c>UOM_CONVERSION</c>;

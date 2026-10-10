@@ -106,7 +106,98 @@ public class RequestAuthorizationRegistryTests
         found.Should().NotContain(typeof(NotificationProbe), "notifications do not go through the request pipeline");
     }
 
+    // ---- every request shape (Pass 55) -----------------------------------------------------------
+    //
+    // Mediator dispatches commands and queries through the same pipeline as requests, so
+    // AuthorizationBehaviour denies an unmarked one at dispatch time. Until Pass 55 the registry knew
+    // only IRequest / IRequest<T>, so the STARTUP check passed over an unmarked ICommand<T> and the
+    // omission surfaced only when a user first hit it - exactly what the registry exists to prevent.
+
+    [Test]
+    public void AnUnmarkedCommand_FailsTheStartupAssertion_ByName()
+    {
+        var act = () => RequestAuthorizationRegistry.AssertAllRequestsAreMarked(
+            [typeof(UnmarkedCommandProbe)], "command probe");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage($"*{nameof(UnmarkedCommandProbe)}*")
+            .WithMessage($"*carry no {nameof(RequestAuthorizeAttribute)}*");
+    }
+
+    [Test]
+    public void MarkingIt_Passes()
+    {
+        var act = () => RequestAuthorizationRegistry.AssertAllRequestsAreMarked(
+            [typeof(MarkedCommandProbe)], "command probe");
+
+        act.Should().NotThrow();
+    }
+
+    [Test]
+    public void EveryRequestShape_IsRecognised_AndNothingElse()
+    {
+        var candidates = new[]
+        {
+            typeof(MarkedProbe), typeof(PlainRequestProbe), typeof(UnmarkedCommandProbe), typeof(PlainCommandProbe),
+            typeof(UnmarkedQueryProbe),
+            typeof(NotificationProbe), typeof(StreamQueryProbe), typeof(AbstractCommandProbe), typeof(NotAMessage)
+        };
+
+        RequestAuthorizationRegistry.FindRequestTypes(candidates).Should().BeEquivalentTo(new[]
+        {
+            typeof(MarkedProbe),            // IRequest<T>
+            typeof(PlainRequestProbe),      // IRequest
+            typeof(UnmarkedCommandProbe),   // ICommand<T>
+            typeof(PlainCommandProbe),      // ICommand
+            typeof(UnmarkedQueryProbe)      // IQuery<T> (Mediator 3 has no non-generic IQuery)
+        });
+    }
+
+    [Test]
+    public void TheAssemblyScan_FindsCommandsAndQueries()
+    {
+        // The overload the application's startup actually calls.
+        var found = RequestAuthorizationRegistry.FindRequestTypes(typeof(RequestAuthorizationRegistryTests).Assembly);
+
+        found.Should().Contain([typeof(UnmarkedCommandProbe), typeof(PlainCommandProbe), typeof(UnmarkedQueryProbe)]);
+    }
+
+    [Test]
+    public void AStructRequest_IsRefused_ItCanNeverBeAuthorized()
+    {
+        // A struct request cannot be authorized by any route: RequestAuthorizeAttribute is valid only
+        // on classes, so it cannot be marked, and AuthorizationBehaviour is constrained to `class`, so
+        // the source generator silently gives it no behaviour - it would run with NO authorization.
+        // FindRequestTypes used to consider classes only, so the registry did not see it either. It is
+        // now found and refused at startup, with its own message rather than "unmarked", because
+        // "add the attribute" is not a fix that exists for it.
+        var act = () => RequestAuthorizationRegistry.AssertAllRequestsAreMarked(
+            [typeof(StructCommandProbe)], "struct probe");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage($"*value types*{nameof(StructCommandProbe)}*");
+    }
+
     // ---- probes ----------------------------------------------------------------------------------
+
+    public sealed record PlainRequestProbe : IRequest;
+
+    public sealed record UnmarkedCommandProbe : ICommand<string>;
+
+    [RequestAuthorize(Policy = "Permissions.Documents.View")]
+    public sealed record MarkedCommandProbe : ICommand<string>;
+
+    public sealed record PlainCommandProbe : ICommand;
+
+    public sealed record UnmarkedQueryProbe : IQuery<int>;
+
+    public abstract record AbstractCommandProbe : ICommand<string>;
+
+    public sealed record StreamQueryProbe : IStreamQuery<int>;
+
+    public sealed record NotAMessage;
+
+    public readonly record struct StructCommandProbe : ICommand<string>;
 
     [RequestAuthorize(Policy = "Permissions.Documents.View")]
     public sealed record MarkedProbe : IRequest<string>;

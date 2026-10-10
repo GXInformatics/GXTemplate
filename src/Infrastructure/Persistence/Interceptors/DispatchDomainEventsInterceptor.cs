@@ -98,14 +98,19 @@ public class DispatchDomainEventsInterceptor : SaveChangesInterceptor
     }
 
     /// <summary>
-    /// Publishes and clears the domain events of every tracked <see cref="BaseEntity"/> whose state
-    /// does (or does not) equal <paramref name="state"/>.
+    /// Publishes and clears the domain events of every tracked <see cref="IHasDomainEvents"/> whose
+    /// state does (or does not) equal <paramref name="state"/>.
     /// </summary>
+    /// <remarks>
+    /// By interface since Pass 55. It was <c>Entries&lt;BaseEntity&gt;()</c>, which silently skipped
+    /// any entity not derived from the int-keyed base: an entity keyed by <c>long</c> or
+    /// <see cref="Guid"/> could raise events that were never published, and nothing failed.
+    /// </remarks>
     private async Task DispatchAsync(
         DbContext context, EntityState state, bool matches, CancellationToken cancellationToken)
     {
         var entities = context.ChangeTracker
-            .Entries<BaseEntity>()
+            .Entries<IHasDomainEvents>()
             .Where(e => e.Entity.DomainEvents.Any() && (e.State == state) == matches)
             .Select(e => e.Entity)
             .ToList();

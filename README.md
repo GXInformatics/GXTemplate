@@ -411,11 +411,16 @@ because each one is enforced by something that will fail loudly if you break it.
 **Contract: every Mediator request declares the permission it requires, and one that does not is
 denied.**
 
-- Every `IRequest` must carry a `RequestAuthorizeAttribute`. `AuthorizationBehaviour` denies any
-  request that does not, and logs why.
+- Every request must carry a `RequestAuthorizeAttribute` — `IRequest`, `ICommand` and `IQuery`, generic
+  or not, since all of them run through the same pipeline. `AuthorizationBehaviour` denies any that
+  does not, and logs why.
 - `RequestAuthorizationRegistry.AssertAllRequestsAreMarked` runs at **startup** and throws, naming
-  the offending request types, if any request in the Application assembly is unmarked. You cannot
-  ship a request that silently runs unauthorized; you get a failed start instead.
+  the offending types, if any request, command or query in the Application assembly is unmarked. You
+  cannot ship one that silently runs unauthorized; you get a failed start instead. (Until Pass 55 it
+  recognised only `IRequest`, so an unmarked `ICommand<T>` passed it and was refused only when used.)
+- **Declare requests as classes or records, never `record struct`.** A struct request can never be
+  authorized: the attribute is class-only and `AuthorizationBehaviour` is constrained to `class`, so
+  the source generator gives a struct no behaviour at all. The startup check refuses one by name.
 - A request also needs an ambient principal. `AuthorizationBehaviour` fails closed when there is
   none, which is why prerendering is off — a prerendered first render has no circuit and therefore
   no principal.
@@ -968,6 +973,34 @@ deriving from `BaseEntity` — there is nothing to remember per entity.**
 `GxNamingConventions.ApplyGxTableNaming()`, which runs last in `ApplicationDbContext.OnModelCreating`.
 Mark a table as a lookup by implementing `ILookupEntity` as well.
 
+**Hierarchies, joins and hand-named tables (Pass 55).** The convention names *tables*, so it follows
+the mapping strategy:
+
+| Shape | What gets a `TBL_` name |
+|---|---|
+| TPH (EF's default) | the root only — every derived type shares its table |
+| TPT (`UseTptMappingStrategy()`) | the root **and** every derived type, each its own table |
+| TPC (`UseTpcMappingStrategy()`) | every **concrete** type; an abstract root has no table and gets none |
+| Owned type | nothing — it is table-split into its owner |
+| Implicit many-to-many join | `TBL_` + the upper-snake of EF's join name (`SampleCourseSampleStudent` → `TBL_SAMPLE_COURSE_SAMPLE_STUDENT`), in `core`, when either side lives in `core` |
+| `ToTable(...)` **or `[Table]`** | left exactly as named, schema included |
+
+Before Pass 55 a TPT derived type and an implicit join kept EF's default name in the default schema,
+`[Table]` was overridden, and a model with an abstract TPC root could not be built at all (EF refuses
+to map an abstract type to the table the convention gave it).
+
+**Keys, events and transactions (Pass 55).**
+
+- **Keys can be any type.** `BaseEntity<TKey>` and `BaseAuditableEntity<TKey>` (and
+  `BaseAuditableSoftDeleteEntity<TKey>`) take `int`, `long`, `Guid` or `string`; `BaseEntity` and
+  `BaseAuditableEntity` are the `int` forms, so existing entities are unchanged. Domain events are
+  dispatched for every `IHasDomainEvents` and audit fields stamped for every `IAuditableEntity`,
+  whatever the base. One consequence: `BaseAuditableEntity` is now `BaseEntity<int>`, not
+  `BaseEntity` — test for an interface, never for a base class.
+- **A handler can own a transaction.** `IApplicationDbContext.Database` exposes the facade, so
+  `await using var tx = await db.Database.BeginTransactionAsync(ct)` works from Application without a
+  cast; audit rows join that transaction and roll back with it.
+
 **What counts as a lookup.** One question: *does any code branch on this row's value?*
 
 - **No** → it is a lookup (`TBL_LK_`). The application treats every row identically; it is code plus
@@ -1135,11 +1168,6 @@ Stated plainly, because finding these out later is worse than reading them now.
   copy rather than the real cause, so it reads as a mysterious build break. Generate into a short
   path — `C:\src\IMS` rather than a nested folder under `Documents` — or enable long paths
   (`git config --global core.longpaths true` plus the `LongPathsEnabled` registry setting).
-- **`BaseEntity` is `IEntity<int>`, with no `long` variant.** A project with high-volume tables — a
-  ledger, a movement history — cannot use the template base and must carry its own, which then has to
-  implement `IEntity<T>` by hand before the pagination and specification helpers will accept it. It
-  also puts that entity outside `IBusinessEntity`, so the GX naming convention skips it unless the
-  project's own base implements the marker too.
 
 ---
 

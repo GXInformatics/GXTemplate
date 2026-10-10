@@ -53,12 +53,94 @@ public class SampleMoney : IBusinessEntity
     public string? Currency { get; set; }
 }
 
+/// <summary>Names its table with the DataAnnotation, not ToTable - and must win the same way (Pass 55).</summary>
+[System.ComponentModel.DataAnnotations.Schema.Table("annotated_things", Schema = "reporting")]
+public class SampleAnnotatedThing : BaseEntity
+{
+    public string? Note { get; set; }
+}
+
+/// <summary>TPT root (Pass 55).</summary>
+public class SampleVehicle : BaseEntity
+{
+    public string? Registration { get; set; }
+}
+
+/// <summary>TPT derived - has a table of its own, so it needs a name of its own.</summary>
+public class SampleTruck : SampleVehicle
+{
+    public decimal PayloadTonnes { get; set; }
+}
+
+/// <summary>Abstract TPC root - stored nowhere, so it must not be given a table.</summary>
+public abstract class SampleShape : BaseEntity
+{
+    public string? Colour { get; set; }
+}
+
+public class SampleCircle : SampleShape
+{
+    public decimal Radius { get; set; }
+}
+
+public class SampleSquare : SampleShape
+{
+    public decimal Side { get; set; }
+}
+
+/// <summary>Many-to-many with SampleStudent through an implicit join table (Pass 55).</summary>
+public class SampleCourse : BaseEntity
+{
+    public string? Title { get; set; }
+    public ICollection<SampleStudent> Students { get; set; } = new List<SampleStudent>();
+    public ICollection<SampleMentor> Mentors { get; set; } = new List<SampleMentor>();
+}
+
+public class SampleStudent : BaseEntity
+{
+    public string? Name { get; set; }
+    public ICollection<SampleCourse> Courses { get; set; } = new List<SampleCourse>();
+}
+
+/// <summary>Many-to-many whose join table is named by hand - which must win.</summary>
+public class SampleMentor : BaseEntity
+{
+    public string? Name { get; set; }
+    public ICollection<SampleCourse> Courses { get; set; } = new List<SampleCourse>();
+}
+
+internal static class SampleShapes
+{
+    /// <summary>
+    /// The project-shaped additions (Pass 55): a TPT pair, an abstract-root TPC hierarchy, and two
+    /// many-to-many joins, one named by hand. Shared by the convention tests and the
+    /// "everything outside core is a template table" test, which runs them inside the real context.
+    /// </summary>
+    public static void Configure(ModelBuilder builder)
+    {
+        builder.Entity<SampleVehicle>().UseTptMappingStrategy();
+        builder.Entity<SampleTruck>();
+
+        builder.Entity<SampleShape>().UseTpcMappingStrategy();
+        // TPC rows of one hierarchy share a key space across tables, so the key cannot be an
+        // identity column per table; never-generated keeps model validation out of the test.
+        builder.Entity<SampleShape>().Property(s => s.Id).ValueGeneratedNever();
+        builder.Entity<SampleCircle>();
+        builder.Entity<SampleSquare>();
+
+        builder.Entity<SampleCourse>().HasMany(c => c.Students).WithMany(s => s.Courses);
+        builder.Entity<SampleCourse>().HasMany(c => c.Mentors).WithMany(m => m.Courses)
+            .UsingEntity("CourseMentor", j => j.ToTable("COURSE_MENTORS", GxNamingConventions.BusinessSchema));
+    }
+}
+
 internal sealed class SampleContext(DbContextOptions<SampleContext> options) : DbContext(options)
 {
     public DbSet<SampleWidget> Widgets => Set<SampleWidget>();
     public DbSet<SampleWidgetKind> WidgetKinds => Set<SampleWidgetKind>();
     public DbSet<SamplePinnedThing> PinnedThings => Set<SamplePinnedThing>();
     public DbSet<SampleAnimal> Animals => Set<SampleAnimal>();
+    public DbSet<SampleAnnotatedThing> AnnotatedThings => Set<SampleAnnotatedThing>();
 
     /// <summary>How many times to run the convention, to prove it is idempotent.</summary>
     public int ApplyCount { get; init; } = 1;
@@ -68,12 +150,28 @@ internal sealed class SampleContext(DbContextOptions<SampleContext> options) : D
         builder.Entity<SampleWidget>().OwnsOne(w => w.Price);
         builder.Entity<SampleDog>();
         builder.Entity<SamplePinnedThing>().ToTable("legacy_things", "reporting");
+        SampleShapes.Configure(builder);
 
         for (var i = 0; i < ApplyCount; i++)
         {
             builder.ApplyGxTableNaming();
         }
     }
+}
+
+/// <summary>
+/// Keys the model cache on <see cref="SampleContext.ApplyCount"/> as well as the context type.
+/// </summary>
+/// <remarks>
+/// Pass 55. EF builds a model once per context TYPE, so without this the "apply twice" context
+/// reused the model built by "apply once" and the idempotence test compared a model with itself.
+/// </remarks>
+internal sealed class ApplyCountModelCacheKeyFactory : Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory
+{
+    public object Create(DbContext context, bool designTime) =>
+        context is SampleContext sample
+            ? (context.GetType(), sample.ApplyCount, designTime)
+            : (object)(context.GetType(), designTime);
 }
 
 #endregion
@@ -90,7 +188,10 @@ public class GxTableNamingTests
 {
     // The provider only has to be enough to build a model; nothing here opens a connection.
     private static SampleContext Sample(int applyCount = 1) =>
-        new(new DbContextOptionsBuilder<SampleContext>().UseNpgsql("Host=none").Options)
+        new(new DbContextOptionsBuilder<SampleContext>()
+            .UseNpgsql("Host=none")
+            .ReplaceService<Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory, ApplyCountModelCacheKeyFactory>()
+            .Options)
         { ApplyCount = applyCount };
 
     private static (string? Table, string? Schema) Mapping<T>(DbContext db)
@@ -158,6 +259,68 @@ public class GxTableNamingTests
 
         Assert.Equal(Mapping<SampleWidget>(once), Mapping<SampleWidget>(twice));
         Assert.Equal(Mapping<SampleWidgetKind>(once), Mapping<SampleWidgetKind>(twice));
+        Assert.Equal(Mapping<SampleTruck>(once), Mapping<SampleTruck>(twice));
+        Assert.Equal(Mapping<SampleCircle>(once), Mapping<SampleCircle>(twice));
+        Assert.Equal(JoinMapping(once, "SampleCourseSampleStudent"), JoinMapping(twice, "SampleCourseSampleStudent"));
+    }
+
+    // ---- Pass 55: the gaps the handover listed --------------------------------------------------
+
+    private static (string? Table, string? Schema) JoinMapping(DbContext db, string joinName)
+    {
+        var join = db.Model.FindEntityType(joinName)!;
+        return (join.GetTableName(), join.GetSchema());
+    }
+
+    [Fact]
+    public void ATableAttribute_WinsOnBothNameAndSchema_LikeToTable()
+    {
+        // [Table] is recorded as ConfigurationSource.DataAnnotation, not Explicit. The convention used
+        // to honour only Explicit, so this entity was renamed TBL_SAMPLE_ANNOTATED_THING in core.
+        using var db = Sample();
+
+        Assert.Equal(("annotated_things", "reporting"), Mapping<SampleAnnotatedThing>(db));
+    }
+
+    [Fact]
+    public void ATptPair_GetsATblNameEach()
+    {
+        // In TPT the derived type HAS a table. It used to be skipped as if it were a TPH leaf, so it
+        // kept EF's default name ("SampleTruck") in the default schema.
+        using var db = Sample();
+
+        Assert.Equal(("TBL_SAMPLE_VEHICLE", GxNamingConventions.BusinessSchema), Mapping<SampleVehicle>(db));
+        Assert.Equal(("TBL_SAMPLE_TRUCK", GxNamingConventions.BusinessSchema), Mapping<SampleTruck>(db));
+    }
+
+    [Fact]
+    public void AnAbstractTpcRoot_GetsNoTable_AndItsConcreteTypesGetOneEach()
+    {
+        using var db = Sample();
+
+        Assert.Null(Mapping<SampleShape>(db).Table);
+        Assert.Equal(("TBL_SAMPLE_CIRCLE", GxNamingConventions.BusinessSchema), Mapping<SampleCircle>(db));
+        Assert.Equal(("TBL_SAMPLE_SQUARE", GxNamingConventions.BusinessSchema), Mapping<SampleSquare>(db));
+    }
+
+    [Fact]
+    public void AnImplicitManyToManyJoin_IsNamedIntoCore()
+    {
+        // The join is a property bag with no CLR type of its own, so the IBusinessEntity test never
+        // saw it: the project's own link table sat in the default schema as "SampleCourseSampleStudent".
+        using var db = Sample();
+
+        Assert.Equal(("TBL_SAMPLE_COURSE_SAMPLE_STUDENT", GxNamingConventions.BusinessSchema),
+            JoinMapping(db, "SampleCourseSampleStudent"));
+    }
+
+    [Fact]
+    public void AJoinNamedByHand_KeepsItsName()
+    {
+        using var db = Sample();
+
+        // Named by hand (ToTable on the join), so it keeps that name - not TBL_COURSE_MENTOR.
+        Assert.Equal(("COURSE_MENTORS", GxNamingConventions.BusinessSchema), JoinMapping(db, "CourseMentor"));
     }
 
     [Theory]
@@ -183,8 +346,22 @@ public class GxTableNamingTests
 public class TemplateTablesStayOutOfCoreTests
 {
     // PostgreSQL only (pass 47). The provider only has to build a model; nothing opens a connection.
+    //
+    // Since Pass 55 this is the application's context PLUS a project's shapes - a TPT pair, an
+    // abstract-root TPC hierarchy and two many-to-many joins (SampleShapes) - because "every table
+    // outside core is a template table" is a claim about what a GENERATED project's model looks like,
+    // and the bare template model has none of those shapes to get wrong.
+    private sealed class ProjectShapedContext(DbContextOptions<ApplicationDbContext> options) : ApplicationDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            SampleShapes.Configure(builder);
+            base.OnModelCreating(builder);
+        }
+    }
+
     private static ApplicationDbContext BusinessContext() =>
-        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql("Host=none").Options);
+        new ProjectShapedContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql("Host=none").Options);
 
     /// <summary>
     /// Every entity type the template itself ships. Listed, not derived: a generated project's model
@@ -241,14 +418,34 @@ public class TemplateTablesStayOutOfCoreTests
     {
         // The other direction, and what keeps the list above honest: a project's own table belongs in
         // core, and a table the template adds must be listed there, or this names it.
+        //
+        // Pass 55: over a PROJECT-shaped model (see ProjectShapedContext), and counting TABLES:
+        //   - a type with no table of its own - the abstract TPC root, a TPH leaf - owns nothing to
+        //     misplace, so it is skipped;
+        //   - a TPT derived type and a many-to-many join ARE tables, and were exactly the two this
+        //     test could not see before, because the bare template model contains neither. A join is
+        //     reported by its EF name, since its CLR type is a shared Dictionary.
         using var db = BusinessContext();
 
         var unlisted = db.Model.GetEntityTypes()
+            .Where(e => e.GetTableName() is not null && !e.IsOwned())
             .Where(e => e.GetSchema() != GxNamingConventions.BusinessSchema && !TemplateEntityTypes.Contains(e.ClrType))
-            .Select(e => e.ClrType.Name)
+            .Select(e => e.HasSharedClrType ? e.Name : e.ClrType.Name)
             .ToArray();
 
         Assert.Empty(unlisted);
+    }
+
+    [Fact]
+    public void TheProjectShapedModel_ReallyContainsATptPairAndAJoin()
+    {
+        // Guards the test above from passing vacuously: if SampleShapes stopped producing these, the
+        // "nothing outside core" assertion would be true of a model that no longer has them.
+        using var db = BusinessContext();
+
+        Assert.Equal(GxNamingConventions.BusinessSchema, db.Model.FindEntityType(typeof(SampleTruck))!.GetSchema());
+        Assert.Equal("TBL_SAMPLE_TRUCK", db.Model.FindEntityType(typeof(SampleTruck))!.GetTableName());
+        Assert.Equal("TBL_SAMPLE_COURSE_SAMPLE_STUDENT", db.Model.FindEntityType("SampleCourseSampleStudent")!.GetTableName());
     }
 
     [Fact]
