@@ -1,4 +1,4 @@
-﻿// Copyright (c) MudBlazor 2021
+// Copyright (c) MudBlazor 2021
 // MudBlazor licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
@@ -16,10 +16,10 @@ public interface IUserPreferencesService
     public Task SaveUserPreferences(UserPreference userPreferences);
 
     /// <summary>
-    ///     Loads UserPreference in local storage
+    ///     Loads UserPreference from local storage
     /// </summary>
-    /// <returns>UserPreference object. Null when no settings were found.</returns>
-    public Task<UserPreference> LoadUserPreferences(bool defaultDarkMode);
+    /// <returns>The user's saved choice. Null when they have made none, so the device's preference applies.</returns>
+    public Task<UserPreference?> LoadUserPreferences();
 }
 
 public class UserPreferencesService : IUserPreferencesService
@@ -37,22 +37,41 @@ public class UserPreferencesService : IUserPreferencesService
         await _localStorage.SetAsync(Key, userPreferences);
     }
 
-    public async Task<UserPreference> LoadUserPreferences(bool defaultDarkMode)
+    public async Task<UserPreference?> LoadUserPreferences()
     {
         try
         {
-            var result = await _localStorage.GetAsync<UserPreference>(Key);
-            if (result.Success && result.Value is not null) return result.Value;
-            return new UserPreference() { IsDarkMode= defaultDarkMode };
+            var result = await _localStorage.GetAsync<StoredPreference>(Key);
+            if (!result.Success || result.Value is null) return null;
+
+            // Pass 52: a value saved by the old theme drawer carries its other fields too; they are ignored. Its mode
+            // (0 System, 1 Light, 2 Dark) is the reliable part: choosing System stored IsDarkMode = true whatever the
+            // device said, so System reads as no choice and the device decides.
+            return result.Value.DarkLightTheme switch
+            {
+                null => new UserPreference { IsDarkMode = result.Value.IsDarkMode },
+                1 => new UserPreference { IsDarkMode = false },
+                2 => new UserPreference { IsDarkMode = true },
+                _ => null
+            };
         }
         catch (CryptographicException)
         {
             await _localStorage.DeleteAsync(Key);
-            return new UserPreference();
+            return null;
         }
         catch (Exception)
         {
-            return new UserPreference();
+            return null;
         }
+    }
+
+    /// <summary>What may be stored under <see cref="Key"/>: this pass's one field, or the old drawer's value.</summary>
+    private sealed class StoredPreference
+    {
+        public bool IsDarkMode { get; set; }
+
+        /// <summary>The old drawer's mode. Never written since pass 52.</summary>
+        public int? DarkLightTheme { get; set; }
     }
 }

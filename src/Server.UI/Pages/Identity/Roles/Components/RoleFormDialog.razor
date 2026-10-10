@@ -37,9 +37,7 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" >@AppStrings.Cancel</MudButton>
-        <MudButton OnClick="Submit">
-            @AppStrings.Save
-        </MudButton>
+        <GxSubmitButton ButtonType="ButtonType.Button" Action="Submit" Label="@AppStrings.Save" BusyLabel="@AppStrings.Saving" Variant="Variant.Text" Color="Color.Default" />
     </DialogActions>
 </MudDialog>
 

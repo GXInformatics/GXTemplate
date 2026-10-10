@@ -86,16 +86,9 @@
                the same decision in two shapes. *@
             @if (MayEdit)
             {
-                <MudButton Variant="Variant.Filled"
-                           Color="Color.Primary"
-                           Disabled="@(_saving || _model is null || !_model.Enabled)"
-                           OnClick="SaveAsync">
-                    @if (_saving)
-                    {
-                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                    }
-                    @AppStrings.Save
-                </MudButton>
+                <GxSubmitButton ButtonType="ButtonType.Button" Action="SaveAsync" Label="@AppStrings.Save" BusyLabel="@AppStrings.Saving"
+                                Variant="Variant.Filled" Color="Color.Primary"
+                                Disabled="@(_model is null || !_model.Enabled)" />
             }
         </MudCardActions>
     </MudCard>
@@ -108,7 +101,6 @@
 
     private SecurityPolicyDto? _model;
     private MudForm? _form;
-    private bool _saving;
     private SecuritySettingsAccessRights _accessRights = new();
 
     /// <summary>
@@ -132,28 +124,20 @@
     {
         if (_model is null) return;
 
-        _saving = true;
-        try
+        var result = await Mediator.Send(new UpdateSecurityPolicyCommand
         {
-            var result = await Mediator.Send(new UpdateSecurityPolicyCommand
-            {
-                IdleTimeoutMinutes = _model.IdleTimeoutMinutes,
-                CountdownSeconds = _model.CountdownSeconds
-            });
+            IdleTimeoutMinutes = _model.IdleTimeoutMinutes,
+            CountdownSeconds = _model.CountdownSeconds
+        });
 
-            result.Match(
-                _ =>
-                {
-                    Snackbar.Add(AppStrings.SaveSuccess, Severity.Info);
-                    // Say it out loud on the save, not only in the static warning above: an
-                    // administrator tightening the window is about to sign people out.
-                    Snackbar.Add(AppStrings.IdleTimeoutAffectsLiveSessions, Severity.Warning);
-                },
-                errors => Snackbar.Add(errors, Severity.Error));
-        }
-        finally
-        {
-            _saving = false;
-        }
+        result.Match(
+            _ =>
+            {
+                Snackbar.Add(AppStrings.SaveSuccess, Severity.Info);
+                // Say it out loud on the save, not only in the static warning above: an
+                // administrator tightening the window is about to sign people out.
+                Snackbar.Add(AppStrings.IdleTimeoutAffectsLiveSessions, Severity.Warning);
+            },
+            errors => Snackbar.Add(errors, Severity.Error));
     }
 }

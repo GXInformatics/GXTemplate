@@ -82,4 +82,7 @@
   <data name="Forgot Password" xml:space="preserve">
     <value>忘记密码</value>
   </data>
+  <data name="Sending…" xml:space="preserve">
+    <value>正在发送…</value>
+  </data>
 </root> 

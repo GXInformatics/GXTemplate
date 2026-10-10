@@ -45,7 +45,6 @@
                     @if (_accessRights.Purge)
                     {
                         <MudButton 
-                        Disabled="@(_clearing)"
                         OnClick="@(OnPurge)"
                         StartIcon="@Icons.Material.Outlined.ClearAll">
                             @L["Clear Logs"]
@@ -267,7 +266,6 @@
     private readonly SystemLogDto _currentDto = new();
     private readonly int _defaultPageSize = 15;
     private bool _loading;
-    private bool _clearing;
     private LogsAccessRights _accessRights = new();
 
     /// <summary>
@@ -359,33 +357,19 @@
     {
         var contentText = $"{L["Are you sure you want to erase all the logs?"]}";
         var title = $"{L["Erase logs"]}";
-        await DialogServiceHelper.ShowConfirmationDialogAsync(title, contentText, async () =>
-        {
-            _clearing = true;
-            try
+        // The result was previously discarded, which reported a successful purge whatever happened. That mattered
+        // little while the log table lived in the business database and a failure there meant the whole application
+        // was down; now the log database can be unreachable on its own, and claiming to have erased logs that are
+        // still there is a lie the operator would act on.
+        // Pass 52: the dialog's Confirm erases, with progress; a failure is said in the dialog, which stays open.
+        await DialogServiceHelper.ShowConfirmationDialogAsync(title, contentText,
+            async () =>
             {
-                var command = new ClearSystemLogsCommand();
-                var result = await Mediator.Send(command);
                 await _table.ReloadServerData();
-
-                // The result was previously discarded, which reported a successful purge whatever
-                // happened. That mattered little while the log table lived in the business database
-                // and a failure there meant the whole application was down; now the log database can
-                // be unreachable on its own, and claiming to have erased logs that are still there
-                // is a lie the operator would act on.
-                if (result.Succeeded)
-                {
-                    Snackbar.Add(L["Logs have been erased"], Severity.Info);
-                }
-                else
-                {
-                    Snackbar.Add(L["The logs could not be erased"], Severity.Error);
-                }
-            }
-            finally
-            {
-                _clearing = false;
-            }
-        });
+                Snackbar.Add(L["Logs have been erased"], Severity.Info);
+            },
+            onCancel: () => _table.ReloadServerData(),
+            action: async () => (await Mediator.Send(new ClearSystemLogsCommand())).Succeeded ? null : L["The logs could not be erased"].Value,
+            busyLabel: AppStrings.Deleting);
     }
 }

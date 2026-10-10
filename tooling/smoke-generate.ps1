@@ -28,7 +28,9 @@
              template-repository-only file;
            - does not carry the project name inside upstream attribution text;
            - carries the outbound-address guard test, and no Seq sink, Gravatar address, MaxMind
-             client, Google Fonts link or qrcodejs script in src/ (pass 48); the guard passes alone.
+             client, Google Fonts link or qrcodejs script in src/ (pass 48); the guard passes alone;
+           - carries the app bar's ThemeToggle and GxSubmitButton with gx-busy-button.js, its .gx-busy
+             style and their tests, and no theme drawer, theme.js or MudLoadingButton (pass 52).
       4. The generated solution builds with 0 errors. Without GX_TEST_PG its four test suites FAIL,
          naming the variable; against the -TestServer (default GX_TEST_PG) they all pass, each on its
          own gx_test_<project>_* database.
@@ -440,6 +442,27 @@ try {
             @{ Name = 'Google Fonts link or qrcodejs CDN script'; Pattern = 'fonts\.googleapis|qrcodejs' })) {
         $hits = @($srcFiles | Select-String -Pattern $probe.Pattern)
         Check ($hits.Count -eq 0) "no $($probe.Name) in src ($($srcFiles.Count) files)" $(if ($hits) { "$($hits[0].Path.Substring($out.Length + 1)):$($hits[0].LineNumber)" })
+    }
+
+    # Pass 52: the app bar's light/dark toggle in place of the theme drawer, and the busy button with its script, its
+    # style and the tests that hold them.
+    Step 'the theme toggle and the busy button are generated; the theme drawer is not'
+    $ui = Join-Path $out 'src\Server.UI'
+    foreach ($present in @('Components\Theming\ThemeToggle.razor', 'Components\Common\GxSubmitButton.razor',
+            'Components\Dialogs\DialogAction.cs', 'wwwroot\js\gx-busy-button.js')) {
+        Check (Test-Path (Join-Path $ui $present)) "src\Server.UI\$present is generated"
+    }
+    foreach ($absent in @('Components\Theming\ThemesMenu.razor', 'Components\Theming\ThemesButton.razor',
+            'Components\Theming\PrimaryColorPicker.razor', 'Components\Inputs\Button\MudLoadingButton.razor',
+            'Components\Presence\OnlineUsersTracker.razor', 'wwwroot\js\theme.js')) {
+        Check (-not (Test-Path (Join-Path $ui $absent))) "src\Server.UI\$absent is not generated"
+    }
+    $appRazor = Get-Content -Raw (Join-Path $ui 'App.razor')
+    Check ($appRazor -match 'js/gx-busy-button\.js') 'App.razor loads js/gx-busy-button.js'
+    Check ((Get-Content -Raw (Join-Path $ui 'wwwroot\css\app.css')) -match '\.mud-button-root\.gx-busy') 'app.css styles .mud-button-root.gx-busy'
+    foreach ($test in @('GxSubmitButtonComponentTests.cs', 'DialogActionComponentTests.cs', 'SubmitButtonGuardTests.cs', 'ThemeToggleComponentTests.cs')) {
+        $found = @(Get-ChildItem -Path (Join-Path $out 'tests') -Recurse -File -Filter $test)
+        Check ($found.Count -eq 1) "$test is generated" "found $($found.Count)"
     }
 
     # ------------------------------------------------------------------ 4. build and test

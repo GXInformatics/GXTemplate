@@ -4,7 +4,6 @@
 
 @using CleanArchitecture.Blazor.Application.Common.Interfaces
 @using CleanArchitecture.Blazor.Server.UI.Components.Security
-@inject LayoutService LayoutService
 @inject IIdleTimeoutSettings IdleTimeoutSettings
 @implements IDisposable
 <MudLayout>
@@ -15,17 +14,10 @@
         <Authorized>
             <HeaderMenu NavigationMenuDrawerOpen="_navigationMenuDrawerOpen"
                         OpenSearchDialog="OpenSearchDialog"
-                        IsDarkMode="@LayoutService.IsDarkMode"
-                        ToggleNavigationMenuDrawer="ToggleNavigationMenuDrawer"
-                        RightToLeft="@LayoutService.IsRTL"
-                        RightToLeftToggle="LayoutService.ToggleRightToLeft"
-                        OnSettingClick="@(() => themeSettings?.OpenSetting())" />
+                        ToggleNavigationMenuDrawer="ToggleNavigationMenuDrawer" />
             <NavigationMenu DrawerOpen="_navigationMenuDrawerOpen" Roles="@(UserProfileState.Value.AssignedRoles??[])"
-                            DrawerOpenChanged="NavigationMenuDrawerOpenChangedHandler"
-                            OnSettingClick="@(() => themeSettings?.OpenSetting())"/>
-            <ThemesMenu @ref="themeSettings" UserPreferences="@LayoutService.UserPreferences"
-                        UserPreferencesChanged="LayoutService.UpdateUserPreferences"/>
-           
+                            DrawerOpenChanged="NavigationMenuDrawerOpenChangedHandler"/>
+
             <MudMainContent>
                 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mb-4 mt-4">
                     <ErrorBoundary @ref="ErrorBoundary">
@@ -54,9 +46,7 @@
 {
 	private bool _commandPaletteOpen;
 	private bool _navigationMenuDrawerOpen = true;
-	private bool _themingDrawerOpen;
 	private ErrorBoundary? ErrorBoundary { set; get; }
-	private ThemesMenu? themeSettings { set; get; }
 	[CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
 
 	protected override async Task OnInitializedAsync()
@@ -95,11 +85,6 @@
     protected void NavigationMenuDrawerOpenChangedHandler(bool state)
     {
         _navigationMenuDrawerOpen = state;
-    }
-
-    protected void ThemingDrawerOpenChangedHandler(bool state)
-    {
-        _themingDrawerOpen = state;
     }
 
     protected void ToggleNavigationMenuDrawer()

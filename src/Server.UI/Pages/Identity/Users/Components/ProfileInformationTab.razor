@@ -15,7 +15,7 @@
 
 @if (_profileModel != null)
 {
-    <EditForm Model="@_profileModel" OnValidSubmit="HandleValidSubmitAsync" style="display: flex; align-items: center; flex-direction: column;">
+    <EditForm Model="@_profileModel" OnValidSubmit="@(ctx => _saveButton.RunAsync(() => HandleValidSubmitAsync(ctx)))" style="display: flex; align-items: center; flex-direction: column;">
         <DataAnnotationsValidator />
         <MudGrid Justify="Justify.Center" Spacing="2" Style="max-width:600px; display:flex;">
             <!-- Profile Picture and Roles -->
@@ -82,8 +82,8 @@
                 <LanguageAutocomplete T="string" For="@(() => _profileModel.LanguageCode)" @bind-Value="_profileModel.LanguageCode" Label="@L["Language"]" Placeholder="@L["Select a language"]" />
             </MudItem>
             <MudItem sm="12" xs="12" Class="d-flex justify-end">
-				<MudButton ButtonType="ButtonType.Submit"  Variant="Variant.Filled" Color="Color.Primary" Class="ml-auto">@AppStrings.Save
-                </MudButton>
+				<GxSubmitButton @ref="_saveButton" Label="@AppStrings.Save" BusyLabel="@AppStrings.Saving"
+                                Variant="Variant.Filled" Color="Color.Primary" Class="ml-auto" />
             </MudItem>
         </MudGrid>
     </EditForm>
@@ -92,6 +92,7 @@
 @code {
     private UserProfile UserProfile => UserProfileState.Value;
     private ChangeUserProfileModel? _profileModel { get; set; } = null!;
+    private GxSubmitButton _saveButton = null!; // Pass 52
     private UserManager<ApplicationUser> _userManager { get; set; } = null!;
     protected override Task OnInitializedAsync()
     {

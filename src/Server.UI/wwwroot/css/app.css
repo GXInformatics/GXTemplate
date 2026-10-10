@@ -7,6 +7,21 @@
     --nav-padding-y: 0.75em;
 }
 
+/* Pass 52: the base font size, 15px, which the theme drawer's script used to set once the page had loaded (so the
+   first paint was at the browser's 16px and then shrank). The background is the theme's once MudThemeProvider has
+   rendered; before that (the page is blank until the theme is known, MainLayout) it follows the device's scheme, in
+   Theme.cs's two background colours. */
+html {
+    font-size: 15px;
+    background-color: var(--mud-palette-background, #f8fafc);
+}
+
+@media (prefers-color-scheme: dark) {
+    html {
+        background-color: var(--mud-palette-background, #0c0a09);
+    }
+}
+
 
 
 .mud-main-content {
@@ -150,4 +165,15 @@
 
 .mud-typography-subtitle2 {
     color: var(--mud-palette-text-secondary);
+}
+
+/* A busy GxSubmitButton (Components/Common/GxSubmitButton.razor, and wwwroot/js/gx-busy-button.js for a native
+   post). It keeps its own colours, at reduced opacity, and takes no pointer input. It is deliberately NOT the disabled
+   attribute: MudBlazor draws :disabled grey with !important. At 0.7 the label keeps a contrast of about 6.5:1 or more
+   against its own background, filled or text, in both themes (measured in GX Project Tracking pass 18d). */
+.mud-button-root.gx-busy {
+    opacity: 0.7;
+    pointer-events: none;
+    cursor: progress;
+    box-shadow: none;
 }

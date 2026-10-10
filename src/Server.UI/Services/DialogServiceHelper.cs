@@ -126,11 +126,20 @@ public class DialogServiceHelper
     /// <summary>
     /// Shows a simple confirmation dialog.
     /// </summary>
+    /// <param name="action">
+    /// Pass 52: optional - the work Confirm does inside the dialog, with progress; null when it succeeded, else the
+    /// sentence the dialog shows while it stays open. <paramref name="onConfirm"/> then runs after a success (a reload,
+    /// a snackbar), and <paramref name="onCancel"/> after the user gives up. Without it, <paramref name="onConfirm"/>
+    /// does the work after the dialog has closed, as before.
+    /// </param>
+    /// <param name="busyLabel">The Confirm button's label while <paramref name="action"/> runs, e.g. "Saving…".</param>
     public async Task ShowConfirmationDialogAsync(
         string title,
         string contentText,
         Func<Task> onConfirm,
-        Func<Task>? onCancel = null)
+        Func<Task>? onCancel = null,
+        Func<Task<string?>>? action = null,
+        string? busyLabel = null)
     {
         // Adapt: Wrap Func<Task> into Func<DialogResult, Task>
         Func<DialogResult, Task> confirmWrapper = _ => onConfirm();
@@ -139,7 +148,12 @@ public class DialogServiceHelper
         await ShowDialogAsync<ConfirmationDialog>(
             title,
             confirmWrapper,
-            parameters => parameters.Add(x => x.ContentText, contentText),
+            parameters =>
+            {
+                parameters.Add(x => x.ContentText, contentText);
+                parameters.Add(x => x.Action, action);
+                parameters.Add(x => x.BusyLabel, busyLabel);
+            },
             SmallOptions,
             onCancel
         );

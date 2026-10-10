@@ -1,0 +1,33 @@
+@* Pass 52: the one theme control, light or dark. The icon shows what a click will do: a moon in the light theme, a sun
+   in the dark. The choice is saved at once and applies on every page, the sign-in pages included (MainLayout). *@
+@implements IDisposable
+@inject LayoutService LayoutService
+@inject IStringLocalizer<ThemeToggle> L
+
+<MudTooltip Arrow="true" Text="@Label">
+    <MudIconButton Class="mx-1"
+                   Color="Color.Default"
+                   Icon="@Icon"
+                   aria-label="@Label"
+                   data-test="theme-toggle"
+                   OnClick="LayoutService.ToggleDarkMode" />
+</MudTooltip>
+
+@code
+{
+    private string Label => LayoutService.IsDarkMode ? L["Switch to light theme"] : L["Switch to dark theme"];
+
+    private string Icon => LayoutService.IsDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode;
+
+    protected override void OnInitialized()
+    {
+        LayoutService.DarkModeChanged += OnDarkModeChanged;
+    }
+
+    private Task OnDarkModeChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        LayoutService.DarkModeChanged -= OnDarkModeChanged;
+    }
+}

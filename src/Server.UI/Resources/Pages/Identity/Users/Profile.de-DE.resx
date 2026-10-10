@@ -309,4 +309,7 @@
   <data name="Verification code is required" xml:space="preserve">
     <value>Bestätigungscode ist erforderlich</value>
   </data>
+  <data name="Changing password…" xml:space="preserve">
+    <value>Passwort wird geändert…</value>
+  </data>
 </root>

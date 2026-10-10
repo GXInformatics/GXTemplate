@@ -82,4 +82,7 @@
   <data name="Verify Recovery Code" xml:space="preserve">
     <value>Wiederherstellungscode überprüfen</value>
   </data>
+  <data name="Verifying…" xml:space="preserve">
+    <value>Wird überprüft…</value>
+  </data>
 </root> 

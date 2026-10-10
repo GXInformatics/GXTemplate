@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
     <metadata>
         <id>GX.Blazor.Template</id>
-        <version>1.1.0</version>
+        <version>1.2.0</version>
         <title>GX Blazor Server Solution Template</title>
         <authors>GX Informatics Limited</authors>
         <description>
@@ -22,6 +22,18 @@
             multi-tenant data model, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
+            1.2.0
+            - The theme drawer is gone. One light/dark toggle sits in the app bar; with no saved choice
+              the device's preference decides, and no page paints in the wrong theme first. The drawer's
+              colour picker, right-to-left toggle and online-users roster went with it.
+            - GxSubmitButton: every button that submits or does work shows its progress (spinner, busy
+              label, aria-busy) and cannot run twice; never the disabled attribute. gx-busy-button.js
+              covers real form posts. MudLoadingButton and the hand-made busy flags are removed, and
+              SubmitButtonGuardTests keeps a plain submit MudButton out.
+            - Dialog actions run inside their dialog: user and role deletes, clearing the logs and
+              resetting a password show progress there, and a refusal stays in the dialog instead of a
+              snackbar after it closed.
+
             1.1.0
             - Nothing calls out by default. Removed: the unused MaxMind GeoIP web-service client, the
               Google Fonts link, the qrcodejs CDN script loaded on every page, and the unreferenced

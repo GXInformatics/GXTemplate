@@ -82,4 +82,7 @@
   <data name="Forgot Password" xml:space="preserve">
     <value>Passwort vergessen</value>
   </data>
+  <data name="Sending…" xml:space="preserve">
+    <value>Wird gesendet…</value>
+  </data>
 </root> 

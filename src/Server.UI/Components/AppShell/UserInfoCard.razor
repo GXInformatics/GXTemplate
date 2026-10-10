@@ -73,24 +73,15 @@
                             <MudText Typo="Typo.body2">@L["Profile"]</MudText>
                         </div>
                     </MudMenuItem>
-                    <MudMenuItem OnClick="OnSettingClick">
-                        <div class="d-flex align-center">
-                            <MudIcon Class="mx-2" Icon="@Icons.Material.Filled.Settings" />
-                            <MudText Typo="Typo.body2">@L["Settings"]</MudText>
-                        </div>
-                    </MudMenuItem>
+                    @* Pass 52: "Settings" opened the theme drawer, which is gone. *@
                     <MudDivider Class="my-2" />
                     <div class="mx-4 mb-2">
                         <form action="@IdentityComponentsEndpointRouteBuilderExtensions.Logout" method="post">
                             <input type="hidden" name="ReturnUrl" value="/account/login" />
-                            <MudButton Color="Color.Primary"
-                                      ButtonType="ButtonType.Submit"
-                                      FullWidth="true"
-                                      StartIcon="@Icons.Material.Filled.Logout"
-                                      Variant="Variant.Outlined"
-                                      Size="Size.Small">
-                                @L["Logout"]
-                            </MudButton>
+                            @* A native post: wwwroot/js/gx-busy-button.js shows its busy state (pass 52). *@
+                            <GxSubmitButton Label="@L["Logout"]" BusyLabel="@L["Signing out…"]" Color="Color.Primary"
+                                            FullWidth="true" StartIcon="@Icons.Material.Filled.Logout"
+                                            Variant="Variant.Outlined" Size="Size.Small" />
                         </form>
                     </div>
                 </div>
@@ -101,8 +92,6 @@
 
 @code
 {
-    [Parameter] public EventCallback<MouseEventArgs> OnSettingClick { get; set; }
-    
     private UserProfile UserProfile => UserProfileState.Value;
 
     protected override void OnInitialized()

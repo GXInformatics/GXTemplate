@@ -147,4 +147,7 @@
   <data name="Log in with a recovery code" xml:space="preserve">
     <value>Log in with a recovery code</value>
   </data>
+  <data name="Signing in…" xml:space="preserve">
+    <value>Signing in…</value>
+  </data>
 </root>

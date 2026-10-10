@@ -64,4 +64,7 @@
   <data name="Login with {0}" xml:space="preserve">
     <value>使用 {0} 登录</value>
   </data>
+  <data name="Redirecting…" xml:space="preserve">
+    <value>正在跳转…</value>
+  </data>
 </root> 

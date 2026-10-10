@@ -16,7 +16,11 @@ else
             <div class="d-flex flex-column flex-grow-1 gap-y-2">
                 @foreach (var provider in _externalLogins)
                 {
-                    <button type="submit" class="mud-button-root mud-button mud-button-outlined mud-button-filled-secondary mud-button-filled-size-medium mud-width-full mud-ripple" name="provider" value="@provider.Name" title="Log in using your @provider.DisplayName account">@string.Format(L["Login with {0}"], provider.DisplayName)</button>
+                    @* Pass 52: a native post that carries the button's own name=value; wwwroot/js/gx-busy-button.js shows the busy
+                       state without disabling it, so the provider still reaches the endpoint. *@
+                    <GxSubmitButton Label="@string.Format(L["Login with {0}"], provider.DisplayName)" BusyLabel="@L["Redirecting…"]"
+                                    Variant="Variant.Filled" Color="Color.Secondary" FullWidth="true"
+                                    name="provider" value="@provider.Name" title="@($"Log in using your {provider.DisplayName} account")" />
                 }
             </div>
         </div>

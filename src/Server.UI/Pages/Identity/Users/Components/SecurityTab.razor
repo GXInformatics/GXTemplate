@@ -41,13 +41,12 @@ else if (_loaded)
             }
 
             <MudStack Row Class="mt-6" Spacing="2">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                           Disabled="_saving" OnClick="SaveAsync">
-                    @AppStrings.Save
-                </MudButton>
+                <GxSubmitButton @ref="_saveButton" ButtonType="ButtonType.Button" Action="SaveAsync" Label="@AppStrings.Save"
+                                BusyLabel="@AppStrings.Saving" Variant="Variant.Filled" Color="Color.Primary" />
                 @if (_useOwn)
                 {
-                    <MudButton Variant="Variant.Text" Disabled="_saving" OnClick="ResetAsync">
+                    @* Pass 52: runs through the Save button, which shows the progress; this button leaves the page at once. *@
+                    <MudButton Variant="Variant.Text" OnClick="@(() => _saveButton.RunAsync(ResetAsync))">
                         @AppStrings.UseOrganisationDefault
                     </MudButton>
                 }
@@ -72,7 +71,7 @@ else if (_loaded)
     private UserManager<ApplicationUser> _userManager = null!;
     private string? _userId;
     private bool _loaded;
-    private bool _saving;
+    private GxSubmitButton _saveButton = null!; // Pass 52: replaces the hand-made busy flag
     private bool _useOwn;
     private int _chosenMinutes;
     private int _administeredMinutes;
@@ -133,34 +132,26 @@ else if (_loaded)
             return;
         }
 
-        _saving = true;
-        try
+        var user = await _userManager.FindByIdAsync(_userId);
+        if (user is null) return;
+
+        user.IdleTimeoutMinutes = minutes;
+        var result = await _userManager.UpdateAsync(user);
+
+        if (!result.Succeeded)
         {
-            var user = await _userManager.FindByIdAsync(_userId);
-            if (user is null) return;
-
-            user.IdleTimeoutMinutes = minutes;
-            var result = await _userManager.UpdateAsync(user);
-
-            if (!result.Succeeded)
-            {
-                Snackbar.Add(string.Join("; ", result.Errors.Select(e => e.Description)), Severity.Error);
-                return;
-            }
-
-            // Immediately, so the change is live on this user's very next request rather than at
-            // their next sign-in. This is the reason the preference is read from the database and
-            // not carried as a claim - see IdleTimeoutPolicyProvider's remarks.
-            PolicyProvider.InvalidateUser(_userId);
-
-            var state = await AuthenticationStateTask;
-            _effectiveMinutes = (await PolicyProvider.GetEffectiveAsync(state.User)).IdleMinutes;
-
-            Snackbar.Add(AppStrings.SaveSuccess, Severity.Info);
+            Snackbar.Add(string.Join("; ", result.Errors.Select(e => e.Description)), Severity.Error);
+            return;
         }
-        finally
-        {
-            _saving = false;
-        }
+
+        // Immediately, so the change is live on this user's very next request rather than at
+        // their next sign-in. This is the reason the preference is read from the database and
+        // not carried as a claim - see IdleTimeoutPolicyProvider's remarks.
+        PolicyProvider.InvalidateUser(_userId);
+
+        var state = await AuthenticationStateTask;
+        _effectiveMinutes = (await PolicyProvider.GetEffectiveAsync(state.User)).IdleMinutes;
+
+        Snackbar.Add(AppStrings.SaveSuccess, Severity.Info);
     }
 }

@@ -418,24 +418,35 @@
             return;
         }
 
+        // Pass 52: the dialog's Confirm deletes, with progress; a refusal stays in the dialog.
         await DialogServiceHelper.ShowConfirmationDialogAsync(
             AppStrings.DeleteConfirmationTitle,
             string.Format(AppStrings.DeleteConfirmation, dto.Name),
-            async () =>
+            DeletedAsync,
+            onCancel: OnRefresh,
+            action: () => DeleteRolesAsync([dto.Id]),
+            busyLabel: AppStrings.Deleting);
+    }
+
+    /// <summary>Deletes the roles; null when done, else why not (the roles before a failure stay deleted, as before).</summary>
+    private async Task<string?> DeleteRolesAsync(string[] ids)
+    {
+        var rolesToDelete = await _roleManager.Roles.Where(x => ids.Contains(x.Id)).ToListAsync();
+        foreach (var role in rolesToDelete)
+        {
+            var deleteResult = await _roleManager.DeleteAsync(role);
+            if (!deleteResult.Succeeded)
             {
-                var rolesToDelete = await _roleManager.Roles.Where(x => x.Id == dto.Id).ToListAsync();
-                foreach (var role in rolesToDelete)
-                {
-                    var deleteResult = await _roleManager.DeleteAsync(role);
-                    if (!deleteResult.Succeeded)
-                    {
-                        Snackbar.Add(string.Join(",", deleteResult.Errors.Select(x => x.Description)), Severity.Error);
-                        return;
-                    }
-                }
-                Snackbar.Add(AppStrings.DeleteSuccess, Severity.Info);
-                await OnRefresh();
-            });
+                return string.Join(",", deleteResult.Errors.Select(x => x.Description));
+            }
+        }
+        return null;
+    }
+
+    private async Task DeletedAsync()
+    {
+        Snackbar.Add(AppStrings.DeleteSuccess, Severity.Info);
+        await OnRefresh();
     }
 
     // Delete selected roles after confirmation.
@@ -461,22 +472,10 @@
         await DialogServiceHelper.ShowConfirmationDialogAsync(
             AppStrings.DeleteConfirmationTitle,
             string.Format(AppStrings.DeleteConfirmation, _selectedRoles.Count),
-            async () =>
-            {
-                var deleteIds = _selectedRoles.Select(x => x.Id).ToArray();
-                var rolesToDelete = await _roleManager.Roles.Where(x => deleteIds.Contains(x.Id)).ToListAsync();
-                foreach (var role in rolesToDelete)
-                {
-                    var deleteResult = await _roleManager.DeleteAsync(role);
-                    if (!deleteResult.Succeeded)
-                    {
-                        Snackbar.Add(string.Join(",", deleteResult.Errors.Select(x => x.Description)), Severity.Error);
-                        return;
-                    }
-                }
-                Snackbar.Add(AppStrings.DeleteSuccess, Severity.Info);
-                await OnRefresh();
-            });
+            DeletedAsync,
+            onCancel: OnRefresh,
+            action: () => DeleteRolesAsync(_selectedRoles.Select(x => x.Id).ToArray()),
+            busyLabel: AppStrings.Deleting);
     }
 
     #endregion

@@ -393,4 +393,16 @@
   <data name="My login histories" xml:space="preserve">
     <value>我的登录历史</value>
   </data>
+  <data name="Saving…" xml:space="preserve">
+    <value>正在保存…</value>
+  </data>
+  <data name="Deleting…" xml:space="preserve">
+    <value>正在删除…</value>
+  </data>
+  <data name="Adding…" xml:space="preserve">
+    <value>正在添加…</value>
+  </data>
+  <data name="Submitting…" xml:space="preserve">
+    <value>正在提交…</value>
+  </data>
 </root>

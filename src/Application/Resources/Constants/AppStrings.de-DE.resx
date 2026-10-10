@@ -393,4 +393,16 @@
   <data name="My login histories" xml:space="preserve">
     <value>Meine Anmeldeverläufe</value>
   </data>
+  <data name="Saving…" xml:space="preserve">
+    <value>Wird gespeichert…</value>
+  </data>
+  <data name="Deleting…" xml:space="preserve">
+    <value>Wird gelöscht…</value>
+  </data>
+  <data name="Adding…" xml:space="preserve">
+    <value>Wird hinzugefügt…</value>
+  </data>
+  <data name="Submitting…" xml:space="preserve">
+    <value>Wird übermittelt…</value>
+  </data>
 </root>

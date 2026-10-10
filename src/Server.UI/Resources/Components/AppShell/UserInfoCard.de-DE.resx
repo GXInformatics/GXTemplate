@@ -126,4 +126,7 @@
   <data name="Settings" xml:space="preserve">
     <value>Einstellungen</value>
   </data>
+  <data name="Signing out…" xml:space="preserve">
+    <value>Abmeldung läuft…</value>
+  </data>
 </root>

@@ -109,4 +109,7 @@
   <data name="Provider is not set." xml:space="preserve">
     <value>提供商未设置。</value>
   </data>
+  <data name="Completing registration…" xml:space="preserve">
+    <value>正在完成注册…</value>
+  </data>
 </root> 

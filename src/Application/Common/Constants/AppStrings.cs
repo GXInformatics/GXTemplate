@@ -36,6 +36,12 @@ public static class AppStrings
     public static string SaveChanges => Localize("Save Changes");
     public static string Cancel => Localize("Cancel");
     public static string Close => Localize("Close");
+
+    // Pass 52: the busy labels of GxSubmitButton, for buttons labelled from this class.
+    public static string Saving => Localize("Saving…");
+    public static string Deleting => Localize("Deleting…");
+    public static string Adding => Localize("Adding…");
+    public static string Submitting => Localize("Submitting…");
     public static string Search => Localize("Search");
     public static string Clear => Localize("Clear");
     public static string Reset => Localize("Reset");

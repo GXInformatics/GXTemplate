@@ -117,7 +117,9 @@ public static class Theme
             LayoutProperties = new LayoutProperties
             {
                 AppbarHeight = "64px", // More modern height
-                DefaultBorderRadius = "8px", // More modern border radius
+                // Pass 52: 4px, what the application has always shown. The theme drawer's default replaced this file's 8px
+                // on every load; with the drawer gone, its value lives here.
+                DefaultBorderRadius = "4px",
                 DrawerWidthLeft = "280px", // Wider sidebar
                 DrawerMiniWidthRight= "260px"
             },

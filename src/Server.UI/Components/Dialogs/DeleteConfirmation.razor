@@ -7,10 +7,16 @@
     </TitleContent>
     <DialogContent>
         <MudText>@ContentText</MudText>
+        @* Pass 52: a refusal (a failed result, a stale row) is shown here and the dialog stays open, as in ConfirmationDialog. *@
+        @if (_failure is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3" data-test="dialog-failure">@_failure</MudAlert>
+        }
     </DialogContent>
     <DialogActions>
-        <MudButton StartIcon="@Icons.Material.Filled.Cancel" OnClick="Cancel" title="@AppStrings.Cancel">@AppStrings.Cancel</MudButton>
-        <MudButton StartIcon="@Icons.Material.Outlined.Delete" Color="Color.Error"  title="@AppStrings.Delete" OnClick="Submit">@AppStrings.Confirm</MudButton>
+        <MudButton StartIcon="@Icons.Material.Filled.Cancel" OnClick="Cancel" title="@AppStrings.Cancel" Disabled="@_running" data-test="dialog-cancel">@AppStrings.Cancel</MudButton>
+        <GxSubmitButton ButtonType="ButtonType.Button" Action="Submit" Label="@AppStrings.Confirm" BusyLabel="@AppStrings.Deleting"
+                        Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Outlined.Delete" title="@AppStrings.Delete" data-test="dialog-confirm" />
     </DialogActions>
 </MudDialog>
 
@@ -21,21 +27,27 @@
     [EditorRequired][Parameter] public string? ContentText { get; set; }
     [EditorRequired][Parameter] public IRequest<Result> Command { get; set; } = default!;
 
+    private bool _running;
+    private string? _failure;
+
     private async Task Submit()
     {
-        var result = await Mediator.Send(Command);
-        result.Match(
-          ()=>
-          {
-              Snackbar.Add($"{AppStrings.DeleteSuccess}", Severity.Info);
-              MudDialog.Close(DialogResult.Ok(true));
-          },
-          errors =>
-          {
-              Snackbar.Add($"{errors}", Severity.Error);
-          }
-        );
-        
+        _running = true;
+        _failure = null;
+        try
+        {
+            _failure = await DialogAction.RunHeldOpenAsync(MudDialog, () => Mediator.FailureOf(Command));
+        }
+        finally
+        {
+            _running = false;
+        }
+
+        if (_failure is null)
+        {
+            Snackbar.Add($"{AppStrings.DeleteSuccess}", Severity.Info);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
     }
 
     private void Cancel()

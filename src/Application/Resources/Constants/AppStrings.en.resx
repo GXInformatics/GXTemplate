@@ -393,4 +393,16 @@
   <data name="My login histories" xml:space="preserve">
     <value>My login histories</value>
   </data>
+  <data name="Saving…" xml:space="preserve">
+    <value>Saving…</value>
+  </data>
+  <data name="Deleting…" xml:space="preserve">
+    <value>Deleting…</value>
+  </data>
+  <data name="Adding…" xml:space="preserve">
+    <value>Adding…</value>
+  </data>
+  <data name="Submitting…" xml:space="preserve">
+    <value>Submitting…</value>
+  </data>
 </root>

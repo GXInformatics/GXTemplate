@@ -1,7 +1,6 @@
 ﻿@using CleanArchitecture.Blazor.Server.UI.Models.NavigationMenu
 @using CleanArchitecture.Blazor.Server.UI.Services.Navigation
 @inject IMenuService MenuService
-@inject LayoutService LayoutService
 @inject IStringLocalizer<NavigationMenu> L
 
 <MudDrawer Breakpoint="Breakpoint.Md"
@@ -19,7 +18,7 @@
         {
             @if (section is not null)
             {
-                <div class="@(LayoutService.IsRTL ? "mr-6" : "ml-6") my-3">
+                <div class="ml-6 my-3">
                     <MudText Typo="Typo.subtitle1">
                         <b>
                             @(L[section.Title])
@@ -76,7 +75,7 @@
     <MudDivider Class="mt-auto"></MudDivider>
     
     @* 用户信息显示区域 - 使用独立组件 *@
-    <UserInfoCard OnSettingClick="OnSettingClick" />
+    <UserInfoCard />
     
     <MudNavMenu Class="d-flex justify-space-between pa-2">
         <MudLink Href="#" Style="font-size:0.625rem;line-height:1.125rem;color:#6F6F6F !important">@L[ApplicationSettings.Copyright]</MudLink>
@@ -86,31 +85,15 @@
 </MudDrawer>
 
 
-@if (LayoutService.IsRTL)
-{
-    <style>
-        .mud-nav-link.active:not(.mud-nav-link-disabled) {
-            border-left: 3px solid var(--mud-palette-primary);
-            background-color: rgba(var(--mud-palette-primary-rgb), 0.1);
-        }
+<style>
+    .mud-nav-link.active:not(.mud-nav-link-disabled) {
+        border-right: 3px solid var(--mud-palette-primary);
+    }
 
-        .side-menu {
-            border-left: 1px solid var(--mud-palette-table-lines)
-        }
-    </style>
-}
-else
-{
-    <style>
-        .mud-nav-link.active:not(.mud-nav-link-disabled) {
-            border-right: 3px solid var(--mud-palette-primary);
-        }
-
-        .side-menu {
-            border-right: 1px solid var(--mud-palette-table-lines)
-        }
-    </style>
-}
+    .side-menu {
+        border-right: 1px solid var(--mud-palette-table-lines)
+    }
+</style>
 
 @code
 {
@@ -121,8 +104,6 @@ else
 
     private IEnumerable<MenuSectionModel> MenuSections => MenuService.Features;
     [EditorRequired] [Parameter] public string[] Roles { get; set; } = Array.Empty<string>();
-    
-    [Parameter] public EventCallback<MouseEventArgs> OnSettingClick { get; set; }
 
     private bool Expanded(MenuSectionItemModel menu)
     {

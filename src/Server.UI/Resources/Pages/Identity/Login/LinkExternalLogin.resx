@@ -109,4 +109,7 @@
   <data name="Provider is not set." xml:space="preserve">
     <value>Provider is not set.</value>
   </data>
+  <data name="Completing registration…" xml:space="preserve">
+    <value>Completing registration…</value>
+  </data>
 </root> 

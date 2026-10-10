@@ -128,7 +128,7 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="CancelDialog">@AppStrings.Cancel</MudButton>
-        <MudButton Color="Color.Primary" OnClick="SubmitAsync">@AppStrings.Ok</MudButton>
+        <GxSubmitButton ButtonType="ButtonType.Button" Action="SubmitAsync" Label="@AppStrings.Ok" BusyLabel="@AppStrings.Saving" Variant="Variant.Text" Color="Color.Primary" />
     </DialogActions>
 </MudDialog>
 

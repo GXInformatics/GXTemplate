@@ -548,11 +548,6 @@
     }
 
 
-    private async Task ShowDeleteConfirmationAsync(ApplicationUserDto model, Func<Task> onConfirmed)
-    {
-        var message = string.Format(AppStrings.DeleteConfirmation, model.UserName);
-        await DialogServiceHelper.ShowConfirmationDialogAsync(AppStrings.DeleteConfirmationTitle, message, onConfirmed);
-    }
 
     private async Task DeleteUserAsync(ApplicationUserDto model)
     {
@@ -562,15 +557,22 @@
             Snackbar.Add(L["You cannot delete your own account!"], Severity.Error);
             return;
         }
-        await ShowDeleteConfirmationAsync(model, async () =>
-        {
-            await ProcessUserDeletionAsync(model);
-            _selectedUsers = new();
-            await RefreshDataGridAsync();
-        });
+        // Pass 52: the dialog's Confirm deletes, with progress; a refusal (the last administrator) stays in the dialog.
+        await DialogServiceHelper.ShowConfirmationDialogAsync(
+            AppStrings.DeleteConfirmationTitle,
+            string.Format(AppStrings.DeleteConfirmation, model.UserName),
+            async () =>
+            {
+                _selectedUsers = new();
+                await DeletedAsync();
+            },
+            onCancel: RefreshDataGridAsync,
+            action: () => ProcessUserDeletionAsync(model),
+            busyLabel: AppStrings.Deleting);
     }
 
-    private async Task ProcessUserDeletionAsync(ApplicationUserDto model)
+    /// <summary>Deletes one user; null when done, else why not.</summary>
+    private async Task<string?> ProcessUserDeletionAsync(ApplicationUserDto model)
     {
         var user = await _userManager.FindByIdAsync(model.Id)
         ?? throw new NotFoundException($"User not found: {model.Id}");
@@ -581,22 +583,24 @@
         }
         catch (ForbiddenAccessException ex)
         {
-            Snackbar.Add(ex.Message, Severity.Error);
-            return;
+            return ex.Message;
         }
 
         var result = await _userManager.DeleteAsync(user);
-        if (result.Succeeded)
+        if (!result.Succeeded)
         {
-            Logger.LogInformation("User deleted: {UserName} (ID: {UserId})", user.UserName, user.Id);
-            Snackbar.Add(AppStrings.DeleteSuccess, Severity.Info);
-            await RefreshDataGridAsync();
-            await UserService.RefreshAsync();
+            return string.Join(",", result.Errors.Select(e => e.Description));
         }
-        else
-        {
-            Snackbar.Add(string.Join(",", result.Errors.Select(e => e.Description)), Severity.Error);
-        }
+
+        Logger.LogInformation("User deleted: {UserName} (ID: {UserId})", user.UserName, user.Id);
+        return null;
+    }
+
+    private async Task DeletedAsync()
+    {
+        Snackbar.Add(AppStrings.DeleteSuccess, Severity.Info);
+        await RefreshDataGridAsync();
+        await UserService.RefreshAsync();
     }
 
     private async Task DeleteCheckedUsersAsync()
@@ -609,10 +613,14 @@
         }
         var message = string.Format(AppStrings.DeleteConfirmation, _selectedUsers.Count);
         await DialogServiceHelper.ShowConfirmationDialogAsync(AppStrings.DeleteConfirmationTitle, message,
-        DeleteSelectedUsersAsync);
+            DeletedAsync,
+            onCancel: RefreshDataGridAsync,
+            action: DeleteSelectedUsersAsync,
+            busyLabel: AppStrings.Deleting);
     }
 
-    private async Task DeleteSelectedUsersAsync()
+    /// <summary>Deletes the checked users; null when done, else why not (the rows before a failure stay deleted).</summary>
+    private async Task<string?> DeleteSelectedUsersAsync()
     {
         var deleteIds = _selectedUsers.Select(u => u.Id).ToArray();
         var usersToDelete = await _userManager.Users.Where(x => deleteIds.Contains(x.Id)).ToListAsync();
@@ -626,8 +634,7 @@
         }
         catch (ForbiddenAccessException ex)
         {
-            Snackbar.Add(ex.Message, Severity.Error);
-            return;
+            return ex.Message;
         }
 
         foreach (var user in usersToDelete)
@@ -635,14 +642,11 @@
             var result = await _userManager.DeleteAsync(user);
             if (!result.Succeeded)
             {
-                Snackbar.Add(string.Join(",", result.Errors.Select(e => e.Description)), Severity.Error);
-                return;
+                return string.Join(",", result.Errors.Select(e => e.Description));
             }
             Logger.LogInformation("User deleted: {UserName} (ID: {UserId})", user.UserName, user.Id);
         }
-        Snackbar.Add(AppStrings.DeleteSuccess, Severity.Info);
-        await RefreshDataGridAsync();
-        await UserService.RefreshAsync();
+        return null;
     }
 
     #endregion
@@ -720,32 +724,40 @@
             UserName = model.UserName,
         };
         var options = new DialogOptions { CloseOnEscapeKey = true, CloseButton = true, MaxWidth = MaxWidth.ExtraSmall };
+        // Pass 52: the dialog's OK resets, with progress; a refusal (say, a password the policy rejects) stays in the dialog.
         await DialogServiceHelper.ShowDialogAsync<ResetPasswordDialog>(
             L["Set Password"],
-            _ => ProcessPasswordResetAsync(model, resetModel),
-            p => p.Add(x => x.Model, resetModel),
+            _ =>
+            {
+                Snackbar.Add(L["Reset password successfully"], Severity.Info);
+                return Task.CompletedTask;
+            },
+            p =>
+            {
+                p.Add(x => x.Model, resetModel);
+                p.Add(x => x.Action, () => ProcessPasswordResetAsync(model, resetModel));
+            },
             options);
     }
 
-    private async Task ProcessPasswordResetAsync(ApplicationUserDto model, ResetPasswordDialog.ResetPasswordModel resetModel)
+    /// <summary>Sets the user's password; null when done, else why not.</summary>
+    private async Task<string?> ProcessPasswordResetAsync(ApplicationUserDto model, ResetPasswordDialog.ResetPasswordModel resetModel)
     {
         var user = await _userManager.FindByIdAsync(model.Id!)
         ?? throw new NotFoundException($"User not found: {model.Id}");
         var token = await _userManager.GeneratePasswordResetTokenAsync(user);
         var result = await _userManager.ResetPasswordAsync(user, token, resetModel.Password!);
-        if (result.Succeeded)
+        if (!result.Succeeded)
         {
-            if (!user.EmailConfirmed)
-            {
-                user.EmailConfirmed = true;
-                await _userManager.UpdateAsync(user);
-            }
-            Snackbar.Add(L["Reset password successfully"], Severity.Info);
+            return string.Join(",", result.Errors.Select(e => e.Description));
         }
-        else
+
+        if (!user.EmailConfirmed)
         {
-            Snackbar.Add(string.Join(",", result.Errors.Select(e => e.Description)), Severity.Error);
+            user.EmailConfirmed = true;
+            await _userManager.UpdateAsync(user);
         }
+        return null;
     }
 
     #endregion

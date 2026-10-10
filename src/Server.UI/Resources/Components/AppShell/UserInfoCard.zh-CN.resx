@@ -67,4 +67,7 @@
   <data name="Logout" xml:space="preserve">
     <value>退出登录</value>
   </data>
+  <data name="Signing out…" xml:space="preserve">
+    <value>正在退出…</value>
+  </data>
 </root>

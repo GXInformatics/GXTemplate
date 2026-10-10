@@ -1,10 +1,25 @@
+@* Pass 52: with an Action, Confirm does the work here, with progress (GxSubmitButton): success closes the dialog, a
+   failure shows its sentence below the question and the dialog stays open. Cancel is disabled while the work runs.
+   Without an Action it only closes, and the caller does the work, as before. *@
 <MudDialog>
     <DialogContent>
         <MudText>@ContentText</MudText>
+        @if (_failure is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3" data-test="dialog-failure">@_failure</MudAlert>
+        }
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel" title="@AppStrings.Cancel">@AppStrings.Cancel</MudButton>
-        <MudButton OnClick="Submit" title="@AppStrings.Confirm">@AppStrings.Confirm</MudButton>
+        <MudButton OnClick="Cancel" title="@AppStrings.Cancel" Disabled="@_running" data-test="dialog-cancel">@AppStrings.Cancel</MudButton>
+        @if (Action is null)
+        {
+            <MudButton OnClick="Submit" title="@AppStrings.Confirm">@AppStrings.Confirm</MudButton>
+        }
+        else
+        {
+            <GxSubmitButton ButtonType="ButtonType.Button" Action="RunAsync" Label="@AppStrings.Confirm" BusyLabel="@(BusyLabel ?? AppStrings.Saving)"
+                            Variant="Variant.Text" Color="Color.Primary" title="@AppStrings.Confirm" data-test="dialog-confirm" />
+        }
     </DialogActions>
 </MudDialog>
 
@@ -15,9 +30,37 @@
 
     [Parameter] public string? ContentText { get; set; }
 
+    /// <summary>Optional: the work Confirm does; null when it succeeded, else the sentence to show (see <see cref="DialogAction"/>).</summary>
+    [Parameter] public Func<Task<string?>>? Action { get; set; }
+
+    /// <summary>The Confirm button's label while the action runs, e.g. "Saving…".</summary>
+    [Parameter] public string? BusyLabel { get; set; }
+
+    private bool _running;
+    private string? _failure;
+
     private void Submit()
     {
         MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private async Task RunAsync()
+    {
+        _running = true;
+        _failure = null;
+        try
+        {
+            _failure = await DialogAction.RunHeldOpenAsync(MudDialog, Action!);
+        }
+        finally
+        {
+            _running = false;
+        }
+
+        if (_failure is null)
+        {
+            MudDialog.Close(DialogResult.Ok(true));
+        }
     }
 
     private void Cancel()

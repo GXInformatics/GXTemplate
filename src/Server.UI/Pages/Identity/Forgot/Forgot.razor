@@ -14,7 +14,7 @@
 
 <PageTitle>@_pageTitle</PageTitle>
 
-<EditForm Model="_formModel" FormName="forgot-password" OnValidSubmit="HandleValidSubmitAsync" method="post">
+<EditForm Model="_formModel" FormName="forgot-password" OnValidSubmit="@(() => _sendButton.RunAsync(HandleValidSubmitAsync))" method="post">
 	<DataAnnotationsValidator />
 	<MudStack Spacing="2">
 		<MudText Typo="Typo.h4" GutterBottom="true">@L["Forgot Password?"]</MudText>
@@ -29,13 +29,8 @@
 					  Required="true"
 					  FullWidth="true"
 					  For="@(() => _formModel.Email)" />
-		<MudButton Variant="Variant.Filled"
-				   Color="Color.Primary"
-				   Size="Size.Large"
-				   ButtonType="ButtonType.Submit"
-				   FullWidth="true">
-			@L["Send E-mail"]
-		</MudButton>
+		<GxSubmitButton @ref="_sendButton" Label="@L["Send E-mail"]" BusyLabel="@L["Sending…"]"
+						Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" FullWidth="true" />
 	</MudStack>
 </EditForm>
 
@@ -44,6 +39,7 @@
 	private string _pageTitle = "Forgot Password";
 	private UserManager<ApplicationUser> _userManager = null!;
 	private InputModel _formModel { get; set; } = new();
+	private GxSubmitButton _sendButton = null!; // Pass 52
 
 	protected override Task OnInitializedAsync()
 	{

@@ -117,7 +117,7 @@
                 }
             };
 
-        LayoutService.MajorUpdateOccurred += LayoutServiceOnMajorUpdateOccurred;
+        LayoutService.DarkModeChanged += LayoutServiceOnDarkModeChanged;
 
         try
         {
@@ -140,7 +140,7 @@
         }
     }
 
-    private async Task LayoutServiceOnMajorUpdateOccurred()
+    private async Task LayoutServiceOnDarkModeChanged()
     {
        
             var isDarkMode = LayoutService.IsDarkMode;
@@ -157,7 +157,7 @@
 
     public void Dispose()
     {
-        LayoutService.MajorUpdateOccurred -= LayoutServiceOnMajorUpdateOccurred;
+        LayoutService.DarkModeChanged -= LayoutServiceOnDarkModeChanged;
         GC.SuppressFinalize(this);
     }
 }

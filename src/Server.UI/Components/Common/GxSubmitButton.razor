@@ -1,0 +1,155 @@
+@* Pass 52: a button that shows progress. At rest it shows Label; while busy it shows a small spinner and BusyLabel,
+   carries aria-busy="true", and cannot be pressed again.
+
+   Two ways to become busy, one per way a form submits:
+   - Interactive (every page today): the circuit handles the submit and Blazor prevents the browser's default, so this
+     component owns the busy state. Call RunAsync from the form's handler (OnValidSubmit), or give the button an
+     Action for a click that is the whole job. A handler that ends in a full-page navigation calls
+     HoldUntilNavigation, so the button stays busy until the page goes.
+   - A native or enhanced post (static server rendering): no C# runs before the browser leaves, so
+     wwwroot/js/gx-busy-button.js does the same thing in the page, keyed on data-gx-busy-button.
+
+   Pass 52: busy is NOT the disabled attribute. MudBlazor draws :disabled grey (with !important); a busy button keeps
+   its own colour, at reduced opacity, through one class, BusyClass (wwwroot/css/app.css), which the script applies too.
+   The class also stops pointer events; RunAsync refuses re-entry and the script blocks a second submit, so a keyboard
+   press cannot run the work twice either. *@
+@implements IDisposable
+
+<MudButton @attributes="UserAttributes"
+           ButtonType="@ButtonType"
+           Variant="@Variant"
+           Color="@Color"
+           Size="@Size"
+           FullWidth="@FullWidth"
+           StartIcon="@StartIcon"
+           Class="@CssClass"
+           Style="@Style"
+           Disabled="@Disabled"
+           OnClick="@_onClick"
+           aria-busy="@(_busy ? "true" : null)"
+           aria-disabled="@(_busy ? "true" : null)"
+           data-gx-busy-button=""
+           data-gx-busy-label="@BusyLabel">
+    <span class="gx-busy-spinner" hidden="@(!_busy)">
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Inherit" Class="me-2" />
+    </span>
+    <span class="gx-busy-text">@(_busy ? BusyLabel : Label)</span>
+</MudButton>
+
+@code {
+    /// <summary>How long a held button waits for its navigation before it lets the user retry. The script uses the same.</summary>
+    public static readonly TimeSpan HoldTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>The class a busy button carries, here and in wwwroot/js/gx-busy-button.js. Styled in wwwroot/css/app.css.</summary>
+    public const string BusyClass = "gx-busy";
+
+    /// <summary>The label at rest, e.g. "Sign in".</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+    /// <summary>The label while busy, e.g. "Signing in…".</summary>
+    [Parameter, EditorRequired] public string BusyLabel { get; set; } = "";
+
+    /// <summary>
+    /// Optional, interactive only: the work a click starts, run through <see cref="RunAsync"/>. Leave it unset inside an
+    /// EditForm and call <see cref="RunAsync"/> from OnValidSubmit instead, so validation runs first.
+    /// </summary>
+    /// <remarks>
+    /// Pass 52: an EventCallback, not a Func: its receiver is the component that supplies it, so that component
+    /// re-renders when the work is done, exactly as it did when the work was a MudButton's OnClick. A Func run from
+    /// this button's own callback re-rendered only the button, and the page's new state never reached the screen.
+    /// </remarks>
+    [Parameter] public EventCallback Action { get; set; }
+
+    /// <summary>Submit (the default) inside a form; Button for an action outside one, such as a dialog's Save wired to Action.</summary>
+    [Parameter] public ButtonType ButtonType { get; set; } = ButtonType.Submit;
+
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public Variant Variant { get; set; } = Variant.Filled;
+    [Parameter] public Color Color { get; set; } = Color.Primary;
+    [Parameter] public Size Size { get; set; } = Size.Medium;
+    [Parameter] public bool FullWidth { get; set; }
+    [Parameter] public string? StartIcon { get; set; }
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public string? Style { get; set; }
+
+    /// <summary>Any other attribute (e.g. data-test) goes on the button.</summary>
+    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? UserAttributes { get; set; }
+
+    private bool _busy;
+    private bool _holding;
+    private EventCallback<MouseEventArgs> _onClick;
+    private CancellationTokenSource? _hold;
+
+    /// <summary>Whether the button is busy.</summary>
+    public bool Busy => _busy;
+
+    private string CssClass => _busy ? $"{Class} {BusyClass}".Trim() : Class ?? "";
+
+    protected override void OnParametersSet()
+    {
+        // No click handler without an Action: a submit button's click needs no round trip of its own.
+        _onClick = Action.HasDelegate
+            ? EventCallback.Factory.Create<MouseEventArgs>(this, () => RunAsync(() => Action.InvokeAsync()))
+            : default;
+    }
+
+    /// <summary>
+    /// Busy on, await <paramref name="action"/>, busy off in finally, unless the action called
+    /// <see cref="HoldUntilNavigation"/>. A call while busy does nothing, so a second click cannot run the work twice.
+    /// </summary>
+    public async Task RunAsync(Func<Task> action)
+    {
+        if (_busy) return;
+        _busy = true;
+        _holding = false;
+        StateHasChanged();
+        try
+        {
+            // The busy render reaches the browser at the action's first await.
+            await action();
+        }
+        finally
+        {
+            if (_holding)
+            {
+                _hold = new CancellationTokenSource();
+                _ = ReleaseAfterHoldAsync(_hold.Token);
+            }
+            else
+            {
+                _busy = false;
+            }
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// The running action has started a full-page navigation (e.g. the sign-in post). The button stays busy after the
+    /// action returns, until the page goes; if it has not gone after <see cref="HoldTimeout"/>, it is released.
+    /// </summary>
+    public void HoldUntilNavigation() => _holding = _busy;
+
+    private async Task ReleaseAfterHoldAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(HoldTimeout, token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        await InvokeAsync(() =>
+        {
+            _busy = false;
+            _holding = false;
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        _hold?.Cancel();
+        _hold?.Dispose();
+    }
+}

@@ -147,4 +147,7 @@
   <data name="Log in with a recovery code" xml:space="preserve">
     <value>使用恢复代码登录</value>
   </data>
+  <data name="Signing in…" xml:space="preserve">
+    <value>正在登录…</value>
+  </data>
 </root>

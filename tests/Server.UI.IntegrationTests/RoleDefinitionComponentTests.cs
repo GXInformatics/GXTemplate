@@ -173,14 +173,21 @@ public class RoleDefinitionComponentTests
         // prompt that was really opened. The refusals happen before the prompt is ever requested,
         // which ConfirmationsShown asserts separately.
         _confirmationsShown = 0;
-        var dialogReference = new Mock<IDialogReference>();
-        dialogReference.SetupGet(x => x.Result)
-            .Returns(Task.FromResult<DialogResult?>(DialogResult.Ok(true)));
         var dialogService = new Mock<IDialogService>();
         dialogService.Setup(x => x.ShowAsync<ConfirmationDialog>(
                 It.IsAny<string>(), It.IsAny<DialogParameters>(), It.IsAny<DialogOptions>()))
-            .Callback(() => _confirmationsShown++)
-            .ReturnsAsync(dialogReference.Object);
+            .Returns(async (string _, DialogParameters parameters, DialogOptions _) =>
+            {
+                _confirmationsShown++;
+                // As ConfirmationDialog's Confirm does since pass 52: the delete is the dialog's action, run inside
+                // it; success closes it as confirmed (a failure would keep it open - here, a cancel).
+                var action = parameters.FirstOrDefault(p => p.Key == nameof(ConfirmationDialog.Action)).Value as Func<Task<string?>>;
+                var failure = action is null ? null : await action();
+                var dialogReference = new Mock<IDialogReference>();
+                dialogReference.SetupGet(x => x.Result)
+                    .Returns(Task.FromResult<DialogResult?>(failure is null ? DialogResult.Ok(true) : DialogResult.Cancel()));
+                return dialogReference.Object;
+            });
         services.AddSingleton(dialogService.Object);
 
         var permissions = new Mock<IPermissionService>();

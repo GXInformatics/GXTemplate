@@ -1,5 +1,6 @@
 ﻿
 @inject LayoutService LayoutService
+@implements IDisposable
 @if (LayoutService.IsDarkMode)
 {
     <img src="/dark-brand.svg" alt="Logo" class="@Class" style="@Style" />
@@ -23,10 +24,11 @@ else
     {
          await   InvokeAsync(StateHasChanged);
     }
+    // Pass 52: unsubscribes the event it subscribed to (it used to unsubscribe MajorUpdateOccurred, which the theme
+    // drawer's LayoutService raised, and was never disposed).
     public void Dispose()
     {
-        LayoutService.MajorUpdateOccurred -= LayoutService_DarkModeChanged;
-        GC.SuppressFinalize(this);
+        LayoutService.DarkModeChanged -= LayoutService_DarkModeChanged;
     }
     
     

@@ -1,60 +1,54 @@
-﻿@inherits LayoutComponentBase
-@using CleanArchitecture.Blazor.Server.UI.Services.JsInterop
-@using CleanArchitecture.Blazor.Server.UI.Themes
+@inherits LayoutComponentBase
 @implements IDisposable
 @inject LayoutService LayoutService
+@inject IJSRuntime JS
 <PageTitle>@ApplicationSettings.AppName</PageTitle>
-<MudRTLProvider RightToLeft="@LayoutService.IsRTL">
+@* Pass 52: nothing is rendered until the theme is known, so no page is ever painted in the wrong one. Until then the
+   page is blank, in the device's scheme (app.css). The sign-in pages sit under this layout too (AuthLayout). *@
+@if (_themeResolved)
+{
     <MudPopoverProvider />
     <MudDialogProvider />
     <MudSnackbarProvider />
-    <MudThemeProvider @ref="@_mudThemeProvider" Theme="@LayoutService.CurrentTheme" IsDarkMode="@LayoutService.IsDarkMode"  />
+    <MudThemeProvider Theme="@LayoutService.CurrentTheme" IsDarkMode="@LayoutService.IsDarkMode" />
     @Body
-</MudRTLProvider>
+}
 
 @code
 {
-    private MudThemeProvider _mudThemeProvider = null!;
-    private bool _defaultDarkMode;
-    public void Dispose()
+    private bool _themeResolved;
+
+    protected override void OnInitialized()
     {
-        LayoutService.MajorUpdateOccurred -= LayoutServiceOnMajorUpdateOccurred;
-        GC.SuppressFinalize(this);
+        LayoutService.DarkModeChanged += OnDarkModeChanged;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        await base.OnAfterRenderAsync(firstRender);
-        if (firstRender)
+        if (!firstRender) return;
+
+        try
         {
-            await ApplyUserPreferences();
+            // The device's prefers-color-scheme, through the function MudThemeProvider.GetSystemDarkModeAsync calls;
+            // called directly because the provider is not rendered yet.
+            var deviceIsDark = await JS.InvokeAsync<bool>("mudThemeProvider.isDarkMode");
+            await LayoutService.ApplyUserPreferences(deviceIsDark);
+        }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+        finally
+        {
+            // Whatever happened, the page is shown: in the light theme if nothing could be read.
+            _themeResolved = true;
             StateHasChanged();
         }
     }
 
-    private async Task ApplyUserPreferences()
-    {
-        _defaultDarkMode = await _mudThemeProvider.GetSystemDarkModeAsync();
-        await LayoutService.ApplyUserPreferences(_defaultDarkMode);
-    }
+    private Task OnDarkModeChanged() => InvokeAsync(StateHasChanged);
 
-    protected override async Task OnInitializedAsync()
+    public void Dispose()
     {
-        LayoutService.MajorUpdateOccurred += LayoutServiceOnMajorUpdateOccurred;
-        await  LayoutService.SetBaseTheme(Theme.ApplicationTheme());
-         
+        LayoutService.DarkModeChanged -= OnDarkModeChanged;
     }
-
-    private async Task LayoutServiceOnMajorUpdateOccurred()
-    {
-      
-        if (LayoutService.DarkModeToggle == Services.UserPreferences.DarkLightMode.System && _mudThemeProvider!=null)
-        {
-            _defaultDarkMode = await _mudThemeProvider.GetSystemDarkModeAsync();
-            await LayoutService.ApplyUserPreferences(_defaultDarkMode);
-            
-        }
-       await InvokeAsync(()=> StateHasChanged());
-    }
-
 }

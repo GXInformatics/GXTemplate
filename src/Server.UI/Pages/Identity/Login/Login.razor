@@ -17,7 +17,7 @@
 <PageTitle>@_pageTitle</PageTitle>
 
 <div class="d-flex flex-column  gap-y-2">
-	<EditForm Model="_formModel" OnValidSubmit="HandleSubmitAsync" FormName="login">
+	<EditForm Model="_formModel" OnValidSubmit="SignInAsync" FormName="login">
 		<DataAnnotationsValidator />
 		<MudStack Spacing="2">
 			<MudText Typo="Typo.h4" GutterBottom="true">@L["Sign In"]</MudText>
@@ -55,10 +55,8 @@
 				<MudLink Href="@Forgot.PageUrl">@L["Forgot password?"]</MudLink>
 			</div>
 
-			<MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" ButtonType="ButtonType.Submit"
-				FullWidth="true">
-				<MudText>@L["Sign In"]</MudText>
-			</MudButton>
+			<GxSubmitButton @ref="_signInButton" Label="@L["Sign in button"]" BusyLabel="@L["Signing in…"]"
+				Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" FullWidth="true" />
 		</MudStack>
 	</EditForm>
 
@@ -87,6 +85,7 @@
 	private InputType _passwordInputType = InputType.Password;
 	private string _passwordIcon = Icons.Material.Filled.VisibilityOff;
 	private IJSObjectReference? _auth;
+	private GxSubmitButton _signInButton = null!;
 	private InputModel _formModel { get; set; } = new()
 	{
 		UserName = "",
@@ -116,6 +115,10 @@
 		if (firstRender)
 			_auth = await JS.InvokeAsync<IJSObjectReference>("import", "/js/auth.js");
 	}
+
+	// Pass 52: the button is busy from a valid submit until the browser leaves for the sign-in endpoint. A refusal
+	// below returns, and the button is normal again beside the error.
+	private Task SignInAsync() => _signInButton.RunAsync(HandleSubmitAsync);
 
 	private async Task HandleSubmitAsync()
 	{
@@ -170,6 +173,7 @@
 		}
 
 		if (_auth is null) return;
+		_signInButton.HoldUntilNavigation();
 		await _auth.InvokeVoidAsync("postLogin", new
 		{
 			userName = _formModel.UserName,

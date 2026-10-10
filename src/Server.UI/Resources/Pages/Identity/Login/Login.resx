@@ -162,4 +162,10 @@
   <data name="Login with Passkey" xml:space="preserve">
     <value>Login with Passkey</value>
   </data>
+  <data name="Sign in button" xml:space="preserve">
+    <value>Sign in</value>
+  </data>
+  <data name="Signing in…" xml:space="preserve">
+    <value>Signing in…</value>
+  </data>
 </root>

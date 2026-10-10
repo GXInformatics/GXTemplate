@@ -8,7 +8,7 @@
 
         @if (OnSaveButtonClick.HasDelegate)
         {
-            <MudLoadingButton Loading="@Saving"  OnClick="@Save">@AppStrings.Save</MudLoadingButton>
+            <GxSubmitButton ButtonType="ButtonType.Button" Action="Save" Label="@AppStrings.Save" BusyLabel="@AppStrings.Saving" Variant="Variant.Text" Color="Color.Default" />
         }
         @if (OnGoEditClick.HasDelegate)
         {
@@ -35,8 +35,6 @@
 @code {
     [Parameter]
     public List<BreadcrumbItem>? BreadcrumbItems { get; set; }
-    [Parameter]
-    public bool Saving { get; set; }
     [Parameter]
     public EventCallback OnSaveButtonClick { get; set; }
     [Parameter]

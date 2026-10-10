@@ -64,4 +64,7 @@
   <data name="Login with {0}" xml:space="preserve">
     <value>Login with {0}</value>
   </data>
+  <data name="Redirecting…" xml:space="preserve">
+    <value>Redirecting…</value>
+  </data>
 </root> 
