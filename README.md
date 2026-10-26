@@ -148,6 +148,23 @@ form — in IIS, through `web.config`:
 fail a deploy), and an MSDeploy skip rule, `SkipWebConfig`, so a deploy never overwrites or deletes
 the server's `web.config` and the values in it.
 
+**The app carries its own ICU (template 1.4.0).** Time zones are named by IANA id
+(`AppConfigurationSettings:DefaultTimeZone` is `Africa/Lagos`). On Windows, .NET resolves an IANA id
+only through ICU, and Windows ships ICU only from Windows 10 1903 / Windows Server 2022. Before 1.4.0,
+an app on Windows Server 2019 or older refused `DefaultTimeZone` at startup, and IIS answered
+**500.30 — app failed to start**: the log database had been created, the business database had not.
+`Server.UI.csproj` now references `Microsoft.ICU.ICU4C.Runtime` and sets
+`System.Globalization.AppLocalIcu` to the same version, so a publish puts `icuuc72.dll`, `icuin72.dll`
+and `icudt72.dll` beside the app and .NET loads those instead of the system's. Keep the two version
+numbers equal (`AppLocalIcuTests` fails otherwise), and never set `System.Globalization.UseNls`. The
+first log line of every start reports it:
+
+```
+Process-wide state: …; ICU app-local 72.1.0.3; default time zone Africa/Lagos resolves: yes.
+```
+
+If a server still refuses the zone, the error names the three DLLs: check they were deployed.
+
 ### 4. Run
 
 ```

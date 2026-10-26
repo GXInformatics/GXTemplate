@@ -88,6 +88,7 @@ void LogEffectiveProcessWideState()
     const string legacyTimestampSwitch = "Npgsql.EnableLegacyTimestampBehavior";
 
     var provider = builder.Configuration["DatabaseSettings:DBProvider"] ?? "(unset)";
+    var defaultZone = builder.Configuration["AppConfigurationSettings:DefaultTimeZone"] ?? "(unset)";
     var legacySet = AppContext.TryGetSwitch(legacyTimestampSwitch, out var legacyEnabled);
 
     // "In force" is a property of the provider AND the switch together: timestamptz is Npgsql's
@@ -105,12 +106,18 @@ void LogEffectiveProcessWideState()
 
     app.Logger.LogInformation(
         "Process-wide state: database provider {Provider}; {Switch} {LegacySwitchState}; " +
-        "timestamptz in force: {Timestamptz}; QuestPDF licence {QuestPdfLicence}.",
+        "timestamptz in force: {Timestamptz}; QuestPDF licence {QuestPdfLicence}; ICU {Icu}; " +
+        "default time zone {DefaultTimeZone} resolves: {ZoneResolves}.",
         provider,
         legacyTimestampSwitch,
         legacySet ? (legacyEnabled ? "SET to true" : "set to false") : "not set",
         timestamptz,
-        Settings.License?.ToString() ?? "(unset)");
+        Settings.License?.ToString() ?? "(unset)",
+        // The app's own ICU (Server.UI.csproj, AppLocalIcuTests), or the system's. Without one, IANA time zone ids do
+        // not resolve on Windows Server 2019 and older; this line is what an operator reads to see which is in force.
+        AppContext.GetData("System.Globalization.AppLocalIcu") is string icu ? $"app-local {icu}" : "the system's",
+        defaultZone,
+        TimeZoneInfo.TryFindSystemTimeZoneById(defaultZone, out _) ? "yes" : "NO");
 }
 
 /// <summary>

@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
     <metadata>
         <id>GX.Blazor.Template</id>
-        <version>1.3.0</version>
+        <version>1.4.0</version>
         <title>GX Blazor Server Solution Template</title>
         <authors>GX Informatics Limited</authors>
         <description>
@@ -22,6 +22,11 @@
             multi-tenant data model, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
+            1.4.0
+            - Apps carry their own ICU (Microsoft.ICU.ICU4C.Runtime, System.Globalization.AppLocalIcu),
+              so IANA time zone ids such as Africa/Lagos resolve on Windows Server 2019 and older; the
+              startup log says which ICU is in force.
+
             1.3.0
             - Tenancy by marker: every IMustHaveTenant / IMayHaveTenant entity is tenant-filtered and
               stamped from its marker, and startup fails if a marked entity ends up unfiltered.

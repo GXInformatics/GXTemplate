@@ -80,29 +80,40 @@
   -->
   <Target Name="AssertTemplatePackageContents" AfterTargets="Pack" Condition="'$(NoPackageAssert)' != 'true'">
     <!--
-        Found by globbing the output directory for the nuspec's package id.
+        Found by the nuspec's package id AND version, both read from the nuspec.
 
         Neither obvious alternative works when packing from a NuspecFile: $(PackageId) is the
         PROJECT name ("pack"), not the nuspec's id, and @(NuGetPackOutput) carries the SDK's default
         guess at the filename rather than the one the nuspec actually produced. Both point at
         "pack.1.0.0.nupkg", which is never written.
 
-        If the nuspec id ever changes, this glob matches nothing and the Error below fires - a loud
-        failure rather than an assertion that silently stops asserting.
+        The version matters (template 1.4.0): a bare GX.Blazor.Template.*.nupkg glob matched every
+        older package left in the output directory, and Unzip merged them all into one folder. The
+        assertion then checked the union - 1.2.0's content/.claude/ failed a clean 1.4.0, and an
+        older package's template.json could equally have passed one that lacked it.
+
+        If the nuspec id or version is not what was written, this matches nothing and the Error below
+        fires - a loud failure rather than an assertion that silently stops asserting.
     -->
     <PropertyGroup>
       <_PackageOutDir>$([MSBuild]::EnsureTrailingSlash('$(PackageOutputPath)'))</_PackageOutDir>
       <_PackageAssertDir>$(IntermediateOutputPath)package-assert</_PackageAssertDir>
     </PropertyGroup>
 
+    <XmlPeek XmlInputPath="$(NuspecFile)" Query="/n:package/n:metadata/n:version/text()"
+             Namespaces="&lt;Namespace Prefix='n' Uri='http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd' /&gt;">
+      <Output TaskParameter="Result" PropertyName="_NuspecVersion" />
+    </XmlPeek>
+
     <ItemGroup>
-      <_ProducedPackage Include="$(_PackageOutDir)GX.Blazor.Template.*.nupkg" />
+      <_ProducedPackage Include="$(_PackageOutDir)GX.Blazor.Template.$(_NuspecVersion).nupkg"
+                        Condition="'$(_NuspecVersion)' != '' And Exists('$(_PackageOutDir)GX.Blazor.Template.$(_NuspecVersion).nupkg')" />
     </ItemGroup>
 
     <RemoveDir Directories="$(_PackageAssertDir)" />
 
     <Error Condition="'@(_ProducedPackage)' == ''"
-           Text="Pack produced no GX.Blazor.Template.*.nupkg in $(_PackageOutDir) to verify. If the nuspec id changed, update this glob." />
+           Text="Pack produced no GX.Blazor.Template.$(_NuspecVersion).nupkg in $(_PackageOutDir) to verify (version read from the nuspec). If the nuspec id changed, update this name." />
 
     <Unzip SourceFiles="@(_ProducedPackage)" DestinationFolder="$(_PackageAssertDir)" />
 

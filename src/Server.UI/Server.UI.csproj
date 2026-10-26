@@ -27,6 +27,19 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- TIME ZONES ON EVERY WINDOWS SERVER. The app names zones by their IANA ids ("Africa/Lagos": the
+             DefaultTimeZone setting, every property, every user). On Windows, .NET resolves an IANA id only through
+             ICU, and Windows ships ICU only from Windows 10 1903 / Windows Server 2022: on Windows Server 2019 and
+             older the lookup fails, AppConfigurationSettings' startup check refuses the id, and IIS shows
+             "500.30 - app failed to start" before the business database is created. So the app carries its own
+             ICU: the package puts icuuc/icuin/icudt beside the app for win-x64, and the runtime option tells .NET to
+             load them instead of the system's. The two version numbers must be the same. AppLocalIcuTests holds
+             both. -->
+        <PackageReference Include="Microsoft.ICU.ICU4C.Runtime" Version="72.1.0.3" />
+        <RuntimeHostConfigurationOption Include="System.Globalization.AppLocalIcu" Value="72.1.0.3" />
+    </ItemGroup>
+
+    <ItemGroup>
         <!-- The local settings file holds this machine's credentials. It is gitignored, and this
              keeps it off every server too: a publish or an MSDeploy from a developer machine would
              otherwise copy it into the site folder. ServerUiPublishTests reads the evaluated item. -->

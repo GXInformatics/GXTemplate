@@ -32,7 +32,7 @@ public class AppConfigurationSettings : IApplicationSettings, IValidatableObject
     /// <summary>
     ///     Current application version
     /// </summary>
-    public string Version { get; set; } = "1.3.0";
+    public string Version { get; set; } = "1.4.0";
 
     /// <summary>
     ///     Application framework
@@ -71,7 +71,10 @@ public class AppConfigurationSettings : IApplicationSettings, IValidatableObject
         {
             yield return new ValidationResult(
                 $"{Key}.{nameof(DefaultTimeZone)} '{DefaultTimeZone}' is not a time zone this system recognises; " +
-                "use an IANA id such as 'UTC', 'Africa/Lagos' or 'Europe/London'",
+                "use an IANA id such as 'UTC', 'Africa/Lagos' or 'Europe/London'. If the id is right, this process " +
+                "has no ICU to resolve it: Windows Server 2019 and older ship none, and the app brings its own " +
+                "(Server.UI.csproj, System.Globalization.AppLocalIcu) - check that icuuc72.dll, icuin72.dll and " +
+                "icudt72.dll were published beside the app",
                 new[] { nameof(DefaultTimeZone) });
         }
     }
