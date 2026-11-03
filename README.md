@@ -165,6 +165,16 @@ Process-wide state: …; ICU app-local 72.1.0.3; default time zone Africa/Lagos 
 
 If a server still refuses the zone, the error names the three DLLs: check they were deployed.
 
+**Images use SkiaSharp, and the IIS application pool must run 64-bit (template pass 47b).** Profile
+photos and document images are processed by SkiaSharp. A `win-x64` publish ships only the x64 native
+library, `libSkiaSharp.dll`, beside the app. Leave "Enable 32-bit Applications" **off** on the pool, which
+is the IIS default. The library needs no Visual C++ runtime, so nothing else has to be installed for it.
+
+**The server needs the .NET 10 Hosting Bundle 10.0.13 or later; 10.0.14 is current.** The build is
+framework-dependent, so `System.Security.Cryptography.Xml` and `Microsoft.AspNetCore.SignalR.Common` run
+from the server's installed ASP.NET Core runtime, and their advisories are fixed only from 10.0.13. Run
+`iisreset` after installing it.
+
 ### 4. Run
 
 ```

@@ -30,6 +30,10 @@
         </PackageReference>
         <PackageReference Include="FluentAssertions" Version="8.10.0" />
         <PackageReference Include="Moq" Version="4.20.72" />
+        <!-- Pass 47b (as ProjectTracking pass 28 D1): pinned past GHSA-334f-vvp4-7g6p (fixed in 10.0.13). It comes in through
+             Server.UI's SignalR.Client 10.0.11, which Server.UI itself takes from the shared framework (pruned); a test
+             project does not. Remove the pin when SignalR.Client is past 10.0.12. -->
+        <PackageReference Include="Microsoft.AspNetCore.SignalR.Common" Version="10.0.14" />
     </ItemGroup>
 
     <ItemGroup>

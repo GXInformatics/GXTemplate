@@ -31,7 +31,10 @@
            - carries the outbound-address guard test, and no Seq sink, Gravatar address, MaxMind
              client, Google Fonts link or qrcodejs script in src/ (pass 48); the guard passes alone;
            - carries the app bar's ThemeToggle and GxSubmitButton with gx-busy-button.js, its .gx-busy
-             style and their tests, and no theme drawer, theme.js or MudLoadingButton (pass 52).
+             style and their tests, and no theme drawer, theme.js or MudLoadingButton (pass 52);
+           - references SkiaSharp and carries no ImageSharp in any file, and ships the image upload
+             tests (pass 47b); after the build, no SixLabors.ImageSharp in any restore graph, and the
+             photo and document upload tests pass on their own.
       4. The generated solution builds with 0 errors. Without GX_TEST_PG its four test suites FAIL,
          naming the variable; against the -TestServer (default GX_TEST_PG) they all pass, each on its
          own gx_test_<project>_* database.
@@ -512,6 +515,18 @@ try {
         Check ($found.Count -eq 1) "$test is generated" "found $($found.Count)"
     }
 
+    # Pass 47b: images are processed by SkiaSharp; ImageSharp is gone from every file, and the upload tests ship.
+    Step 'images use SkiaSharp; ImageSharp is not generated'
+    $uiProject = Get-Content -Raw (Join-Path $ui 'Server.UI.csproj')
+    Check ($uiProject -match '<PackageReference Include="SkiaSharp" Version="4\.154\.0" />') 'Server.UI.csproj references SkiaSharp 4.154.0'
+    # Comments may name it as what SkiaSharp replaced; no reference or using may.
+    $imageSharp = @($files | Select-String -Pattern 'Include="SixLabors\.ImageSharp|using SixLabors\.ImageSharp')
+    Check ($imageSharp.Count -eq 0) "no ImageSharp package reference or using ($($files.Count) files)" $(if ($imageSharp) { "$($imageSharp[0].Path.Substring($out.Length + 1)):$($imageSharp[0].LineNumber)" })
+    foreach ($test in @('ImageUploadHardeningTests.cs', 'ProfilePhotoUploadComponentTests.cs')) {
+        $found = @(Get-ChildItem -Path (Join-Path $out 'tests') -Recurse -File -Filter $test)
+        Check ($found.Count -eq 1) "$test is generated" "found $($found.Count)"
+    }
+
     # ------------------------------------------------------------------ 4. build and test
     if (-not $NoBuild) {
         Step 'the generated solution builds'
@@ -523,6 +538,15 @@ try {
         else {
             Select-String -Path $buildLog -Pattern ': error ' | Select-Object -First 10 | ForEach-Object { Write-Host "        $($_.Line.Trim())" }
             Fail "build failed with exit code $exit - see $buildLog"
+        }
+
+        if ($built) {
+            # Pass 47b: not even transitively.
+            $assets = @(Get-ChildItem -Path $out -Recurse -File -Filter 'project.assets.json')
+            $withImageSharp = @($assets | Select-String -SimpleMatch -Pattern '"SixLabors.ImageSharp/' -List)
+            Check ($assets.Count -gt 0 -and $withImageSharp.Count -eq 0) "no SixLabors.ImageSharp in any of $($assets.Count) restore graphs" $(if ($withImageSharp) { $withImageSharp[0].Path.Substring($out.Length + 1) })
+            $withSkia = @($assets | Select-String -SimpleMatch -Pattern '"SkiaSharp/4.154.0"' -List)
+            Check ($withSkia.Count -gt 0) "SkiaSharp 4.154.0 restored ($($withSkia.Count) projects)"
         }
 
         # Before `git init` below, on purpose: this is the state `dotnet new` leaves a project in,
@@ -571,6 +595,14 @@ try {
                             Fail "${suite}: $text (exit code $exit) - see $testLog"
                         }
                     }
+
+                    # Pass 47b: the photo and document uploads, alone, so their result is not hidden in a total.
+                    Step 'the image upload tests pass in the generated project'
+                    $testLog = Join-Path $WorkRoot 'test-image-uploads.log'
+                    $exit = Invoke-Dotnet @('test', (Join-Path $out 'tests\Server.UI.IntegrationTests'), '--no-build', '-nologo', '--filter', 'FullyQualifiedName~ImageUploadHardeningTests|FullyQualifiedName~ProfilePhotoUploadComponentTests') $testLog
+                    $line = Select-String -Path $testLog -Pattern '^(Passed|Failed|Skipped)!' | Select-Object -Last 1
+                    $text = if ($line) { $line.Line.Trim() -replace '\s+', ' ' } else { 'no summary line' }
+                    Check ($exit -eq 0 -and $line -and $line.Line -match '^Passed!.*Passed:\s+28,') "image uploads: $text" "exit code $exit - see $testLog"
                 }
             }
             finally {

@@ -54,6 +54,11 @@
                         </MudFileUpload>
                     </MudTooltip>
                 </div>
+                @* Pass 47b: a refused upload says why, here; the photo above is unchanged. *@
+                @if (_photoError is not null)
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" data-test="photo-upload-error">@_photoError</MudAlert>
+                }
             </MudItem>
 
             <!-- User Information Fields -->
@@ -91,6 +96,9 @@
  
 @code {
     private UserProfile UserProfile => UserProfileState.Value;
+
+    /// <summary>Pass 47b: why the last upload was refused, or null.</summary>
+    private string? _photoError;
     private ChangeUserProfileModel? _profileModel { get; set; } = null!;
     private GxSubmitButton _saveButton = null!; // Pass 52
     private UserManager<ApplicationUser> _userManager { get; set; } = null!;
@@ -176,7 +184,20 @@
         await fileStream.CopyToAsync(memoryStream);
         byte[] fileData = memoryStream.ToArray();
 
-        var resizedStream = await ImageProcessor.ResizeAndCompressToJpegAsync(memoryStream, 128, 128, 80);
+        // Pass 47b: another format, over 50 megapixels or a corrupt file is refused with a message shown under the photo,
+        // which stays as it was; the refusal never reaches the circuit.
+        _photoError = null;
+        MemoryStream resizedStream;
+        try
+        {
+            resizedStream = await ImageProcessor.ResizeAndCompressToJpegAsync(memoryStream, 128, 128, 80);
+        }
+        catch (UnsupportedImageException refused)
+        {
+            _photoError = refused.Message;
+            return;
+        }
+
         var uploadRequest = new FileUploadRequest(file.Name, UploadType.ProfilePicture, resizedStream.ToArray(), overwrite: true, _profileModel.UserId);
 
         var result = await FileStorage.SaveAsync(uploadRequest);

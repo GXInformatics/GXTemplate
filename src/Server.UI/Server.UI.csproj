@@ -67,7 +67,9 @@
           <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
           <PrivateAssets>all</PrivateAssets>
         </PackageReference>
-        <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+        <!-- Pass 47b: replaces SixLabors.ImageSharp (ImageProcessor: profile photos and document images). MIT. Only the
+             x64 native library (SkiaSharp.NativeAssets.Win32) is published for win-x64: the IIS pool must run 64-bit. -->
+        <PackageReference Include="SkiaSharp" Version="4.154.0" />
         <PackageReference Include="MudBlazor" Version="9.8.0" />
         <PackageReference Include="Blazor-ApexCharts" Version="7.0.0" />
         <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.11">
