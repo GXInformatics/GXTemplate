@@ -1,0 +1,13 @@
+@using CleanArchitecture.Blazor.Application.Features.Branches
+@inject IStringLocalizer<Branches> L
+
+@* Pass 60b (item 4d): the template's branch fields, apart from the dialog, so an application's own dialog can wrap them
+   and add its own. Inside a MudForm whose Validation runs every registered validator of AddEditBranchCommand, each
+   field shows a module's rule as well as the template's. *@
+<MudTextField @bind-Value="Model.Code" For="@(() => Model.Code)" Label="@L["Code"]" Required="true" MaxLength="20" data-testid="branch-code" />
+<MudTextField @bind-Value="Model.Name" For="@(() => Model.Name)" Label="@L["Name"]" Required="true" MaxLength="100" data-testid="branch-name" />
+<MudSwitch T="bool" @bind-Value="Model.IsActive" Label="@L["Active"]" Color="Color.Primary" />
+
+@code {
+    [EditorRequired, Parameter] public AddEditBranchCommand Model { get; set; } = default!;
+}

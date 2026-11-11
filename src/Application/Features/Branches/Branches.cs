@@ -55,9 +55,17 @@ public sealed class GetUserBranchesQueryHandler(IApplicationDbContextFactory dbC
 // ---- Commands ---------------------------------------------------------------------------------
 
 /// <summary>Creates a branch, or edits one (including deactivating it). Branches are never deleted.</summary>
+/// <remarks>
+/// Pass 60b (item 4): one unit of work that raises <see cref="BranchCreatedEvent"/>, <see cref="BranchChangedEvent"/> and
+/// <see cref="BranchDeactivatingEvent"/>, handled in the transaction; any handler can veto with
+/// <c>PostingRejectedException</c>. The branch it saves is granted to the command and its handlers
+/// (<see cref="Common.Branches.IBranchDefiningCommand"/>). A module tightens the rules with its own
+/// <c>AbstractValidator&lt;AddEditBranchCommand&gt;</c>, which runs beside the template's.
+/// </remarks>
 [RequestAuthorize(Policy = Permissions.Branches.Create)]
 [RequestAuthorize(Policy = Permissions.Branches.Edit)]
-public sealed class AddEditBranchCommand : IRequest<Result<Saved<int>>>, IVersionedEdit
+public sealed class AddEditBranchCommand : IRequest<Result<Saved<int>>>, IVersionedEdit, ITransactionalRequest,
+    CleanArchitecture.Blazor.Application.Common.Branches.IBranchDefiningCommand
 {
     public int Id { get; set; }
     public string Code { get; set; } = string.Empty;
@@ -77,8 +85,7 @@ public sealed class AddEditBranchCommandValidator : AbstractValidator<AddEditBra
 }
 
 public sealed class AddEditBranchCommandHandler(
-    IApplicationDbContextFactory dbContextFactory,
-    IUserContextInvalidator userContextInvalidator)
+    IApplicationDbContextFactory dbContextFactory)
     : IRequestHandler<AddEditBranchCommand, Result<Saved<int>>>
 {
     public async ValueTask<Result<Saved<int>>> Handle(AddEditBranchCommand request, CancellationToken cancellationToken)
@@ -102,17 +109,35 @@ public sealed class AddEditBranchCommandHandler(
             db.Branches.Add(branch);
         }
 
-        var activeChanged = request.IsEdit && branch.IsActive != request.IsActive;
+        var (oldCode, oldName, wasActive) = (branch.Code, branch.Name, branch.IsActive);
+        var name = request.Name.Trim();
         branch.Code = code;
-        branch.Name = request.Name.Trim();
+        branch.Name = name;
         branch.IsActive = request.IsActive;
+
+        // Pass 60b: the events, raised before the one save. Inside the unit of work the posting events are dispatched
+        // after this handler returns, in this transaction; a handler that throws PostingRejectedException vetoes.
+        if (!request.IsEdit)
+        {
+            branch.AddDomainEvent(new BranchCreatedEvent(branch));
+        }
+        else
+        {
+            var renamed = oldCode != code || oldName != name;
+            if (wasActive && !branch.IsActive) branch.AddDomainEvent(new BranchDeactivatingEvent(branch.Id, code));
+            if (renamed || (!wasActive && branch.IsActive))
+                branch.AddDomainEvent(new BranchChangedEvent(branch.Id, code, name, oldCode, oldName, branch.IsActive, wasActive));
+            // Deactivating a branch removes it from its users' write sets (owner decision 11). Published after the commit,
+            // so no circuit can reload and cache the old state between the invalidation and the commit.
+            if (wasActive != branch.IsActive) branch.AddDomainEvent(new BranchActivationChangedEvent(branch.Id, branch.IsActive));
+        }
 
         var saved = db.SavedVersionOf(branch, 0);
         await db.SaveChangesAsync(cancellationToken);
         saved.Id = branch.Id;
 
-        // Deactivating a branch removes it from its users' write sets (owner decision 11).
-        if (activeChanged) userContextInvalidator.InvalidateAll();
+        // Pass 60b (decision 9): the saved branch is granted to the rest of this command and its event handlers.
+        CleanArchitecture.Blazor.Application.Common.Branches.BranchGrant.ExtendDefining(branch.Id);
         return Result<Saved<int>>.Success(saved);
     }
 }
@@ -134,10 +159,17 @@ public sealed class SetUserBranchesCommandValidator : AbstractValidator<SetUserB
     public SetUserBranchesCommandValidator()
     {
         RuleFor(c => c.UserId).NotEmpty();
+        // Pass 60b (decision 11): a user with at least one assigned branch has exactly one default, and a user with
+        // none has no default. Refused rather than chosen for the caller: the UI always sends one.
+        RuleFor(c => c.DefaultBranchId)
+            .NotNull().When(c => c.BranchIds.Count > 0)
+            .WithMessage(DefaultRequiredMessage);
         RuleFor(c => c.DefaultBranchId)
             .Must((c, id) => id is null || c.BranchIds.Contains(id.Value))
             .WithMessage("The default branch must be one of the assigned branches.");
     }
+
+    public const string DefaultRequiredMessage = "Choose the user's default branch.";
 }
 
 public sealed class SetUserBranchesCommandHandler(
@@ -157,8 +189,17 @@ public sealed class SetUserBranchesCommandHandler(
         db.UserBranches.RemoveRange(existing.Where(ub => !wanted.Contains(ub.BranchId)));
         foreach (var row in existing.Where(ub => wanted.Contains(ub.BranchId)))
             row.IsDefault = row.BranchId == request.DefaultBranchId;
-        foreach (var id in wanted.Except(existing.Select(ub => ub.BranchId)))
-            db.UserBranches.Add(new UserBranch { UserId = request.UserId, BranchId = id, IsDefault = id == request.DefaultBranchId });
+        var added = wanted.Except(existing.Select(ub => ub.BranchId))
+            .Select(id => new UserBranch { UserId = request.UserId, BranchId = id, IsDefault = id == request.DefaultBranchId })
+            .ToList();
+        db.UserBranches.AddRange(added);
+
+        // Pass 60b: the backstop for a future edit of this handler. The validator already refuses a request that
+        // would break it; this refuses a handler that would.
+        var defaults = existing.Where(ub => wanted.Contains(ub.BranchId)).Concat(added).Count(ub => ub.IsDefault);
+        if (wanted.Count > 0 && defaults != 1)
+            throw new InvalidOperationException(
+                $"SetUserBranchesCommand would leave user {request.UserId} with {defaults} default branches; exactly one is required.");
 
         await db.SaveChangesAsync(cancellationToken);
 

@@ -55,13 +55,31 @@ public static class ModuleBoundaryRule
         return new Result(Violations(scan.References).Distinct().ToList(), scan.Unresolved);
     }
 
+    /// <summary>How application-level code is reported, as either side of a violation (Pass 60b, amendment E2).</summary>
+    public const string AppLevel = "AppLevel";
+
     public static IEnumerable<ModuleViolation> Violations(IEnumerable<TypeReference> references)
     {
         foreach (var reference in references)
         {
             var from = ModuleOf(reference.From);
-            if (from is null) continue;
             var to = ModuleOf(reference.To);
+
+            if (from is null)
+            {
+                // Pass 60b (E2): application-level code may send a module's commands and use its Contracts, nothing else.
+                if (IsAppLevel(reference.From) && to is not null && !IsPublished(reference.To) && !IsRequest(reference.To))
+                    yield return new ModuleViolation(AppLevel, to, reference);
+                continue;
+            }
+
+            // Pass 60b (E2): no module references application-level code.
+            if (IsAppLevel(reference.To))
+            {
+                yield return new ModuleViolation(from, AppLevel, reference);
+                continue;
+            }
+
             if (to is null || string.Equals(from, to, StringComparison.Ordinal)) continue;
             if (IsPublished(reference.To)) continue;
             if (IsConfiguration(reference.From) && ModuleDefinition.Of(reference.To) is not null) continue;
@@ -69,6 +87,19 @@ public static class ModuleBoundaryRule
             yield return new ModuleViolation(from, to, reference);
         }
     }
+
+    /// <summary>
+    /// True for application-level code (Pass 60b, amendment E2): a namespace with the segment <c>AppLevel</c> and no
+    /// <c>Modules</c> segment.
+    /// </summary>
+    public static bool IsAppLevel(Type type)
+    {
+        var segments = TypeReferenceScanner.Outermost(type).Namespace?.Split('.') ?? [];
+        return segments.Contains(AppLevel) && !segments.Contains("Modules");
+    }
+
+    /// <summary>A Mediator request (a command or query), or a type nested in one.</summary>
+    public static bool IsRequest(Type type) => typeof(Mediator.IMessage).IsAssignableFrom(TypeReferenceScanner.Outermost(type));
 
     /// <summary>The module of <paramref name="type"/> from its namespace, or null for template code.</summary>
     public static string? ModuleOf(Type type)

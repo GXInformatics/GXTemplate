@@ -25,6 +25,9 @@ public static class ModuleDeclarationRules
                 problems.Add($"{type.FullName}: is in module {byNamespace}'s namespace but declares no [Module<>].");
             else if (byNamespace is not null && !string.Equals(declared!.Name, byNamespace, StringComparison.Ordinal))
                 problems.Add($"{type.FullName}: is in module {byNamespace}'s namespace but declares module {declared.Name}.");
+            else if (ModuleBoundaryRule.IsAppLevel(type))
+                problems.Add($"{type.FullName}: is application-level code (AppLevel), which holds no entities. " +
+                             "An entity belongs to a module: Domain/Modules/<Module>/Entities (pass 60b).");
             else if (byNamespace is null && declared is not null)
                 problems.Add($"{type.FullName}: declares module {declared.Name} but is not under Modules.{declared.Name}; " +
                              "module entities live in Domain/Modules/<Module>/, not in the template's folders.");

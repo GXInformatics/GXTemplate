@@ -14,7 +14,7 @@ builder.RegisterSerilog();
 builder.WebHost.UseStaticWebAssets();
 
 builder.Services
-    .AddApplication()
+    .AddApplication(builder.Configuration)
     .AddInfrastructure(builder.Configuration)
     .AddServerUI(builder.Configuration);
 var app = builder.Build();

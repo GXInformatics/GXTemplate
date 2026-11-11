@@ -254,10 +254,75 @@ public static class AdministratorPermissionRegistry
     /// <exception cref="InvalidOperationException">The lists and the constants have diverged.</exception>
     public static void AssertNoDivergence()
     {
-        Validate(DiscoverAllPermissions(), Granted, (IReadOnlyCollection<string>)Excluded.Keys);
-        ValidateApprovals(
-            CleanArchitecture.Blazor.Application.Common.Approvals.ApprovalPermissions.Discover(typeof(Permissions).Assembly),
-            Granted, (IReadOnlyCollection<string>)Excluded.Keys);
+        var approvals = CleanArchitecture.Blazor.Application.Common.Approvals.ApprovalPermissions.Discover(typeof(Permissions).Assembly);
+        var byAttribute = DecideByAttribute(PermissionFields(), Granted, (IReadOnlyCollection<string>)Excluded.Keys, approvals);
+        if (byAttribute.Problems.Count > 0)
+            throw new InvalidOperationException(
+                $"{nameof(AdministratorPermissionRegistry)}: the permission attributes contradict themselves or the lists (pass 60b). " +
+                string.Join(" ", byAttribute.Problems));
+
+        var granted = Granted.Concat(byAttribute.Granted).ToList();
+        var excluded = Excluded.Keys.Concat(byAttribute.Excluded.Keys).ToList();
+        Validate(DiscoverAllPermissions(), granted, excluded);
+        ValidateApprovals(approvals, granted, excluded);
+    }
+
+    /// <summary>
+    /// What the administrator role and the system account are given: <see cref="Granted"/> plus every constant
+    /// marked <see cref="AdministratorGrantAttribute"/> (Pass 60b). <see cref="Granted"/> stays the template's own list.
+    /// </summary>
+    public static IReadOnlyList<string> EffectiveGranted =>
+        Granted.Concat(DecideByAttribute(PermissionFields(), Granted, (IReadOnlyCollection<string>)Excluded.Keys,
+                CleanArchitecture.Blazor.Application.Common.Approvals.ApprovalPermissions.Discover(typeof(Permissions).Assembly)).Granted)
+            .Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>The decisions made by attribute, and anything wrong with them (Pass 60b, decision 2 and amendment E2).</summary>
+    public sealed record AttributeDecisions(
+        IReadOnlyList<string> Granted, IReadOnlyDictionary<string, string> Excluded, IReadOnlyList<string> Problems);
+
+    /// <summary>The public static string fields of every class nested under <see cref="Permissions"/>.</summary>
+    public static IEnumerable<FieldInfo> PermissionFields() =>
+        typeof(Permissions).GetNestedTypes()
+            .SelectMany(module => module.GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy))
+            .Where(field => field.FieldType == typeof(string));
+
+    /// <summary>
+    /// Reads <see cref="AdministratorGrantAttribute"/> and <see cref="AdministratorExcludedAttribute"/> on
+    /// <paramref name="fields"/>. They decide any constant that is not in the template's lists, wherever the
+    /// application declares it (a module, <c>AppLevel</c>, anywhere). A problem is reported, naming the constant, for:
+    /// a constant both listed and attributed; both attributes on one constant; an exclusion with a blank reason; and an
+    /// approval permission marked for the administrator.
+    /// </summary>
+    public static AttributeDecisions DecideByAttribute(IEnumerable<FieldInfo> fields,
+        IReadOnlyCollection<string> listedGranted, IReadOnlyCollection<string> listedExcluded,
+        IReadOnlyCollection<string> approvalPermissions)
+    {
+        var granted = new List<string>();
+        var excluded = new Dictionary<string, string>(StringComparer.Ordinal);
+        var problems = new List<string>();
+        var listed = new HashSet<string>(listedGranted.Concat(listedExcluded), StringComparer.Ordinal);
+
+        foreach (var field in fields)
+        {
+            if (field.GetValue(null) is not string value || value.Length == 0) continue;
+            var grant = field.GetCustomAttribute<AdministratorGrantAttribute>();
+            var exclude = field.GetCustomAttribute<AdministratorExcludedAttribute>();
+            if (grant is null && exclude is null) continue;
+
+            if (listed.Contains(value))
+                problems.Add($"{value} is in the template's {nameof(Granted)}/{nameof(Excluded)} list and also carries an attribute; decide it in one place.");
+            if (grant is not null && exclude is not null)
+                problems.Add($"{value} carries both [AdministratorGrant] and [AdministratorExcluded].");
+            if (exclude is not null && string.IsNullOrWhiteSpace(exclude.Reason))
+                problems.Add($"{value}: [AdministratorExcluded] needs a reason.");
+            if (grant is not null && approvalPermissions.Contains(value, StringComparer.Ordinal))
+                problems.Add($"{value} approves documents and is marked [AdministratorGrant]; the administrator never approves (pass 60). Mark it [AdministratorExcluded(\"reason\")].");
+
+            if (grant is not null && exclude is null) granted.Add(value);
+            if (exclude is not null && grant is null) excluded[value] = exclude.Reason;
+        }
+
+        return new AttributeDecisions(granted.Distinct(StringComparer.Ordinal).ToList(), excluded, problems);
     }
 
     /// <summary>
@@ -333,8 +398,8 @@ public static class AdministratorPermissionRegistry
         if (unlisted.Count > 0)
         {
             message.Add(
-                $"Neither granted nor excluded - decide, then add to {nameof(Granted)} or " +
-                $"{nameof(Excluded)}: {string.Join(", ", unlisted)}.");
+                $"Neither granted nor excluded - decide: mark the constant [AdministratorGrant] or " +
+                $"[AdministratorExcluded(\"reason\")] (pass 60b; a template constant goes in {nameof(Granted)} or {nameof(Excluded)}): {string.Join(", ", unlisted)}.");
         }
 
         if (inBoth.Count > 0)

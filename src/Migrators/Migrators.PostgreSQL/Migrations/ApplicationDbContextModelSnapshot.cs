@@ -442,6 +442,10 @@ namespace CleanArchitecture.Blazor.Migrators.PostgreSQL.Migrations
 
                     b.HasIndex("BranchId");
 
+                    b.HasIndex(new[] { "UserId" }, "IX_UserBranches_UserId_Default")
+                        .IsUnique()
+                        .HasFilter("\"IsDefault\"");
+
                     b.ToTable("UserBranches", (string)null);
                 });
 

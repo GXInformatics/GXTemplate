@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
     <metadata>
         <id>GX.Blazor.Template</id>
-        <version>1.7.0</version>
+        <version>1.7.1</version>
         <title>GX Blazor Server Solution Template</title>
         <authors>GX Informatics Limited</authors>
         <description>
@@ -22,6 +22,29 @@
             multi-tenant data model, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
+            1.7.1
+            - Module services: a ModuleServices&lt;TModule&gt; per module per layer (and one AppLevelServices for code
+              that belongs to no module) registers the module's services, seeders and Contracts implementations,
+              found by scan; no module edits a DependencyInjection file. Order: template, then modules by
+              ModuleDefinition.Order and name, then the application level. Startup fails for a silent replacement
+              of a registered service (use Replace&lt;,&gt;, which is logged), an EF interceptor, or a Contracts
+              interface not registered exactly once ([NotAService("reason")] exempts a shape or marker).
+            - Permissions decided by attribute: [AdministratorGrant] / [AdministratorExcluded("reason")] decide any
+              constant outside the template's lists, in a module or the application level.
+            - Role catalogue: AddApplicationRole / GrantToRole, reconciled at every start (grant, never revoke).
+              The administrator role is never named. An administrator holding an approval permission is logged
+              at Error on every start; the approval is refused when sent.
+            - Branches: AddEditBranchCommand runs in a unit of work and raises BranchCreated, BranchChanged and
+              BranchDeactivating, which handlers may veto; the saved branch is granted to the command and its
+              handlers (IBranchDefiningCommand). Module validators show on the dialog's fields.
+              BranchScreenOptions replaces the dialog and the page (the template page redirects).
+            - A user with assigned branches has exactly one default (refused otherwise; PostgreSQL partial unique
+              index; existing users repaired at startup).
+            - Application-level code (AppLevel folders): may send module commands and use Contracts; no module may
+              reference it; it holds no entities.
+            - The template's tests assert the template's own parts, not "nothing else exists", so a generated
+              project with modules stays green; every release's smoke test now proves it with a sample module.
+
             1.7.0
             - Approvals: IApprovable&lt;T&gt; documents are approved only by an IApprovalCommand&lt;T&gt;, which
               ApprovalBehaviour checks inside the unit of work, with the header locked. Nobody approves what they

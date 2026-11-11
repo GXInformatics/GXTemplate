@@ -72,9 +72,16 @@ public class ModuleBoundaryTests
             typeof(CaseA_GenericMethodArgument), typeof(CaseB_ExpressionLambda), typeof(CaseB_DelegateLambda),
             typeof(CaseC_AsyncMethod), typeof(CaseD_Iterator), typeof(CaseD_LocalFunction),
             typeof(CaseE_ParameterOfAlphaEntity), typeof(CaseE_RendersAlphaComponent),
-            typeof(CaseF_FieldGenericArgument), typeof(CaseF_BaseTypeGenericArgument), typeof(CaseF_AttributeTypeArgument)
+            typeof(CaseF_FieldGenericArgument), typeof(CaseF_BaseTypeGenericArgument), typeof(CaseF_AttributeTypeArgument),
+            // Pass 60b, amendment E2: a module using application-level code; a module sending another module's command;
+            // application-level code using a module's entity.
+            typeof(CaseG_ReferencesAppLevel), typeof(CaseH_SendsAnotherModulesCommand),
+            typeof(CleanArchitecture.Blazor.ArchitectureSamples.AppLevel.AppLevelUsesAModuleEntity)
         });
-        result.Violations.Should().OnlyContain(v => v.FromModule == "SampleBeta" && v.ToModule == "SampleAlpha");
+        result.Violations.Should().OnlyContain(v =>
+            (v.FromModule == "SampleBeta" && v.ToModule == "SampleAlpha")
+            || (v.FromModule == "SampleBeta" && v.ToModule == ModuleBoundaryRule.AppLevel)
+            || (v.FromModule == ModuleBoundaryRule.AppLevel && v.ToModule == "SampleAlpha"));
     }
 
     // ---- 36 to 41: amendment C2, one case at a time ----------------------------------------------------

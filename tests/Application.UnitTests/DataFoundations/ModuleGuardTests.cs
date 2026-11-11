@@ -180,12 +180,34 @@ public class ModuleGuardTests
         problems.Should().NotContain(p => p.Contains("BetaOrder.Branch"), "a navigation to a template entity is allowed");
     }
 
+    /// <summary>
+    /// Pass 60b (item 1): what matters about the REAL model, in the template and in every generated project: the guard
+    /// finds no problem, and every entity is either the template's or declares a module. Until 1.7.1 this asserted that
+    /// the model held template entities ONLY, which failed in a generated project the moment its first module entity
+    /// existed.
+    /// </summary>
     [Test]
-    public void T20_TheTemplatesOwnModel_HasNoModuleProblems()
+    public void T20_TheRealModel_HasNoModuleProblems_AndEveryEntityIsTemplateOrModule()
     {
         using var context = new ApplicationDbContext(GuardContext.Options());
         DataModelGuard.FindProblems(context.Model).Should().BeEmpty();
+
+        var entities = context.Model.GetEntityTypes().Where(e => !e.IsOwned() && !e.IsPropertyBag).ToList();
+        entities.Should().OnlyContain(e => TemplateEntities.Contains(e.ClrType) || ModuleDefinition.Of(e.ClrType) != null,
+            "an application entity declares its module");
+
+        // And the template list cannot rot: every listed type is in the model. The passkey table enters the model only
+        // through Identity's options on the application's service provider (ModelMatchesMigrationsTests), not this bare context.
+        TemplateEntities.Types.Where(t => t != typeof(Microsoft.AspNetCore.Identity.IdentityUserPasskey<string>))
+            .Should().OnlyContain(t => entities.Any(e => e.ClrType == t), "TemplateEntities lists only real tables");
+    }
+
+    [Test]
+    public void T20_TheSameCheck_NamesAnEntityThatIsNeitherTemplateNorModule()
+    {
+        using var context = new ModulelessContext();
         context.Model.GetEntityTypes().Where(e => !e.IsOwned() && !e.IsPropertyBag)
-            .Should().OnlyContain(e => TemplateEntities.Contains(e.ClrType), "the template ships no module entity");
+            .Where(e => !TemplateEntities.Contains(e.ClrType) && ModuleDefinition.Of(e.ClrType) == null)
+            .Select(e => e.ClrType).Should().Equal(typeof(Moduleless));
     }
 }

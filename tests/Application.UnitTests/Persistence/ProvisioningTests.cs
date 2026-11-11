@@ -164,7 +164,8 @@ public class ProvisioningTests
         await ProvisionAsync();
 
         (await ClaimsOfAsync(Roles.Admin)).Should().BeEquivalentTo(
-            AdministratorPermissionRegistry.Granted,
+            // Pass 60b: the template's list plus an application's [AdministratorGrant] constants; the same thing on the bare template.
+            AdministratorPermissionRegistry.EffectiveGranted,
             "the grant is an explicit list, not whatever reflection happens to find");
     }
 
@@ -418,7 +419,7 @@ public class ProvisioningTests
             .Where(c => c.Type == ApplicationClaimTypes.Permission)
             .Select(c => c.Value);
 
-        claims.Should().BeEquivalentTo(AdministratorPermissionRegistry.Granted);
+        claims.Should().BeEquivalentTo(AdministratorPermissionRegistry.EffectiveGranted); // pass 60b: with attribute grants
     }
 
     [Test]

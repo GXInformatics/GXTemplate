@@ -18,6 +18,20 @@ public interface IBranchCommand
 }
 
 /// <summary>
+/// A command that saves a branch itself (Pass 60b, item 4b): <c>AddEditBranchCommand</c>, or an application command that
+/// wraps it. While it runs, the branch it saves is granted to it and to its posting-event handlers, so they can write
+/// that branch's rows in the same transaction (for example, a module creating a new branch's default stock location).
+/// </summary>
+/// <remarks>
+/// <c>BranchDefinitionGrantBehaviour</c> opens an empty grant around the whole command, outside the unit of work, so it
+/// spans the handler, every retry and every posting-event round. The handler adds the branch with
+/// <see cref="BranchGrant.ExtendDefining"/> once it is saved. A nested branch-defining command joins the outer one's
+/// grant, so a wrapping command keeps the grant after the nested send returns. The grant is that one branch, for that
+/// one command: it is a bounded exception to "a user writes only where assigned" (decision 9).
+/// </remarks>
+public interface IBranchDefiningCommand;
+
+/// <summary>
 /// The branches the current call chain may write to (Pass 59). Installed by <c>BranchAccessBehaviour</c>
 /// after its check, read by the save rules.
 /// </summary>
@@ -37,6 +51,7 @@ public static class BranchGrant
         public readonly HashSet<int> Branches = new();
         public Node? Parent;
         public bool Ended;
+        public bool Defining;
     }
 
     private static readonly AsyncLocal<Node?> Ambient = new();
@@ -59,6 +74,47 @@ public static class BranchGrant
         node.Branches.Add(branchId);
         Ambient.Value = node;
         return new End(node);
+    }
+
+    /// <summary>
+    /// Opens an EMPTY grant for a branch-defining command (Pass 60b), or joins the one already open further out. Until
+    /// <see cref="ExtendDefining"/> adds the saved branch, a branch-scoped write is refused, naming why.
+    /// </summary>
+    public static IDisposable BeginDefining()
+    {
+        if (Innermost(n => n.Defining) is not null) return Joined.Instance;
+        var node = new Node { Parent = Ambient.Value, Defining = true };
+        Ambient.Value = node;
+        return new End(node);
+    }
+
+    /// <summary>True while the innermost active grant is a branch-defining one that has no branch yet.</summary>
+    public static bool IsAwaitingDefinedBranch => Innermost(_ => true) is { Defining: true, Branches.Count: 0 };
+
+    /// <summary>
+    /// Grants <paramref name="branchId"/>, just saved, to the branch-defining command that is running (Pass 60b).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No branch-defining command is running: the request does not
+    /// implement <see cref="IBranchDefiningCommand"/>. Never a silent no-op.</exception>
+    public static void ExtendDefining(int branchId)
+    {
+        var node = Innermost(n => n.Defining) ?? throw new InvalidOperationException(
+            "BranchGrant.ExtendDefining was called outside a branch-defining command. The request that saves a branch must " +
+            "implement IBranchDefiningCommand, so that BranchDefinitionGrantBehaviour opens the grant around it.");
+        node.Branches.Add(branchId);
+    }
+
+    private static Node? Innermost(Func<Node, bool> match)
+    {
+        for (var node = Ambient.Value; node is not null; node = node.Parent)
+            if (!node.Ended && match(node)) return node;
+        return null;
+    }
+
+    private sealed class Joined : IDisposable
+    {
+        public static readonly Joined Instance = new();
+        public void Dispose() { }
     }
 
     /// <summary>Adds branches to the innermost active grant. No-op without one.</summary>

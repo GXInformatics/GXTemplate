@@ -51,10 +51,29 @@ public class RequestAuthorizationRegistryTests
     /// If this fails, check the new request carries the right RequestAuthorizeAttribute, then update
     /// the number here.
     /// </summary>
+    /// <summary>A module's (<c>…Modules.&lt;M&gt;…</c>) or the application level's (<c>…AppLevel…</c>) request type (Pass 60b).</summary>
+    private static bool IsApplicationOwn(Type type)
+    {
+        var segments = (type.Namespace ?? string.Empty).Split('.');
+        return segments.Contains("Modules") || segments.Contains("AppLevel");
+    }
+
+    [Test]
+    public void TheCountExcludes_ModuleAndApplicationLevelRequests_Only()
+    {
+        IsApplicationOwn(typeof(CleanArchitecture.Blazor.Application.Features.Branches.AddEditBranchCommand)).Should().BeFalse();
+        RequestAuthorizationRegistry.FindRequestTypes(ApplicationAssembly).Where(t => !IsApplicationOwn(t))
+            .Should().Contain(typeof(CleanArchitecture.Blazor.Application.Features.Branches.SetUserBranchesCommand));
+    }
+
     [Test]
     public void TheApplicationDeclaresTheExpectedNumberOfRequestTypes()
     {
-        var requests = RequestAuthorizationRegistry.FindRequestTypes(ApplicationAssembly);
+        // Pass 60b (item 1): the TEMPLATE's request types. A generated project's module and application-level requests are
+        // its own; counting them here failed every generated project at its first module command. They are still all
+        // checked for marking, at startup and below.
+        var requests = RequestAuthorizationRegistry.FindRequestTypes(ApplicationAssembly)
+            .Where(t => !IsApplicationOwn(t)).ToList();
 
         requests.Should().HaveCount(ExpectedRequestTypeCount,
             "the Mediator source-generated registry contained this many request types when the count was last confirmed");

@@ -35,6 +35,9 @@
            - references SkiaSharp and carries no ImageSharp in any file, and ships the image upload
              tests (pass 47b); after the build, no SixLabors.ImageSharp in any restore graph, and the
              photo and document upload tests pass on their own.
+      4b. (Pass 60b) The sample module in tooling/sample-module is copied in under the project's name,
+         its SampleModule migration is added for every migrator, the solution builds again, and the
+         suites below run on a project WITH a module; the sample's own tests are also run alone.
       4. The generated solution builds with 0 errors. Without GX_TEST_PG its four test suites FAIL,
          naming the variable; against the -TestServer (default GX_TEST_PG) they all pass, each on its
          own gx_test_<project>_* database.
@@ -549,6 +552,81 @@ try {
             Check ($withSkia.Count -gt 0) "SkiaSharp 4.154.0 restored ($($withSkia.Count) projects)"
         }
 
+        # ---------------------------------------------------------- 4b. a module (pass 60b)
+        # Every release proves that a generated project WITH a module stays green: the sample module in
+        # tooling/sample-module (an entity, a configuration, permissions decided by attribute, a catalogue role,
+        # a menu contributor, posting-event handlers, a Contracts interface and its implementation, a seeder,
+        # a branch validator, an application-level page, and its own tests) is copied in with the project's
+        # name, its migration is added for every migrator the project has, and the suites below run on it.
+        if ($built) {
+            Step 'the sample module is added (pass 60b)'
+            $sampleRoot = Join-Path $PSScriptRoot 'sample-module'
+            $copied = 0
+            foreach ($file in Get-ChildItem -Path $sampleRoot -Recurse -File) {
+                $relative = $file.FullName.Substring($sampleRoot.Length + 1)
+                $target = Join-Path $out $relative
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+                $text = [IO.File]::ReadAllText($file.FullName).Replace('CleanArchitecture.Blazor', $ProjectName)
+                [IO.File]::WriteAllText($target, $text, (New-Object System.Text.UTF8Encoding($false)))
+                $copied++
+            }
+            Check ($copied -gt 0) "$copied sample files copied with the namespace $ProjectName"
+
+            $efLog = Join-Path $WorkRoot 'dotnet-ef-version.log'
+            if ((Invoke-Dotnet @('ef', '--version') $efLog) -ne 0) {
+                Fail "dotnet-ef is not installed (dotnet tool install --global dotnet-ef); the sample module needs a migration - see $efLog"
+                $built = $false
+            }
+            else {
+                $buildLog = Join-Path $WorkRoot 'build-sample.log'
+                $built = (Invoke-Dotnet @('build', (Join-Path $out "$ProjectName.slnx"), '-nologo') $buildLog) -eq 0
+                Check $built "the solution builds with the sample module" "see $buildLog"
+            }
+
+            if ($built) {
+                # The design-time host builds the real service provider, so each provider gets a connection
+                # string it can parse; nothing connects.
+                $designTime = @{
+                    'Migrators.PostgreSQL' = @('postgresql', 'Host=localhost;Database=gx_design', 'Host=localhost;Database=gx_design_log')
+                    'Migrators.MSSQL'      = @('mssql', 'Server=(localdb)\mssqllocaldb;Database=gx_design;Trusted_Connection=True', 'Server=(localdb)\mssqllocaldb;Database=gx_design_log;Trusted_Connection=True')
+                    'Migrators.SqLite'     = @('sqlite', 'Data Source=gx_design.db', 'Data Source=gx_design_log.db')
+                }
+                $migrators = @(Get-ChildItem -Path (Join-Path $out 'src\Migrators') -Directory | Where-Object { $designTime.ContainsKey($_.Name) })
+                foreach ($migrator in $migrators) {
+                    $settings = $designTime[$migrator.Name]
+                    $saved = @($env:DatabaseSettings__DBProvider, $env:DatabaseSettings__ConnectionString, $env:DatabaseSettings__LogConnectionString)
+                    $env:DatabaseSettings__DBProvider, $env:DatabaseSettings__ConnectionString, $env:DatabaseSettings__LogConnectionString = $settings
+                    try {
+                        $migrationLog = Join-Path $WorkRoot "migration-$($migrator.Name).log"
+                        $exit = Invoke-Native 'dotnet' @('ef', 'migrations', 'add', 'SampleModule', '--project', $migrator.FullName,
+                            '--startup-project', (Join-Path $out 'src\Server.UI'), '--context', 'ApplicationDbContext', '--no-build') $migrationLog $out
+                        Check ($exit -eq 0) "migration SampleModule added to $($migrator.Name)" "exit code $exit - see $migrationLog"
+
+                        # One fixed id on every run. The suites' databases are kept between runs and their harness
+                        # refuses a history row this assembly does not define, so a fresh timestamp each release
+                        # would fail the next smoke. 2099 also keeps it after every template migration.
+                        foreach ($generated in @(Get-ChildItem -Path $migrator.FullName -Recurse -File -Filter '*_SampleModule*.cs')) {
+                            $id = $generated.Name.Substring(0, $generated.Name.IndexOf('_'))
+                            $text = [IO.File]::ReadAllText($generated.FullName).Replace("${id}_SampleModule", '20990101000000_SampleModule')
+                            [IO.File]::WriteAllText($generated.FullName, $text, (New-Object System.Text.UTF8Encoding($true)))
+                            Rename-Item -Path $generated.FullName -NewName ($generated.Name.Replace($id, '20990101000000'))
+                        }
+                    }
+                    finally {
+                        $env:DatabaseSettings__DBProvider, $env:DatabaseSettings__ConnectionString, $env:DatabaseSettings__LogConnectionString = $saved
+                    }
+                }
+
+                $pgMigration = @(Get-ChildItem -Path (Join-Path $out 'src\Migrators\Migrators.PostgreSQL') -Recurse -Filter '*_SampleModule.cs')
+                $ensured = $pgMigration.Count -eq 1 -and ([IO.File]::ReadAllText($pgMigration[0].FullName) -match 'EnsureSchema\(\s*name:\s*"smp"')
+                Check $ensured 'the PostgreSQL migration creates the module schema: EnsureSchema("smp")'
+
+                $buildLog = Join-Path $WorkRoot 'build-sample-migrations.log'
+                $built = (Invoke-Dotnet @('build', (Join-Path $out "$ProjectName.slnx"), '-nologo') $buildLog) -eq 0
+                Check $built 'the solution builds with the sample module and its migrations' "see $buildLog"
+            }
+        }
+
         # Before `git init` below, on purpose: this is the state `dotnet new` leaves a project in,
         # and CommittedAppSettingsTests has a path for a folder that is not a repository yet.
         if ($built -and -not $NoTests) {
@@ -603,6 +681,19 @@ try {
                     $line = Select-String -Path $testLog -Pattern '^(Passed|Failed|Skipped)!' | Select-Object -Last 1
                     $text = if ($line) { $line.Line.Trim() -replace '\s+', ' ' } else { 'no summary line' }
                     Check ($exit -eq 0 -and $line -and $line.Line -match '^Passed!.*Passed:\s+28,') "image uploads: $text" "exit code $exit - see $testLog"
+
+                    # Pass 60b: the sample module's own tests, alone, so a module test that silently did not run
+                    # fails the smoke instead of hiding in a suite total.
+                    Step 'the sample module tests pass in the generated project'
+                    foreach ($run in @(
+                            @('Application.IntegrationTests', 'FullyQualifiedName~SampleModuleTests', 7),
+                            @('Server.UI.IntegrationTests', 'FullyQualifiedName~SampleModuleUiTests|FullyQualifiedName~ModuleServicesResolveTests', 3))) {
+                        $testLog = Join-Path $WorkRoot "test-sample-$($run[0]).log"
+                        $exit = Invoke-Dotnet @('test', (Join-Path $out "tests\$($run[0])"), '--no-build', '-nologo', '--filter', $run[1]) $testLog
+                        $line = Select-String -Path $testLog -Pattern '^(Passed|Failed|Skipped)!' | Select-Object -Last 1
+                        $text = if ($line) { $line.Line.Trim() -replace '\s+', ' ' } else { 'no summary line' }
+                        Check ($exit -eq 0 -and $line -and $line.Line -match "^Passed!.*Passed:\s+$($run[2]),") "sample, $($run[0]): $text" "exit code $exit - see $testLog"
+                    }
                 }
             }
             finally {

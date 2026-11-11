@@ -28,10 +28,11 @@ public class UserBranchConfiguration : IEntityTypeConfiguration<UserBranch>
         builder.HasOne(ub => ub.User).WithMany().HasForeignKey(ub => ub.UserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(ub => ub.Branch).WithMany().HasForeignKey(ub => ub.BranchId).OnDelete(DeleteBehavior.Restrict);
 
-        // "One default per user" is kept by SetUserBranchesCommand, the only writer, not by a filtered
-        // unique index: a boolean filter has no spelling all three providers accept (SQL Server has no
-        // TRUE literal, PostgreSQL will not compare a boolean with 1), and the template still builds all
-        // three migrations.
+        // "Exactly one default per user with any assignment" is SetUserBranchesCommand's rule, the only
+        // writer. Pass 60b: on PostgreSQL, the only target, a partial unique index also keeps "at most one"
+        // (ApplicationDbContext.UserBranchDefaultIndex). It is not declared here because a boolean filter has
+        // no spelling all three providers accept (SQL Server has no TRUE literal, PostgreSQL will not compare
+        // a boolean with 1), and the template still builds all three migrations.
         builder.HasIndex(ub => ub.BranchId);
     }
 }

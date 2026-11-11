@@ -3,10 +3,9 @@
 
 <MudDialog>
     <DialogContent>
-        <MudForm @ref="_form">
-            <MudTextField @bind-Value="Model.Code" Label="@L["Code"]" Required="true" MaxLength="20" />
-            <MudTextField @bind-Value="Model.Name" Label="@L["Name"]" Required="true" MaxLength="100" />
-            <MudSwitch T="bool" @bind-Value="Model.IsActive" Label="@L["Active"]" Color="Color.Primary" />
+        @* Pass 60b: every registered validator of the command, the template's and any module's, on each field. *@
+        <MudForm Model="Model" @ref="_form" Validation="@(Validator.ValidateValue(Model))">
+            <BranchFormFields Model="Model" />
         </MudForm>
     </DialogContent>
     <DialogActions>

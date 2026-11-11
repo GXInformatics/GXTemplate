@@ -33,6 +33,9 @@ public class ApplicationDbContextInitializer
     private readonly IdentityOptions _identityOptions;
     private readonly IApplicationSettings _applicationSettings;
     private readonly ITenantSeedRunner _tenantSeedRunner;
+    private readonly IReadOnlyList<ApplicationRoleDefinition> _roleDefinitions;
+    private readonly IReadOnlyList<ApplicationRoleGrant> _roleGrants;
+    private readonly IReadOnlyList<CleanArchitecture.Blazor.Application.Common.Modules.ModuleServiceLedger> _moduleLedgers;
 
     public ApplicationDbContextInitializer(ILogger<ApplicationDbContextInitializer> logger,
         IDbContextFactory<ApplicationDbContext> dbContextFactory,
@@ -40,7 +43,10 @@ public class ApplicationDbContextInitializer
         RoleManager<ApplicationRole> roleManager,
         IOptions<IdentityOptions> identityOptions,
         IApplicationSettings applicationSettings,
-        ITenantSeedRunner tenantSeedRunner)
+        ITenantSeedRunner tenantSeedRunner,
+        IEnumerable<ApplicationRoleDefinition> roleDefinitions,
+        IEnumerable<ApplicationRoleGrant> roleGrants,
+        IEnumerable<CleanArchitecture.Blazor.Application.Common.Modules.ModuleServiceLedger> moduleLedgers)
     {
         _logger = logger;
         _context = dbContextFactory.CreateDbContext();
@@ -49,6 +55,9 @@ public class ApplicationDbContextInitializer
         _identityOptions = identityOptions.Value;
         _applicationSettings = applicationSettings;
         _tenantSeedRunner = tenantSeedRunner;
+        _roleDefinitions = roleDefinitions.ToList();
+        _roleGrants = roleGrants.ToList();
+        _moduleLedgers = moduleLedgers.ToList();
     }
 
     public async Task InitialiseAsync()
@@ -61,6 +70,10 @@ public class ApplicationDbContextInitializer
             // Pass 59: declared decimal kinds, no binary floats, sound immutability markers, a branch
             // filter on every branch-scoped entity. See DataModelGuard.
             DataModelGuard.AssertModel(_context.Model);
+
+            // Pass 60b (decision 5): a module that replaced a template service says so on every start.
+            foreach (var replaced in _moduleLedgers.SelectMany(l => l.Replaced))
+                _logger.LogWarning("{Owner} replaced {Service} with {Implementation}.", replaced.Owner, replaced.Service.FullName, replaced.Implementation.FullName);
 
             if (_context.Database.IsRelational())
                 await _context.Database.MigrateAsync();
@@ -89,6 +102,7 @@ public class ApplicationDbContextInitializer
             await EnsureDefaultTenantAsync();
             await EnsureAdministratorAsync();
             await EnsureSystemAccountAsync();
+            await EnsureOneDefaultBranchAsync();
             await SeedEveryTenantAsync();
             _context.ChangeTracker.Clear();
         }
@@ -171,18 +185,71 @@ public class ApplicationDbContextInitializer
             "Full access to every feature and every setting.",
             // The administrator grant is an explicit list checked against the Permissions constants
             // at startup, not a reflection sweep - see AdministratorPermissionRegistry for why.
-            AdministratorPermissionRegistry.Granted);
+            AdministratorPermissionRegistry.EffectiveGranted);
+
+        // Pass 60b (item 3): the application's role catalogue, checked before anything is written. It may grant to
+        // Basic; it never names Admin.
+        var catalogue = RoleCatalogue.Resolve(_roleDefinitions, _roleGrants, AdministratorPermissionRegistry.DiscoverAllPermissions());
+        var basicGrants = catalogue.FirstOrDefault(r => r.Name == Roles.Basic)?.Permissions ?? [];
 
         await EnsureRoleAsync(Roles.Basic,
             "Ordinary member: can see and download documents.",
-            BasicPermissions);
+            BasicPermissions.Concat(basicGrants).Distinct(StringComparer.Ordinal));
+
+        foreach (var role in catalogue.Where(r => r.Description is not null))
+            await EnsureRoleAsync(role.Name, role.Description!, role.Permissions, failLoudly: true);
+
+        await LogApprovalSeparationAsync();
     }
+
+    /// <summary>
+    /// Pass 60b, decision 8: an administrator who also holds an approval permission, through another role or a direct
+    /// claim, is logged at Error on every start, naming the user, the role and the permission. Startup continues: one
+    /// user's role membership must not stop the application for every branch, and an ordinary release that adds an
+    /// approve permission to a role an administrator already holds produces exactly this state. The send-time refusal
+    /// in ApprovalBehaviour remains the guarantee.
+    /// </summary>
+    private async Task LogApprovalSeparationAsync()
+    {
+        var approvals = CleanArchitecture.Blazor.Application.Common.Approvals.ApprovalPermissions.DiscoverLoaded();
+        if (approvals.Count == 0) return;
+
+        var roleApprovals = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var administrator in await _userManager.GetUsersInRoleAsync(Roles.Admin))
+        {
+            foreach (var roleName in (await _userManager.GetRolesAsync(administrator)).Where(r => r != Roles.Admin))
+            {
+                if (!roleApprovals.TryGetValue(roleName, out var held))
+                {
+                    var role = await _roleManager.FindByNameAsync(roleName);
+                    held = role is null ? [] : (await _roleManager.GetClaimsAsync(role))
+                        .Where(c => c.Type == ApplicationClaimTypes.Permission && approvals.Contains(c.Value)).Select(c => c.Value).ToArray();
+                    roleApprovals[roleName] = held;
+                }
+                foreach (var permission in held)
+                    LogApprovingAdministrator(administrator, roleName, permission);
+            }
+
+            foreach (var claim in (await _userManager.GetClaimsAsync(administrator))
+                         .Where(c => c.Type == ApplicationClaimTypes.Permission && approvals.Contains(c.Value)))
+                LogApprovingAdministrator(administrator, "(direct grant)", claim.Value);
+        }
+    }
+
+    private void LogApprovingAdministrator(ApplicationUser user, string role, string permission) =>
+        _logger.LogError(
+            "User {UserName} ({UserId}) is a member of the administrator role and holds the approval permission {Permission} " +
+            "through {Role}. The administrator never approves: their approvals are refused when sent. Remove them from {Role} " +
+            "or from the administrator role.",
+            user.UserName, user.Id, permission, role, role);
 
     /// <summary>
     /// Creates <paramref name="roleName"/> if it is absent, then grants any of
     /// <paramref name="permissions"/> it does not already hold.
     /// </summary>
-    private async Task EnsureRoleAsync(string roleName, string description, IEnumerable<string> permissions)
+    /// <param name="failLoudly">Pass 60b: a catalogue role that cannot be created stops startup. The template's own two
+    /// keep their log-and-return, unchanged since before this pass.</param>
+    private async Task EnsureRoleAsync(string roleName, string description, IEnumerable<string> permissions, bool failLoudly = false)
     {
         var role = await _roleManager.FindByNameAsync(roleName);
 
@@ -197,6 +264,10 @@ public class ApplicationDbContextInitializer
             var created = await _roleManager.CreateAsync(role);
             if (!created.Succeeded)
             {
+                if (failLoudly)
+                    throw new InvalidOperationException($"Could not provision the catalogue role {roleName}: " +
+                        string.Join("; ", created.Errors.Select(e => e.Description)));
+
                 // Returning rather than throwing: a role that cannot be created is a broken
                 // installation, but failing the start here would take down an application whose
                 // other roles are fine. The log names the role and the reason.
@@ -226,6 +297,33 @@ public class ApplicationDbContextInitializer
             _logger.LogInformation("Granted {Count} permission(s) to the {Role} role: {Permissions}",
                 missing.Length, roleName, string.Join(", ", missing));
         }
+    }
+
+    /// <summary>
+    /// Pass 60b (decision 11): gives every user who has branch assignments but no default one. A database written
+    /// by 1.6.0 or 1.7.0 can hold such a user, because SetUserBranchesCommand then accepted a missing default.
+    /// Picks the lowest-id ACTIVE assigned branch, or the lowest-id one if none is active, and logs each repair.
+    /// Idempotent: a second start finds nobody to repair and says nothing.
+    /// </summary>
+    private async Task EnsureOneDefaultBranchAsync()
+    {
+        var rows = await _context.UserBranches
+            .Select(ub => new { ub.UserId, ub.BranchId, ub.IsDefault, ub.Branch!.IsActive })
+            .ToListAsync();
+
+        var needing = rows.GroupBy(r => r.UserId).Where(g => !g.Any(r => r.IsDefault)).ToList();
+        if (needing.Count == 0) return;
+
+        foreach (var user in needing)
+        {
+            var chosen = user.Where(r => r.IsActive).Select(r => (int?)r.BranchId).Min() ?? user.Min(r => r.BranchId);
+            var row = await _context.UserBranches.SingleAsync(ub => ub.UserId == user.Key && ub.BranchId == chosen);
+            row.IsDefault = true;
+            _logger.LogInformation("User {UserId} had branch assignments but no default branch; branch {BranchId} is now the default.",
+                user.Key, chosen);
+        }
+
+        await _context.SaveChangesAsync();
     }
 
     private async Task EnsureDefaultTenantAsync()
@@ -380,7 +478,7 @@ public class ApplicationDbContextInitializer
             .Where(c => c.Type == ApplicationClaimTypes.Permission)
             .Select(c => c.Value)
             .ToHashSet(StringComparer.Ordinal);
-        var missing = AdministratorPermissionRegistry.Granted.Where(p => !held.Contains(p)).ToArray();
+        var missing = AdministratorPermissionRegistry.EffectiveGranted.Where(p => !held.Contains(p)).ToArray();
         if (missing.Length > 0)
         {
             await _userManager.AddClaimsAsync(account,

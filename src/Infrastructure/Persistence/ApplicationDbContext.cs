@@ -171,6 +171,9 @@ public class ApplicationDbContext : IdentityDbContext<
         configuration.Namespace is { } ns
         && (ns == LogConfigurationsNamespace || ns.StartsWith(LogConfigurationsNamespace + ".", StringComparison.Ordinal));
 
+    /// <summary>The PostgreSQL partial unique index that allows one default branch per user (Pass 60b).</summary>
+    public const string UserBranchDefaultIndex = "IX_UserBranches_UserId_Default";
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
 
@@ -190,6 +193,20 @@ public class ApplicationDbContext : IdentityDbContext<
         builder.ApplyConfigurationsFromAssembly(
             Assembly.GetExecutingAssembly(),
             t => !IsLogConfiguration(t));
+
+#if (UsePostgreSql)
+        // Pass 60b (decision 11): at most one default branch per user, in the database. PostgreSQL only: a
+        // boolean filter has no spelling all three providers accept (BranchConfiguration), and PostgreSQL is
+        // the only target. "At least one" is SetUserBranchesCommand's rule. Named, so it never merges with an
+        // index EF would otherwise create on UserId.
+        if (Database.IsNpgsql())
+        {
+            builder.Entity<UserBranch>()
+                .HasIndex([nameof(UserBranch.UserId)], UserBranchDefaultIndex)
+                .IsUnique()
+                .HasFilter("\"IsDefault\"");
+        }
+#endif
 
         // NAMED since Pass 29. The single-argument overload REPLACES any filter already on an
         // entity, so with a second filter below this one had to be named or one of the two would

@@ -1,0 +1,22 @@
+@page "/sample-tools"
+@using CleanArchitecture.Blazor.Application.Modules.Sample.Features.SampleBins
+@using CleanArchitecture.Blazor.Server.UI.Services.Branches
+@attribute [Authorize(Policy = Permissions.SampleTools.Use)]
+@inject ActiveBranchState ActiveBranch
+
+@* Amendment E2: an application-level page, outside every module, gated on its own permission. It sends the sample
+   module's command, which the application level may; no module may reference this page. *@
+<PageTitle>Sample tools</PageTitle>
+
+<MudButton Variant="Variant.Filled" OnClick="CreateBinAsync" data-testid="sample-tools-create">Create a bin here</MudButton>
+<MudText data-testid="sample-tools-result">@_result</MudText>
+
+@code {
+    private string? _result;
+
+    private async Task CreateBinAsync()
+    {
+        var result = await Mediator.Send(new CreateSampleBinCommand { BranchId = ActiveBranch.BranchId ?? 0, Name = "Tool bin" });
+        _result = result.Succeeded ? "Created." : result.ErrorMessage;
+    }
+}

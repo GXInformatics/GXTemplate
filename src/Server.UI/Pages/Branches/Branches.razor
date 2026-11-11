@@ -3,6 +3,7 @@
 @attribute [Authorize(Policy = Permissions.Branches.View)]
 @inject IStringLocalizer<Branches> L
 @inject IDialogService DialogService
+@inject Microsoft.Extensions.Options.IOptions<CleanArchitecture.Blazor.Server.UI.Services.Branches.BranchScreenOptions> ScreenOptions
 
 @* Pass 59: the company's branches. A branch is deactivated, never deleted: an inactive branch stays
    readable to its users (its history stays) and nobody can write to it. *@
@@ -51,6 +52,13 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Pass 60b (item 4d): an application that has its own branch page sends visitors of this one there.
+        if (ScreenOptions.Value.Redirects)
+        {
+            Navigation.NavigateTo(ScreenOptions.Value.EffectiveRoute, replace: true);
+            return;
+        }
+
         _accessRights = await PermissionService.GetAccessRightsAsync<BranchesAccessRights>();
         await LoadAsync();
     }
@@ -73,8 +81,9 @@
         var command = branch is null
             ? new AddEditBranchCommand()
             : new AddEditBranchCommand { Id = branch.Id, Code = branch.Code, Name = branch.Name, IsActive = branch.IsActive, Version = branch.Version };
-        var parameters = new DialogParameters<BranchFormDialog> { { x => x.Model, command } };
-        var dialog = await DialogService.ShowAsync<BranchFormDialog>(branch is null ? L["New branch"] : L["Edit branch"], parameters,
+        // Pass 60b (item 4d): the configured dialog, the template's unless an application replaced it.
+        var parameters = new DialogParameters { [nameof(BranchFormDialog.Model)] = command };
+        var dialog = await DialogService.ShowAsync(ScreenOptions.Value.FormDialog, branch is null ? L["New branch"] : L["Edit branch"], parameters,
             new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false });
         await dialog.Result;
         await LoadAsync();

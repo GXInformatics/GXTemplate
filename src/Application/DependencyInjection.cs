@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using CleanArchitecture.Blazor.Application.Common.Mappings;
+using CleanArchitecture.Blazor.Application.Common.Modules;
 using CleanArchitecture.Blazor.Application.Common.PublishStrategies;
 using CleanArchitecture.Blazor.Application.Pipeline;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,7 +12,9 @@ namespace CleanArchitecture.Blazor.Application;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddApplication(this IServiceCollection services)
+    /// <param name="configuration">Passed to the modules' registrations (Pass 60b); an empty one when omitted.</param>
+    public static IServiceCollection AddApplication(this IServiceCollection services,
+        Microsoft.Extensions.Configuration.IConfiguration? configuration = null)
     {
         services.AddSingleton(_ => MapsterConfiguration.Create());
         services.AddScoped<IObjectMapper, MapsterObjectMapper>();
@@ -33,6 +36,9 @@ public static class DependencyInjection
                 // Pass 59: applies only to IBranchCommand requests; refuses a branch the user may not
                 // write to, and grants the branch to the rest of the call chain when it may.
                 typeof(BranchAccessBehaviour<,>),
+                // Pass 60b: applies only to IBranchDefiningCommand requests; grants the branch the command saves to the rest
+                // of the command and its posting-event handlers. Outside the unit of work, so it spans every round.
+                typeof(BranchDefinitionGrantBehaviour<,>),
                 typeof(ValidationBehavior<,>),
                 typeof(ResultExceptionBehavior<,>),
                 typeof(CacheInvalidationBehaviour<,>),
@@ -54,7 +60,10 @@ public static class DependencyInjection
         services.AddScoped<CleanArchitecture.Blazor.Application.Features.Branches.IUserBranchDirectory,
             CleanArchitecture.Blazor.Application.Features.Branches.UserBranchDirectory>();
         services.AddPostingEventHandlers(Assembly.GetExecutingAssembly());
-       
+
+        // Pass 60b: the modules' and the application level's own Application services, after the template's.
+        services.AddModuleServices(Assembly.GetExecutingAssembly(), configuration);
+
         // Deny-by-default is enforced at dispatch time by AuthorizationBehaviour; this fails the
         // application at startup instead, so an unmarked request cannot reach a user at all.
         RequestAuthorizationRegistry.AssertAllRequestsAreMarked(Assembly.GetExecutingAssembly());

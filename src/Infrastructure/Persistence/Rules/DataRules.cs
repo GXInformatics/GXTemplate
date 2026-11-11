@@ -288,6 +288,10 @@ internal static class DataRules
                     $"{branchProperty.CurrentValue}). Record a transfer instead.");
 
             var branchId = entry.State == EntityState.Deleted ? (int)branchProperty.OriginalValue! : scoped.BranchId;
+            if (grant.Count == 0 && BranchGrant.IsAwaitingDefinedBranch)
+                throw new DataRuleViolationException(
+                    $"{Describe(entry)} belongs to branch {branchId}, but this command defines a branch and has not saved it yet, so no " +
+                    "branch is granted yet. Save the branch first; its posting-event handlers may then write its rows (pass 60b).");
             if (!grant.Contains(branchId))
                 throw new DataRuleViolationException(
                     $"{Describe(entry)} belongs to branch {branchId}, but this command was granted branch(es) {string.Join(", ", grant)}.");

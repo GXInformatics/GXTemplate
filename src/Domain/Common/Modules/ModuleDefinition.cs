@@ -31,6 +31,13 @@ public abstract class ModuleDefinition
     /// <summary>The PostgreSQL schema of the module's tables: 1 to 16 lower-case ASCII letters, e.g. <c>inv</c>.</summary>
     public abstract string Schema { get; }
 
+    /// <summary>
+    /// The module's position when services are registered (Pass 60b, decision 4): lowest first, ties broken by
+    /// <see cref="Name"/>. It matters only for services registered more than once, chiefly seeders, which run in
+    /// registration order: give a module whose seeded rows another module's seeders read the lower number.
+    /// </summary>
+    public virtual int Order => 0;
+
     /// <summary>Schemas a module may not use: the default schema, the catalogue schemas and SQL Server's default.</summary>
     public static readonly IReadOnlySet<string> ReservedSchemas =
         new HashSet<string>(StringComparer.Ordinal) { "public", "information_schema", "dbo", "sys" };

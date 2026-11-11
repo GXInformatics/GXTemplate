@@ -1,0 +1,19 @@
+@page "/sample/bins"
+@using CleanArchitecture.Blazor.Application.Modules.Sample.Features.SampleBins
+@attribute [Authorize(Policy = Permissions.SampleBins.View)]
+
+@* The sample module's page (pass 60b): the bins the user can see. *@
+<PageTitle>Bins</PageTitle>
+
+<MudDataGrid T="SampleBinDto" Items="@_bins" Dense="true" data-testid="sample-bins">
+    <Columns>
+        <PropertyColumn Property="x => x.Name" Title="Name" />
+        <PropertyColumn Property="x => x.BranchId" Title="Branch" />
+    </Columns>
+</MudDataGrid>
+
+@code {
+    private IReadOnlyList<SampleBinDto> _bins = [];
+
+    protected override async Task OnInitializedAsync() => _bins = await Mediator.Send(new GetSampleBinsQuery());
+}

@@ -80,3 +80,15 @@ public sealed class BetaTagAttribute(Type tagged) : Attribute
 /// <summary>f. A type argument in an attribute.</summary>
 [BetaTag(typeof(SampleAlphaItem))]
 public sealed class CaseF_AttributeTypeArgument;
+
+/// <summary>Pass 60b, amendment E2: a module references application-level code, which no module may.</summary>
+public sealed class CaseG_ReferencesAppLevel
+{
+    public string Banner() => CleanArchitecture.Blazor.ArchitectureSamples.AppLevel.AppLevelHelper.Banner;
+}
+
+/// <summary>Pass 60b, amendment E2: a module sends another module's command that is not in its Contracts (rule 9, part of rule 1).</summary>
+public sealed class CaseH_SendsAnotherModulesCommand
+{
+    public object Build() => new CleanArchitecture.Blazor.ArchitectureSamples.Modules.SampleAlpha.Features.CreateAlphaItemCommand("x");
+}

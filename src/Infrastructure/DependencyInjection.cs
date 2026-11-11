@@ -1,6 +1,7 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using CleanArchitecture.Blazor.Application.Common.Modules;
 using Microsoft.AspNetCore.Authentication;
 using System.Reflection;
 using CleanArchitecture.Blazor.Application.Common.Constants;
@@ -56,7 +57,10 @@ public static class DependencyInjection
             .AddBusinessServices(configuration)
             .AddCachingServices()
             .AddNotificationServices(configuration)
-            .AddSessionManagement();
+            .AddSessionManagement()
+            // Pass 60b: the modules' and the application level's own Infrastructure services (their Contracts
+            // implementations, seeders), after the template's. A module never edits this file.
+            .AddModuleServices(typeof(DependencyInjection).Assembly, configuration);
 
     }
 

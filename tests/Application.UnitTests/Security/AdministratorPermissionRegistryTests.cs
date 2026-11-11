@@ -42,8 +42,14 @@ public class AdministratorPermissionRegistryTests
     public void TheTwoListsCoverEveryConstantBetweenThem()
     {
         var all = AdministratorPermissionRegistry.DiscoverAllPermissions();
+        // Pass 60b: an application decides its own constants by attribute, so a generated project's constants are covered
+        // by the lists AND the attributes. On the bare template the attributes decide nothing.
+        var byAttribute = AdministratorPermissionRegistry.DecideByAttribute(AdministratorPermissionRegistry.PermissionFields(),
+            AdministratorPermissionRegistry.Granted, AdministratorPermissionRegistry.Excluded.Keys.ToList(), []);
         var covered = AdministratorPermissionRegistry.Granted
             .Concat(AdministratorPermissionRegistry.Excluded.Keys)
+            .Concat(byAttribute.Granted)
+            .Concat(byAttribute.Excluded.Keys)
             .ToList();
 
         covered.Should().BeEquivalentTo(all,

@@ -48,8 +48,14 @@ public class MenuService : IMenuService
     /// link straight to a 404. Removed here, once, rather than omitted from the declaration below, so
     /// that the menu stays one readable list.
     /// </remarks>
-    public MenuService(IIdleTimeoutSettings idleTimeoutSettings, IEnumerable<IMenuContributor>? contributors = null)
+    public MenuService(IIdleTimeoutSettings idleTimeoutSettings, IEnumerable<IMenuContributor>? contributors = null,
+        Microsoft.Extensions.Options.IOptions<CleanArchitecture.Blazor.Server.UI.Services.Branches.BranchScreenOptions>? branchScreens = null)
     {
+        // Pass 60b (item 4d): the Branches entry points at the application's page when it has one.
+        var branchRoute = branchScreens?.Value.EffectiveRoute ?? CleanArchitecture.Blazor.Server.UI.Services.Branches.BranchScreenOptions.TemplateRoute;
+        foreach (var item in _features.SelectMany(s => s.SectionItems ?? []).SelectMany(i => i.MenuItems ?? []).Where(i => i.Href == "/system/branches"))
+            item.Href = branchRoute;
+
         // Pass 60: the modules' sections, between "Application" and "MANAGEMENT", so a module adds its menu
         // without editing this file.
         _features.InsertRange(1, (contributors ?? []).OrderBy(c => c.Order).Select(c => c.Section));

@@ -870,6 +870,79 @@ each module's choice.
   - reads drop the branch at the user's next interaction. The user context is re-read through the
     loader's cache on every hub invocation, and assignment or permission changes clear that cache.
 
+**One default branch (1.7.1, pass 60b).** A user with at least one assigned branch has exactly one
+default. `SetUserBranchesCommand` refuses branches without a default ("Choose the user's default
+branch."), a default outside the set, and a default with no branches. On PostgreSQL a partial unique
+index (`IX_UserBranches_UserId_Default`) keeps "at most one". Each start repairs a user written by an
+earlier release with assignments and no default: the lowest-id active assigned branch becomes the default,
+and the repair is logged.
+
+#### Extending branches (1.7.1, pass 60b)
+
+An application adds its own rules and screens without editing a template file.
+
+**Events in the transaction.** `AddEditBranchCommand` runs in a unit of work and raises posting events,
+handled in the same transaction by any `IPostingEventHandler<T>`:
+
+| Event | When |
+|---|---|
+| `BranchCreatedEvent` | a branch is created; `BranchId` is the new id |
+| `BranchChangedEvent` | the code or name changes, or the branch is reactivated (`Reactivated`) |
+| `BranchDeactivatingEvent` | the branch goes from active to inactive |
+
+A handler **vetoes** by throwing `PostingRejectedException("Branch ABJ still has open stock counts.")`:
+everything rolls back and the user sees the message. An edit that changes nothing raises nothing. The
+users' cached contexts are dropped after the commit (`BranchActivationChangedEvent`), not before it.
+
+**The branch is granted to its own command.** The command, and every handler of its events, may write
+rows of the branch it saves, even when the sender is not assigned to it (the administrator). This is how a
+module creates a new branch's default rows in the same transaction:
+
+```csharp
+public sealed class OpenDefaultLocation(IApplicationDbContextFactory factory) : IPostingEventHandler<BranchCreatedEvent>
+{
+    public async ValueTask Handle(BranchCreatedEvent e, CancellationToken ct)
+    {
+        await using var db = await factory.CreateAsync(ct);
+        db.Set<StockLocation>().Add(new StockLocation { BranchId = e.BranchId, Code = "MAIN" });
+        await db.SaveChangesAsync(ct);
+    }
+}
+```
+
+- The grant is that one branch, for that one command (decision 9), a bounded exception to "a user writes
+  only where assigned". A row of any other branch is refused, naming both.
+- It comes from `IBranchDefiningCommand`, which `AddEditBranchCommand` implements:
+  `BranchDefinitionGrantBehaviour` opens an empty grant around the whole command (outside the unit of
+  work, so it spans every retry and event round), and the handler adds the branch with
+  `BranchGrant.ExtendDefining(id)` after its save. Before the save, a branch-scoped write is refused
+  ("…has not saved it yet, so no branch is granted yet").
+- **A module command that wraps it** (to save extra branch data in the same transaction) implements
+  `IBranchDefiningCommand` and `ITransactionalRequest` too, sends `AddEditBranchCommand` as a nested
+  request, and then writes its rows. Without the marker its writes are refused: the nested command's
+  grant ends when it returns.
+
+**Tightening the rules.** Add an `AbstractValidator<AddEditBranchCommand>` in your module's Application
+folder. `ValidationBehavior` runs it beside the template's, and the dialog shows its message on the field.
+For a unique **name**, add the message in the validator and the index in a configuration of the template's
+`Branch` in `Infrastructure/Modules/<M>/Configurations` (`builder.HasIndex(b => b.Name).IsUnique()`), with
+its migration.
+
+**Replacing the screens.** In a module's (or `AppLevel`'s) Server.UI registrations:
+
+```csharp
+services.Configure<BranchScreenOptions>(o =>
+{
+    o.FormDialog = typeof(OrgBranchDialog);   // a component with [Parameter] AddEditBranchCommand Model
+    o.PageRoute  = "/org/branches";           // the module's own page
+});
+```
+
+The template page then redirects to `PageRoute`, and its menu entry points there. It opens `FormDialog` by
+type. `BranchFormFields` holds the template's fields, for a dialog that wraps them. **Startup fails** for a
+dialog without a public `[Parameter] AddEditBranchCommand Model`, or a route that no page answers. The
+server-side rules above hold whichever screen sends the command.
+
 ### Approvals
 
 Pass 60. A document is prepared by one person and approved by another, within a value limit. The
@@ -1078,16 +1151,89 @@ module, whatever its C# accessibility.
    Handlers use `db.Set<StockItem>()`. The entity enters the model through its configuration, in
    `Infrastructure/Modules/<M>/Configurations`, and every filter, convention, save rule and guard
    applies to it as to any other entity.
-4. Permissions: a nested class of the partial `Permissions` in `Application/Modules/<M>`, and a
-   decision for each constant in `AdministratorPermissionRegistry` (`Granted` or `Excluded`; approval
-   permissions are always `Excluded`).
+4. Permissions: a nested class of the partial `Permissions` in `Application/Modules/<M>`, each constant
+   decided **by attribute** (1.7.1): `[AdministratorGrant]` or `[AdministratorExcluded("reason")]`.
+   Approval permissions are always excluded. The registry's `Granted`/`Excluded` lists hold the
+   template's own constants only; no module edits them.
 5. A menu section: an `IMenuContributor` in `Server.UI/Modules/<M>/<M>Menu.cs`. It is registered by
    scan and placed between "Application" and "MANAGEMENT". **No module edits `MenuService`.**
 6. Posting-event handlers: found by scan. To react to another module's posting, name the event type
    from that module's `Contracts`.
-7. A migration for every provider in `src/Migrators` (README, "Getting started"). For each
+7. Services, seeders and `Contracts` implementations: a `ModuleServices<<M>Module>` per layer (1.7.1,
+   "Module services" below). **No module edits a `DependencyInjection` file.**
+8. Roles: `AddApplicationRole` / `GrantToRole` in the module's services ("Roles" below). **No module edits
+   `Roles.cs` or the initializer.**
+9. A migration for every provider in `src/Migrators` (README, "Getting started"). For each
    `IAppendOnly` table, call `CreateAppendOnlyTrigger(table, schema)`.
-8. Run the tests. The architecture tests check the new module against all of the above.
+10. Run the tests. The architecture tests check the new module against all of the above.
+
+#### Module services (1.7.1, pass 60b)
+
+Each module registers its own services, once per layer, in a class the layer finds by scan:
+
+```csharp
+// src/Infrastructure/Modules/Inventory/InventoryServices.cs
+public sealed class InventoryServices : ModuleServices<InventoryModule>
+{
+    public override void Register(IModuleServiceCollection services, IConfiguration configuration)
+    {
+        services.AddScoped<IStockLevels, StockLevels>();            // its Contracts implementation
+        services.AddScoped<ITenantSeeder, InventoryTenantSeeder>(); // runs after lower-Order modules' seeders
+    }
+}
+```
+
+- **Order.** The template's services first, then the modules by `ModuleDefinition.Order` (default 0),
+  then by name, then the application level. Order matters only for services registered many times:
+  seeders run in registration order, so give a module whose rows another module's seeders read the
+  lower `Order`.
+- **Lifetimes** are yours, per call: scoped for anything that touches the database, the user context or
+  Mediator; singleton only for a stateless service with singleton dependencies; transient almost never.
+  `ModuleServicesResolveTests` resolves every module service under scope validation, so a singleton that
+  captures a scoped service fails a shipped test.
+- **Startup fails**, naming the owner and the service, for:
+  1. a registration class outside its own `Modules.<M>` namespace;
+  2. two registration classes for one module in one layer;
+  3. a service type the template or another module already registered, unless it is registered many
+     times by nature (seeders, event and posting handlers, validators, options configuration, hosted
+     services, menu contributors, role catalogue entries) or replaced on purpose with
+     `services.Replace<TService, TImplementation>(lifetime)`, which is logged on every start;
+  4. any EF interceptor (the template's two save interceptors are the whole set);
+  5. a public interface in a `…Modules.<M>.Contracts` namespace that is not registered exactly once.
+     **A contract that is not a service** (a shape other modules implement, or a marker) is declared with
+     `[NotAService("reason")]`, and must then not be registered at all. Nothing is inferred from its
+     members.
+
+#### Roles (1.7.1, pass 60b)
+
+An application declares its roles in its module's (or `AppLevel`'s) services. Each start reconciles them:
+it creates a missing role, grants missing permissions, and never revokes or overwrites a description.
+
+```csharp
+services.AddApplicationRole("Storekeeper", "Receives and issues stock in assigned branches.",
+        Permissions.StockItems.View, Permissions.StockMovements.Post)
+    .GrantToRole("Branch Manager", Permissions.StockItems.View);   // a role another module declares
+```
+
+- One module declares a role, with its description; others grant to it. `Basic` may receive grants.
+- **Startup fails** for a role declared twice, a grant to a role nobody declares, any entry naming the
+  administrator role (its grant is `AdministratorPermissionRegistry`), an unknown permission, or a
+  catalogue role Identity refuses to create.
+- **An administrator who holds an approval permission** through another role or a direct claim is logged
+  at **Error** on every start, naming the user, the role and the permission. Startup continues; the
+  approval is refused when sent (decision 8). This is the state an ordinary release produces by adding an
+  approve permission to a role an administrator already holds.
+
+#### Application-level code (1.7.1, pass 60b)
+
+Code that belongs to no module (for example a Development-only page that sends commands of several
+modules) lives in `src/Application/AppLevel/`, `src/Infrastructure/AppLevel/` and
+`src/Server.UI/AppLevel/`. Domain has none.
+
+- It **may send module commands and use module `Contracts`**, and nothing else of a module.
+- **No module may reference it**, and it **holds no entities** (architecture rules 1 and 8).
+- Its permissions are decided by attribute, like a module's. Its services are registered by one
+  `AppLevelServices` per layer, under the same rules as `ModuleServices`, after every module.
 
 **New feature in a module:** the existing `Features/<Entity>` layout, under
 `Application/Modules/<M>/Features`, with pages under `Server.UI/Modules/<M>/Pages`. There is no code
@@ -1101,17 +1247,22 @@ Each passes on the template and fails on a deliberately wrong sample.
 
 | # | Rule | How |
 |---|---|---|
-| 1 | A module uses another only through its `Contracts`. An entity configuration may name another module's entity, for a foreign key. | IL type references (`TypeReferenceScanner`, TestSupport) over Domain, Application, Infrastructure and Server.UI. It reads generic method arguments (`Set<T>()`), lambdas and expression trees, `async` and iterator state machines, local functions, Razor components, and generic arguments in fields, base types and attributes. Compiler-generated types count against their declaring type. The six wrong cases are compiled in `tests/ArchitectureSamples`. |
+| 1 | A module uses another only through its `Contracts`. An entity configuration may name another module's entity, for a foreign key. **(1.7.1)** No module references application-level code (`AppLevel`), which may itself use only a module's `Contracts` and requests. | IL type references (`TypeReferenceScanner`, TestSupport) over Domain, Application, Infrastructure and Server.UI. It reads generic method arguments (`Set<T>()`), lambdas and expression trees, `async` and iterator state machines, local functions, Razor components, and generic arguments in fields, base types and attributes. Compiler-generated types count against their declaring type. The six wrong cases are compiled in `tests/ArchitectureSamples`. |
 | 2 | No navigation crosses a module boundary. | `DataModelGuard`, at startup. |
 | 3 | A cacheable request does not read an append-only or branch-scoped table. | At run time: while `FusionCacheBehaviour` fills an entry, `GuardedTableCommandInterceptor` refuses SQL that reads such a table, naming the request and the table. Which table a handler reads is in its LINQ, which no static rule resolves reliably. |
 | 4 | Only `AcrossBranchesAsync` removes the branch filter, and nothing calls a bare `IgnoreQueryFilters()`. | Source scan of `src`. |
 | 5 | `ExecuteUpdate`, `ExecuteDelete`, `ExecuteSql*`, `FromSql*`, `SqlQuery*`, `GetDbConnection` and `CreateCommand` appear only in `SourceRules.RawSqlFiles` and the migrations. | Source scan. A new file is a reviewed change to the list. |
 | 6 | An `IIdempotentRequest` returns `Result` or `Result<T>`, and an approval command fits its header. | `RequestContractRegistry`, at startup. |
 | 7 | No `float`/`double` without `[Approximate]`, and no decimal without a kind. | Pass 59's `DataModelGuard`, at startup. |
-| 8 | An entity under `Modules.<M>` declares `[Module<<M>Module>]`, and no module entity sits outside a module folder. | Reflection over Domain. |
+| 8 | An entity under `Modules.<M>` declares `[Module<<M>Module>]`, and no module entity sits outside a module folder. **(1.7.1)** No entity sits under `AppLevel`. | Reflection over Domain. |
 | 10 | No DbSet of a module entity on the shared context or its interface. | Reflection. |
 
-Rule 9 (no module calls another module's commands) is part of rule 1: a command is not in `Contracts`.
+Rule 9 (no module calls another module's commands) is part of rule 1: a command is not in `Contracts`. The application level is the one
+exception: it may send any module's command.
+
+**Module service registration** (1.7.1) is checked at startup, not by these tests: see "Module services".
+On every release the smoke test adds a sample module (`tooling/sample-module`) to a generated project and
+runs every suite on it, so "a generated project with a module stays green" is proved, not assumed.
 
 ### Errors
 

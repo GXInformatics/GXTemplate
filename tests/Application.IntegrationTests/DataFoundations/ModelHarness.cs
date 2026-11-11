@@ -120,6 +120,11 @@ public static class ModelHarness
         CleanArchitecture.Blazor.Application.Common.Transactions.PostingEventHandlerRegistration
             .AddPostingEventHandlers(services, typeof(ModelHarness).Assembly);
 
+        // Pass 60b (row 13): a module's own rules for AddEditBranchCommand, beside the template's, as a generated project's
+        // AddValidatorsFromAssembly would register them. Inert unless a test switches it on.
+        services.AddScoped<FluentValidation.IValidator<CleanArchitecture.Blazor.Application.Features.Branches.AddEditBranchCommand>,
+            CleanArchitecture.Blazor.Application.IntegrationTests.Extensions.TestModuleBranchValidator>();
+
         // Pass 60: the test approval permissions are policies, as the application's own are.
         services.AddAuthorizationCore(options =>
         {

@@ -1,5 +1,6 @@
 ﻿using System.Net.Http.Headers;
 using CleanArchitecture.Blazor.Application.Common.Constants;
+using CleanArchitecture.Blazor.Application.Common.Modules;
 using CleanArchitecture.Blazor.Application.Common.PublishStrategies;
 using CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 using CleanArchitecture.Blazor.Server.UI.Endpoints;
@@ -133,6 +134,18 @@ public static class DependencyInjection
                 return service;
             });
 
+        // Pass 60b (item 4d): which screens maintain branches. A module sets them with services.Configure<BranchScreenOptions>;
+        // a dialog or route that cannot work fails startup.
+        services.AddOptions<CleanArchitecture.Blazor.Server.UI.Services.Branches.BranchScreenOptions>().ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<CleanArchitecture.Blazor.Server.UI.Services.Branches.BranchScreenOptions>,
+            CleanArchitecture.Blazor.Server.UI.Services.Branches.BranchScreenOptionsValidator>();
+
+        // Pass 60b: the modules' and the application level's own Server.UI services, then the Contracts check,
+        // which needs every layer's registrations (Program adds Server.UI last).
+        services.AddModuleServices(typeof(DependencyInjection).Assembly, config, typeof(IMenuContributor));
+        ModuleServiceGuard.AssertContractsRegistered(services,
+            typeof(CleanArchitecture.Blazor.Domain.Common.Modules.ModuleDefinition).Assembly,
+            typeof(CleanArchitecture.Blazor.Application.DependencyInjection).Assembly);
 
         return services;
     }
