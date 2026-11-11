@@ -193,3 +193,18 @@ afterwards; the diff above is the restored file.
 
 None, as asked. The intended commit is the six modified files, plus `AppLocalIcuTests.cs` and this report.
 After it, repack 1.4.0 (§3.5).
+
+---
+
+## Closed (2026-11-11, before pass 58)
+
+- **1.4.0 is closed as packed in this pass:** `GX.Blazor.Template.1.4.0.nupkg`, ICU only. It was installed in the
+  machine's template store, replacing 1.3.0 (`dotnet new uninstall` lists one GX.Blazor.Template, at 1.4.0).
+- **Tag `gx-v1.4.0` is on `a8a89d63`**, the commit holding the ICU change. The prefix keeps it apart from the
+  upstream template's tags, which this repository also carries (it has an upstream `v1.4`).
+- **The package's stamp records the parent commit.** The package says `commit="5a3c1144…"`, because it was packed
+  before this pass's work was committed.
+- **Pass 47b (ImageSharp → SkiaSharp, `d9d9c75f`) is not in 1.4.0.** It ships in 1.5.0 with pass 58.
+- **The organisation-switcher work is stopped by the owner.** It is not in 1.4.0 and not committed: the
+  `TenantSelector.razor` change and `docs/HANDOFF-tenant-switcher.md` are kept in
+  `git stash` ("org-switcher work, stopped by owner 2026-11-11 …"). Tenancy stays dormant with one seeded tenant.
