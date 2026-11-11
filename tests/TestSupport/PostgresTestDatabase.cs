@@ -235,20 +235,23 @@ public sealed class PostgresTestDatabase
             while (await reader.ReadAsync(cancellationToken)) foreignKeys.Add((reader.GetString(0), reader.GetString(1)));
         }
 
-        // A table whose own trigger refuses DELETE (an append-only record, for example) is emptied with
-        // TRUNCATE, which fires no row trigger: the one way to clear it, and only a throwaway test
-        // database's reset uses it.
+        // A table with triggers of its own (an append-only ledger, Pass 59: its triggers refuse UPDATE,
+        // DELETE and TRUNCATE) is emptied with its user triggers disabled for the one statement. Only a
+        // throwaway test database's reset does this. TRUNCATE is no longer the way round it: the
+        // append-only TRUNCATE trigger refuses that too.
         var guarded = new HashSet<string>(StringComparer.Ordinal);
         await using (var command = new NpgsqlCommand(
             "SELECT DISTINCT format('%I.%I', n.nspname, c.relname) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid " +
-            "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE NOT t.tgisinternal AND (t.tgtype & 8) <> 0", connection))
+            "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE NOT t.tgisinternal", connection))
         {
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken)) guarded.Add(reader.GetString(0));
         }
 
         return string.Concat(ResetOrder.ChildrenFirst(tables, foreignKeys)
-                   .Select(t => guarded.Contains(t) ? $"TRUNCATE {t};" : $"DELETE FROM {t};"))
+                   .Select(t => guarded.Contains(t)
+                       ? $"ALTER TABLE {t} DISABLE TRIGGER USER; DELETE FROM {t}; ALTER TABLE {t} ENABLE TRIGGER USER;"
+                       : $"DELETE FROM {t};"))
                + RestartSequences;
     }
 

@@ -14,7 +14,9 @@ public class AuditTrailConfiguration : IEntityTypeConfiguration<AuditTrail>
         builder.HasOne(x => x.Owner)
             .WithMany()
             .HasForeignKey(x => x.UserId)
-            .OnDelete(DeleteBehavior.SetNull);
+            // Restrict since Pass 59 (was SetNull): users are deactivated, never deleted, and the audit
+            // trail's "who" must never become null - not even through raw SQL.
+            .OnDelete(DeleteBehavior.Restrict);
         builder.Navigation(e => e.Owner).AutoInclude();
 
         // TenantId is a plain column with NO foreign key and no navigation, which is a deliberate

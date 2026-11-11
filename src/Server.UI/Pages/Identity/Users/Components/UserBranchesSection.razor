@@ -1,0 +1,87 @@
+@using CleanArchitecture.Blazor.Application.Features.Branches
+@inject IStringLocalizer<Identity.Users.Users> L
+
+@* Pass 59: a user's branch assignments, on the user dialog. Assigned ACTIVE branches are where the user may
+   write; all assigned branches are what they read (plus everything, with Branches.ViewAll). One assignment
+   may be the default, where a new session starts. Saved on its own, through SetUserBranchesCommand, which
+   also drops the user's cached context so the change reaches their next interaction. *@
+@if (_rights.Edit)
+{
+    <MudItem xs="12" data-testid="user-branches">
+        <MudText Typo="Typo.subtitle2" Class="mb-1">@L["Branches"]</MudText>
+        @if (string.IsNullOrEmpty(UserId))
+        {
+            <MudText Typo="Typo.body2" Class="mud-secondary-text">@L["Save the user first, then assign branches."]</MudText>
+        }
+        else if (_branches.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">@L["No branches exist yet."]</MudAlert>
+        }
+        else
+        {
+            <MudGrid Spacing="0">
+                @foreach (var branch in _branches)
+                {
+                    <MudItem xs="12" sm="6">
+                        <MudStack Row AlignItems="AlignItems.Center" Spacing="0">
+                            <MudCheckBox T="bool" Value="@_assigned.Contains(branch.Id)" ValueChanged="@(v => Toggle(branch.Id, v))"
+                                         Label="@($"{branch.Code} · {branch.Name}{(branch.IsActive ? "" : " (inactive)")}")" Dense="true" />
+                            @if (_assigned.Contains(branch.Id))
+                            {
+                                <MudIconButton Size="Size.Small" Title="@L["Default branch"]"
+                                               Icon="@(_default == branch.Id ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)"
+                                               OnClick="@(() => _default = branch.Id)" />
+                            }
+                        </MudStack>
+                    </MudItem>
+                }
+            </MudGrid>
+            <GxSubmitButton ButtonType="ButtonType.Button" Action="SaveAsync" Label="@L["Save branch assignments"]"
+                            BusyLabel="@AppStrings.Saving" Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary" />
+        }
+    </MudItem>
+}
+
+@code {
+    [Parameter] public string? UserId { get; set; }
+
+    private BranchesAccessRights _rights = new();
+    private IReadOnlyList<BranchDto> _branches = [];
+    private readonly HashSet<int> _assigned = new();
+    private int? _default;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _rights = await PermissionService.GetAccessRightsAsync<BranchesAccessRights>() ?? new();
+        if (!_rights.Edit || string.IsNullOrEmpty(UserId)) return;
+
+        _branches = await Mediator.Send(new GetAllBranchesQuery()) ?? [];
+        foreach (var assignment in await Mediator.Send(new GetUserBranchesQuery(UserId)) ?? [])
+        {
+            _assigned.Add(assignment.BranchId);
+            if (assignment.IsDefault) _default = assignment.BranchId;
+        }
+    }
+
+    private void Toggle(int branchId, bool on)
+    {
+        if (on) _assigned.Add(branchId);
+        else
+        {
+            _assigned.Remove(branchId);
+            if (_default == branchId) _default = null;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        var result = await Mediator.Send(new SetUserBranchesCommand
+        {
+            UserId = UserId!,
+            BranchIds = _assigned.ToArray(),
+            DefaultBranchId = _default ?? _assigned.Order().Cast<int?>().FirstOrDefault()
+        });
+        if (result.Succeeded) Snackbar.Add(L["Branch assignments saved"], Severity.Info);
+        else Snackbar.Add(result.ErrorMessage, Severity.Error);
+    }
+}

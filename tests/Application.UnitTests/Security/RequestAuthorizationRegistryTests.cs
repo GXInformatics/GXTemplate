@@ -33,7 +33,10 @@ public class RequestAuthorizationRegistryTests
     //
     // 25 in Pass 54: AddEditTenantCommand (Create OR Edit, which let either right do both) split into
     // CreateTenantCommand (Tenants.Create) and UpdateTenantCommand (Tenants.Edit).
-    private const int ExpectedRequestTypeCount = 25;
+    //
+    // 29 in Pass 59: the branch feature - GetAllBranchesQuery (Branches.View), GetUserBranchesQuery and
+    // SetUserBranchesCommand (Branches.Edit), AddEditBranchCommand (Branches.Create OR Edit).
+    private const int ExpectedRequestTypeCount = 29;
 
     private static Assembly ApplicationAssembly =>
         typeof(CleanArchitecture.Blazor.Application.DependencyInjection).Assembly;

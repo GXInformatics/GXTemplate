@@ -374,7 +374,9 @@ public class TemplateTablesStayOutOfCoreTests
         typeof(IdentityUserPasskey<string>), typeof(Tenant), typeof(TenantUser), typeof(AuditTrail), typeof(Document),
         typeof(PicklistSet), typeof(SecurityPolicy), typeof(DataProtectionKey),
         // Pass 58: the posting-transaction infrastructure tables.
-        typeof(ProcessedRequest), typeof(DocumentSequence)
+        typeof(ProcessedRequest), typeof(DocumentSequence),
+        // Pass 59: the branch tables.
+        typeof(Branch), typeof(UserBranch)
     ];
 
     [Theory]
@@ -387,6 +389,8 @@ public class TemplateTablesStayOutOfCoreTests
     [InlineData(typeof(SecurityPolicy), "SecurityPolicies")]
     [InlineData(typeof(ProcessedRequest), "ProcessedRequests")]
     [InlineData(typeof(DocumentSequence), "DocumentSequences")]
+    [InlineData(typeof(Branch), "Branches")]
+    [InlineData(typeof(UserBranch), "UserBranches")]
     public void ATemplateTable_KeepsItsNameAndTheDefaultSchema(Type clrType, string expectedTable)
     {
         // Document and PicklistSet derive from BaseAuditableEntity and are therefore IBusinessEntity

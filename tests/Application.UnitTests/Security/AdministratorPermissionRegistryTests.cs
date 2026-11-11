@@ -172,7 +172,11 @@ public class AdministratorPermissionRegistryTests
             Permissions.Roles.ViewPermissions,
 
             // The dashboard is routed at "/", so gating it would 403 every user at sign-in.
-            Permissions.Dashboards.View
+            Permissions.Dashboards.View,
+
+            // Pass 59, amendment B1: writing to every branch is given to a role deliberately, never to
+            // the bootstrap administrator. Not a missing surface but a withheld capability.
+            Permissions.Branches.WriteAll
         }, "an exclusion names a surface this template does not have");
     }
 

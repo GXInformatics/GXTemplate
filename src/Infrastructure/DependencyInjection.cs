@@ -139,6 +139,9 @@ public static class DependencyInjection
             // ForUpdate() -> SELECT ... FOR UPDATE (Pass 58). Stateless, so one instance; a command
             // interceptor, so it does not take part in the save-changes ordering above.
             m.AddInterceptors(ForUpdateCommandInterceptor.Instance);
+            // Pass 59: refuses bulk UPDATE/DELETE/TRUNCATE on append-only, posted and branch-scoped tables,
+            // which SaveChanges and its rules would never see. Also a command interceptor, for the same reason.
+            m.AddInterceptors(GuardedTableCommandInterceptor.Instance);
             m.UseExceptionProcessor(databaseSettings.DBProvider);
             m.UseDatabase(databaseSettings.DBProvider, databaseSettings.ConnectionString);
         },  ServiceLifetime.Scoped);
@@ -713,7 +716,10 @@ public static class DependencyInjection
         services.AddSingleton<IHubFilter, UserContextHubFilter>();
         services.AddSingleton<IClientInfoAccessor, ClientInfoAccessor>();
         services.AddSingleton<IUserContextAccessor, UserContextAccessor>();
-        services.AddSingleton<IUserContextLoader, UserContextLoader>();
+        services.AddSingleton<UserContextLoader>();
+        services.AddSingleton<IUserContextLoader>(p => p.GetRequiredService<UserContextLoader>());
+        // Pass 59: the same instance drops cached contexts when branches or their permissions change.
+        services.AddSingleton<IUserContextInvalidator>(p => p.GetRequiredService<UserContextLoader>());
 
      
      

@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
     <metadata>
         <id>GX.Blazor.Template</id>
-        <version>1.5.0</version>
+        <version>1.6.0</version>
         <title>GX Blazor Server Solution Template</title>
         <authors>GX Informatics Limited</authors>
         <description>
@@ -22,6 +22,22 @@
             multi-tenant data model, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
+            1.6.0
+            - Money and quantities: every decimal declares [Money], [Quantity], [UnitCost] or [Rate], which sets
+              its precision; startup fails for an undeclared decimal or an unmarked float/double, and a value with
+              more decimal places than its kind is refused at save. GxRound rounds midpoints away from zero.
+            - Concurrency: IVersioned / BaseVersionedEntity map Version to PostgreSQL xmin. Edits carry the loaded
+              version (IVersionedEdit, ApplyLoadedVersion) and saves return the new one (Saved&lt;TId&gt;); a stale
+              edit gets "This record was changed by someone else". PicklistSet and Branch are versioned.
+            - Posted records: IAppendOnly ledger rows are never updated or deleted (with database triggers via
+              CreateAppendOnlyTrigger); IPostable documents and their IPostableLine lines change only in
+              [AllowedAfterPosting] properties once posted; bulk writes to these tables are refused.
+            - Users are deactivated, never deleted; Permissions.Users.Delete is retired.
+            - Branches: Branch and UserBranch, a branch query filter on IMustHaveBranch and IBranchVisibility
+              entities, IBranchCommand checked fresh on every send (Branches.WriteAll for head office),
+              AcrossBranchesAsync for permitted cross-branch reads, a Branches page, user-dialog assignments
+              and a top-bar active-branch switcher.
+
             1.5.0
             - Posting transactions: a request marked ITransactionalRequest runs in one context, connection and
               transaction with the PostingEvents it raises (IPostingEventHandler), which commit or roll back

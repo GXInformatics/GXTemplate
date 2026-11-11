@@ -25,7 +25,7 @@ internal class AddEditPicklistCommandTests : TestBase
         var addCommand = new AddEditPicklistSetCommand
             { Name = Picklist.Brand, Text = "Test", Value = "Test", Description = "Description" };
         var result = await SendAsync(addCommand);
-        var find = await FindAsync<PicklistSet>(result.Data);
+        var find = await FindAsync<PicklistSet>(result.Data!.Id);
         find.Should().NotBeNull();
         find.Name.Should().Be(Picklist.Brand);
         find.Text.Should().Be("Test");
@@ -38,10 +38,10 @@ internal class AddEditPicklistCommandTests : TestBase
         var addCommand = new AddEditPicklistSetCommand
             { Name = Picklist.Brand, Text = "Test", Value = "Test", Description = "Description" };
         var result = await SendAsync(addCommand);
-        var find = await FindAsync<PicklistSet>(result.Data);
+        var find = await FindAsync<PicklistSet>(result.Data!.Id);
         find.Should().NotBeNull();
         var editCommand = new AddEditPicklistSetCommand
-            { Id = find.Id, Name = Picklist.Brand, Text = "Test1", Value = "Test1", Description = "Description1" };
+            { Id = find.Id, Version = find.Version, Name = Picklist.Brand, Text = "Test1", Value = "Test1", Description = "Description1" };
         await SendAsync(editCommand);
         var updated = await FindAsync<PicklistSet>(find.Id);
         updated.Should().NotBeNull();

@@ -98,6 +98,8 @@ async function signOutAllTabs(reason) {
     // lets this tab choose where to land afterwards.
     leaving = true;
     clearInterval(tickHandle);
+    // Pass 59: forget the active branch, so the next sign-in starts at the default branch.
+    try { sessionStorage.removeItem('gx.activeBranch'); } catch { }
     try {
         const body = new FormData();
         body.append('returnUrl', loginUrl);

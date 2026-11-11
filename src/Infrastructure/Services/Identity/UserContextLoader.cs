@@ -1,5 +1,6 @@
 ﻿using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Domain.Identity;
+using CleanArchitecture.Blazor.Application.Common.Security;
 using ZiggyCreatures.Caching.Fusion;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Services.Identity;
@@ -7,8 +8,11 @@ namespace CleanArchitecture.Blazor.Infrastructure.Services.Identity;
 /// <summary>
 /// Implementation of IUserContextLoader that uses UserManager to load user context from ClaimsPrincipal.
 /// </summary>
-public class UserContextLoader : IUserContextLoader
+public class UserContextLoader : IUserContextLoader, IUserContextInvalidator
 {
+    /// <summary>The FusionCache tag every cached user context carries (Pass 59), so a role change can drop them all.</summary>
+    public const string ContextTag = "user-context";
+
     /// <summary>How long a successfully loaded user context is cached.</summary>
     public static readonly TimeSpan ContextCacheDuration = TimeSpan.FromHours(1);
 
@@ -99,6 +103,7 @@ public class UserContextLoader : IUserContextLoader
                         ? memberships.Distinct().ToList()
                         : memberships.Append(user.TenantId).Distinct().ToList();
                     var roles = await userManager.GetRolesAsync(user);
+                    var branches = await LoadBranchAccessAsync(scope.ServiceProvider, user.Id, ct);
 
                     return new UserContext(
                         UserId: user.Id,
@@ -109,7 +114,8 @@ public class UserContextLoader : IUserContextLoader
                         Email: user.Email,
                         Roles: roles.ToList().AsReadOnly(),
                         ProfilePictureDataUrl: user.ProfilePictureDataUrl,
-                        SuperiorId: user.SuperiorId
+                        SuperiorId: user.SuperiorId,
+                        Branches: branches
                     );
                 }
                 catch (Exception ex)
@@ -121,7 +127,8 @@ public class UserContextLoader : IUserContextLoader
                 }
             },
             options: new FusionCacheEntryOptions(ContextCacheDuration),
-            cancellationToken
+            tags: [ContextTag],
+            token: cancellationToken
         );
     }
 
@@ -136,6 +143,54 @@ public class UserContextLoader : IUserContextLoader
             var cacheKey = UserCacheKeys.GetCacheKey(userId, UserCacheType.Context);
             _fusionCache.Remove(cacheKey);
         }
+    }
+
+    /// <inheritdoc />
+    public void Invalidate(string userId) => ClearUserContextCache(userId);
+
+    /// <inheritdoc />
+    public void InvalidateAll() => _fusionCache.RemoveByTag(ContextTag);
+
+    /// <summary>
+    /// The user's branch access (Pass 59): the assigned branches (read), the assigned active ones (write),
+    /// the default, and whether they hold <c>Branches.ViewAll</c> or <c>Branches.WriteAll</c>.
+    /// </summary>
+    /// <remarks>
+    /// Read through this scope's own <see cref="ApplicationDbContext"/> - the one <c>UserManager</c> uses above
+    /// - not <c>IApplicationDbContextFactory</c>: this can run while a unit of work is active (a cache miss
+    /// during a query), and the unit of work's context must never be used from here, mid-query, by a second
+    /// caller.
+    /// </remarks>
+    private static async Task<BranchAccess> LoadBranchAccessAsync(IServiceProvider services, string userId, CancellationToken ct)
+    {
+        var db = services.GetRequiredService<ApplicationDbContext>();
+        var rows = await db.UserBranches.AsNoTracking()
+            .Where(ub => ub.UserId == userId)
+            .OrderBy(ub => ub.BranchId)
+            .Select(ub => new { ub.BranchId, ub.IsDefault, ub.Branch!.IsActive })
+            .ToListAsync(ct);
+
+        // The two permissions, from the user's own claims and their roles' claims: exactly what the
+        // policies of the same names require (RequireClaim(Permission, value)).
+        string[] wanted = [Permissions.Branches.ViewAll, Permissions.Branches.WriteAll];
+        var held = await db.UserClaims.AsNoTracking()
+            .Where(c => c.UserId == userId && c.ClaimType == ApplicationClaimTypes.Permission && wanted.Contains(c.ClaimValue!))
+            .Select(c => c.ClaimValue!)
+            .Concat(db.RoleClaims.AsNoTracking()
+                .Where(rc => rc.ClaimType == ApplicationClaimTypes.Permission && wanted.Contains(rc.ClaimValue!)
+                             && db.UserRoles.Any(ur => ur.UserId == userId && ur.RoleId == rc.RoleId))
+                .Select(rc => rc.ClaimValue!))
+            .Distinct()
+            .ToListAsync(ct);
+        var readsAll = held.Contains(Permissions.Branches.ViewAll);
+        var writesAll = held.Contains(Permissions.Branches.WriteAll);
+
+        return new BranchAccess(
+            ReadsAll: readsAll,
+            ReadIds: rows.Select(r => r.BranchId).ToArray(),
+            WriteIds: rows.Where(r => r.IsActive).Select(r => r.BranchId).ToArray(),
+            WritesAll: writesAll,
+            DefaultBranchId: rows.FirstOrDefault(r => r.IsDefault && r.IsActive)?.BranchId);
     }
 
 

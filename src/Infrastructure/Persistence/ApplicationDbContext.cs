@@ -8,6 +8,8 @@ using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Configurations;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using CleanArchitecture.Blazor.Application.Common.Constants;
+using CleanArchitecture.Blazor.Infrastructure.Persistence.Rules;
+using Microsoft.EntityFrameworkCore.Query;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence;
 
@@ -71,6 +73,24 @@ public class ApplicationDbContext : IdentityDbContext<
     /// </para>
     /// </remarks>
     private string? CurrentTenantId => _userContextAccessor?.Current?.TenantId;
+
+    /// <summary>
+    /// Whether the ambient principal reads every branch (Pass 59): <c>Permissions.Branches.ViewAll</c>, or
+    /// the system context. A context member for the same reason as <see cref="CurrentTenantId"/>: EF
+    /// re-binds it per query, so the cached model never bakes in one request's branches.
+    /// </summary>
+    private bool BranchReadsAll => _userContextAccessor?.Current?.Branches?.ReadsAll == true;
+
+    /// <summary>
+    /// The branches the ambient principal may read (Pass 59). Empty with no principal or no computed
+    /// access, so a branch-scoped query then returns no rows: unknown is treated as no access.
+    /// </summary>
+    private int[] BranchReadIds => _userContextAccessor?.Current?.Branches?.ReadIds switch
+    {
+        null => [],
+        int[] array => array,
+        { } list => list.ToArray()
+    };
 #nullable restore
 
     public DbSet<Tenant> Tenants { get; set; }
@@ -87,6 +107,33 @@ public class ApplicationDbContext : IdentityDbContext<
 
     /// <summary>Gap-free document counters (Pass 58). Written only by <c>DocumentNumberAllocator</c>, in raw SQL.</summary>
     public DbSet<DocumentSequence> DocumentSequences { get; set; }
+
+    /// <summary>Branches (Pass 59).</summary>
+    public DbSet<Branch> Branches { get; set; }
+
+    /// <summary>User-to-branch assignments (Pass 59).</summary>
+    public DbSet<UserBranch> UserBranches { get; set; }
+
+    /// <summary>
+    /// Runs the Pass 59 data rules first, then saves, then refreshes any <c>Saved&lt;TId&gt;</c> results.
+    /// The rules run before every save interceptor - see <see cref="Rules.DataRules"/>.
+    /// </summary>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        DataRules.BeforeSave(this, _userContextAccessor);
+        var written = base.SaveChanges(acceptAllChangesOnSuccess);
+        DataRules.AfterSave(this);
+        return written;
+    }
+
+    /// <inheritdoc cref="SaveChanges(bool)"/>
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        DataRules.BeforeSave(this, _userContextAccessor);
+        var written = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        DataRules.AfterSave(this);
+        return written;
+    }
 
     /// <summary>
     /// True while this context belongs to an active unit of work (Pass 58). <c>Dispose</c> then does
@@ -172,6 +219,18 @@ public class ApplicationDbContext : IdentityDbContext<
             QueryFilters.Tenant,
             (AuditTrail a) => a.TenantId == CurrentTenantId);
 
+        // PASS 59. The branch filter, by marker, alongside the tenant filter and under its own name so
+        // the two compose; DataModelGuard fails startup if a marked entity ends up without it.
+        ApplyBranchFilters(builder);
+
+        // PASS 59. Every decimal's column type comes from its declared kind ([Money], [Quantity],
+        // [UnitCost], [Rate]); an undeclared decimal fails DataModelGuard at startup.
+        DataModelConventions.ApplyDecimalKinds(builder);
+
+        // PASS 59. IVersioned maps Version to PostgreSQL's xmin as a row version. On any other provider
+        // the property is not mapped, and the helpers that use it throw NotSupportedException.
+        DataModelConventions.ApplyVersioning(builder, Database.ProviderName);
+
         // LAST, and after ApplyConfigurationsFromAssembly: the GX naming standard yields to an
         // explicit ToTable, so the configurations have to have been applied before it runs. It maps
         // every IBusinessEntity - i.e. everything deriving from BaseEntity - to
@@ -224,6 +283,61 @@ public class ApplicationDbContext : IdentityDbContext<
             builder.Entity(clr).HasQueryFilter(QueryFilters.Tenant, Expression.Lambda(body, e));
         }
     }
+
+    /// <summary>
+    /// Registers <see cref="QueryFilters.Branch"/> (Pass 59) on every hierarchy root implementing
+    /// <see cref="IMustHaveBranch"/> (<c>ReadsAll || ReadIds.Contains(e.BranchId)</c>) or
+    /// <see cref="IBranchVisibility{TSelf}"/> (<c>ReadsAll || TSelf.VisibleTo(e, ReadIds)</c>).
+    /// </summary>
+    /// <remarks>
+    /// Built against <c>this</c>, like <see cref="ApplyTenantFilters"/>, so the read set is bound per query.
+    /// A root that implements both is skipped here and refused by <c>DataModelGuard</c>.
+    /// </remarks>
+    private void ApplyBranchFilters(ModelBuilder builder)
+    {
+        var self = Expression.Constant(this, typeof(ApplicationDbContext));
+        var readsAll = Expression.Property(self, BranchReadsAllProperty);
+        var readIds = Expression.Property(self, BranchReadIdsProperty);
+
+        foreach (var entityType in builder.Model.GetEntityTypes().ToList())
+        {
+            if (entityType.IsOwned() || entityType.BaseType is not null) continue;
+
+            var clr = entityType.ClrType;
+            var mustHave = typeof(IMustHaveBranch).IsAssignableFrom(clr);
+            var visibility = DataModelConventions.BranchVisibilityRuleOf(clr);
+            if (mustHave == (visibility is not null)) continue; // neither, or both (the guard refuses both)
+
+            var e = Expression.Parameter(clr, "e");
+            Expression rule;
+            if (mustHave)
+            {
+                var own = clr.GetProperty(nameof(IMustHaveBranch.BranchId), BindingFlags.Instance | BindingFlags.Public);
+                var branchId = own is not null
+                    ? Expression.Property(e, own)
+                    : Expression.Property(Expression.Convert(e, typeof(IMustHaveBranch)), nameof(IMustHaveBranch.BranchId));
+                rule = Expression.Call(ContainsInt, readIds, branchId);
+            }
+            else
+            {
+                rule = ReplacingExpressionVisitor.Replace(
+                    visibility!.Parameters[0], e,
+                    ReplacingExpressionVisitor.Replace(visibility.Parameters[1], readIds, visibility.Body));
+            }
+
+            builder.Entity(clr).HasQueryFilter(QueryFilters.Branch, Expression.Lambda(Expression.OrElse(readsAll, rule), e));
+        }
+    }
+
+    private static readonly MethodInfo ContainsInt = typeof(Enumerable).GetMethods()
+        .Single(m => m.Name == nameof(Enumerable.Contains) && m.GetParameters().Length == 2)
+        .MakeGenericMethod(typeof(int));
+
+    private static readonly PropertyInfo BranchReadsAllProperty =
+        typeof(ApplicationDbContext).GetProperty(nameof(BranchReadsAll), BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+    private static readonly PropertyInfo BranchReadIdsProperty =
+        typeof(ApplicationDbContext).GetProperty(nameof(BranchReadIds), BindingFlags.Instance | BindingFlags.NonPublic)!;
 
     private static readonly PropertyInfo CurrentTenantIdProperty =
         typeof(ApplicationDbContext).GetProperty(nameof(CurrentTenantId), BindingFlags.Instance | BindingFlags.NonPublic)!;

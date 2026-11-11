@@ -14,6 +14,9 @@ public class PicklistSetDto
     [Display(Name = "Text")] public string? Text { get; set; }
     [Display(Name = "Description")] public string? Description { get; set; }
 
+    /// <summary>The row version (Pass 59), sent back with an edit and replaced by the one each save returns.</summary>
+    public uint Version { get; set; }
+
     /// <summary>
     /// The tenant this value belongs to, or null when it is shared with every tenant.
     /// </summary>

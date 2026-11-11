@@ -22,6 +22,13 @@ public sealed class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<
         MessageHandlerDelegate<TRequest, TResponse> next,
         CancellationToken cancellationToken)
     {
+        // Pass 59: an edit of a versioned entity that does not carry the version the user loaded is
+        // refused here, before the handler, whatever validators the command has. The save check
+        // (ApplyLoadedVersion) is the backstop for a handler that forgets; this is the first wall.
+        if (request is CleanArchitecture.Blazor.Application.Common.Concurrency.IVersionedEdit { IsEdit: true, Version: null })
+            throw new ValidationException(
+                $"{typeof(TRequest).Name} edits a versioned record but does not carry the version that was loaded. Reload and try again.");
+
         if (_validators.Any())
         {
             var failures = _unitOfWork?.IsActive == true
@@ -32,7 +39,12 @@ public sealed class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<
                 throw new ValidationException(string.Join(", ", failures.Select(x => x.ErrorMessage)));
         }
 
-        return await next(request, cancellationToken).ConfigureAwait(false);
+        // Pass 59 (P59, owner decision): the save-time version check applies inside Mediator requests.
+        // This behaviour runs for every request, so it marks the call chain here.
+        using (CleanArchitecture.Blazor.Application.Common.Concurrency.VersionChecks.EnterRequest())
+        {
+            return await next(request, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

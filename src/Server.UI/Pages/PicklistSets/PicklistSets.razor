@@ -322,7 +322,24 @@
         {
             var command = ObjectMapper.Map<AddEditPicklistSetCommand>(item);
             var result = await Mediator.Send(command);
-            if (!result.Succeeded)
+            if (result.Succeeded)
+            {
+                // Pass 59, B4: keep the version this save produced, so the next cell edit of the same
+                // row does not conflict with this one.
+                item.Version = result.Data!.Version;
+            }
+            else if (ConcurrencyConflict.Is(result))
+            {
+                // Pass 59, owner decision 4: Reload and discard. The row changed since it was loaded;
+                // the user's edit is dropped and the grid shows the current values and version.
+                Snackbar.Add(result.ErrorMessage, Severity.Warning, config =>
+                {
+                    config.Action = L["Reload"];
+                    config.OnClick = async _ => await _table.ReloadServerData();
+                });
+                await _table.ReloadServerData();
+            }
+            else
             {
                 Snackbar.Add(result.ErrorMessage, Severity.Error);
             }

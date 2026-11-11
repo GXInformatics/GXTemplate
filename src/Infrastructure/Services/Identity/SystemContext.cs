@@ -65,6 +65,8 @@ public class SystemContext : ISystemContext
             // Exactly the tenant it was given. The system account belongs to no tenant of its own,
             // so anything scoping by AllowedTenantIds confines it to the one this run is for.
             AllowedTenantIds: [tenantId],
-            Roles: []);
+            Roles: [],
+            // Pass 59: background work reads and writes every branch, without a command-level grant.
+            Branches: BranchAccess.System);
     }
 }

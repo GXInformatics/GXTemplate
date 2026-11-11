@@ -36,13 +36,13 @@ public class DeletePicklistTests : TestBase
             Description = "For Test"
         };
         var result = await SendAsync(addCommand);
-        (await FindAsync<PicklistSet>(result.Data)).Should().NotBeNull("the row must exist before the delete");
+        (await FindAsync<PicklistSet>(result.Data!.Id)).Should().NotBeNull("the row must exist before the delete");
 
-        await SendAsync(new DeletePicklistSetCommand(new[] { result.Data }));
+        await SendAsync(new DeletePicklistSetCommand(new[] { result.Data!.Id }));
 
         // PicklistSet, not Document (CO-158): a Document with this id never existed, so the old
         // assertion held whether or not the delete ran.
-        var item = await FindAsync<PicklistSet>(result.Data);
+        var item = await FindAsync<PicklistSet>(result.Data!.Id);
 
         item.Should().BeNull();
     }

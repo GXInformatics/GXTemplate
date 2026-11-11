@@ -610,6 +610,233 @@ keys.
 their own context. `ImportPicklistSetsCommand` is the template's working example of a transactional
 request.
 
+### Money and quantities
+
+**Contract: every `decimal` in the model says what it holds, and a value is never rounded behind your
+back.** (Template 1.6.0, pass 59. The design and its tests are in
+`docs/passes/pass59-data-foundations-plan.md`.)
+
+Mark each decimal property with its kind. The kind decides the column type:
+
+| Attribute | Column | Use |
+|---|---|---|
+| `[Money]` | `numeric(18,2)` | amounts, totals, prices in currency |
+| `[Quantity]` | `numeric(18,4)` | quantities |
+| `[UnitCost]` | `numeric(18,4)` | cost or price per unit |
+| `[Rate]` | `numeric(18,6)` | tax rate, markup percent, exchange rate |
+
+```csharp
+public class SalesLine : BaseEntity<long>
+{
+    [Quantity] public decimal Quantity { get; set; }
+    [UnitCost] public decimal UnitPrice { get; set; }
+    [Money]    public decimal Amount { get; set; }
+}
+```
+
+**The application does not start** (`DataModelGuard`, run first by `InitialiseAsync`) when:
+
+- a decimal has no kind;
+- it has two kinds;
+- a kind sits on a property that is not a decimal;
+- a configuration changed the precision a kind sets.
+
+A `float` or `double` on an entity also stops it. Mark one `[Approximate]` only for genuinely
+approximate data, such as coordinates.
+
+**Rounding, with one rule** (`GxRound`):
+
+- **Midpoint away from zero**, at the kind's scale: `GxRound.Money(2.345m)` is 2.35, and −2.345 gives −2.35.
+- **Round once**, when you compute a value for storage: `Amount = GxRound.Money(Quantity * UnitPrice)`.
+  Never round intermediate arithmetic.
+- **A total is the sum of stored values**, never a recomputation from unrounded parts.
+
+**A value with more decimal places than its kind holds is refused at save**, naming the property. Without
+this, PostgreSQL would round it silently on insert, and the stored value would differ from the one you
+computed. A forgotten `GxRound` therefore fails at once, in the first test of that path.
+
+### Concurrency
+
+**Contract: an edit of a versioned record saves only if nobody changed the record since the user loaded
+it. Otherwise the user sees "This record was changed by someone else. Reload and try again."**
+(Template 1.6.0, pass 59.)
+
+**Opting in.** Implement `IVersioned`, or derive from `BaseVersionedEntity` /
+`BaseVersionedEntity<TKey>`. Use it for master data and document headers. Ledger rows do not need it,
+because they are never updated (see "Posted records").
+
+- `Version` is PostgreSQL's `xmin` system column, mapped as Npgsql documents: a `uint` with
+  `IsRowVersion()`. No column is added: Npgsql's migration SQL skips system columns.
+- The setter is private, so no DTO or command mapping can write it.
+- On other providers it is not mapped, and the helpers throw `NotSupportedException`.
+- In the template, `PicklistSet` (the worked example) and `Branch` are versioned. `SecurityPolicy` is not.
+
+**The round trip.** Each handler opens a fresh context, so the version must travel with the form:
+
+1. The DTO carries `Version`.
+2. The edit command implements `IVersionedEdit` (`uint? Version`, `bool IsEdit`) and carries it back.
+3. The handler loads the row, maps the command onto it, and calls
+   `db.ApplyLoadedVersion(entity, request.Version)`. EF then updates `… WHERE xmin = @loaded`, and a
+   changed row raises `DbUpdateConcurrencyException`. `ResultExceptionBehavior` turns that into the
+   message above, which `ConcurrencyConflict.Is(result)` recognises.
+4. **Saves return the new version (B4).** Return `Result<Saved<TId>>`, created with
+   `db.SavedVersionOf(entity, id)` before the save, and have the form replace the version it holds with
+   the returned one. A form that saves more than once without reloading (a draft saved as each line is
+   added) would otherwise conflict with its own first save. The same applies to a command that edits the
+   lines of a versioned header.
+   - **Inside a unit of work this is not a copy.** `TransactionBehaviour` saves again after the handler
+     returns, and posting handlers may update the same row. So `Saved<TId>` is refreshed after every
+     save on its context, and it holds the committed version.
+
+**Recovery: reload and discard.** On the conflict message, the form reloads the record (new values, new
+version) and drops the user's unsaved edit. `PicklistSets.razor` and `BranchFormDialog.razor` show the
+pattern.
+
+**An omission fails loudly.**
+
+- `ValidationBehavior` refuses an `IVersionedEdit` with `IsEdit` true and no `Version`.
+- **Inside a Mediator request**, saving a Modified or Deleted versioned entity that went through neither
+  `ApplyLoadedVersion` nor `UseCurrentVersion` throws, naming the entity. This catches a handler that
+  forgets, whatever its command type.
+- `UseCurrentVersion(entity)` is for a server-side update with no user-loaded version, such as a Post
+  handler changing a header it locked with `ForUpdate()`, or a delete by id. It checks against the
+  version just read.
+- **(P59) The save check does not apply outside Mediator.** Seeding, infrastructure services and the
+  pinned interceptor suites use a context directly, and EF still compares against the version it read.
+
+**With pass 58:**
+
+- `ForUpdate()` does not change `xmin` (the locker is recorded in `xmax`). A versioned edit that meets a
+  lock waits, then conflicts if the locker changed the row.
+- A conflict is never retried by the unit of work: only `40001` and `40P01` are.
+- **Upgrade warning.** From Npgsql 11, `40001`/`40P01` during `SaveChanges` are reported as
+  `DbUpdateConcurrencyException`, per the Npgsql documentation. An exhausted deadlock retry would then
+  show the "changed by someone else" message. Stay on 10.x until that is handled; test T11 pins today's
+  behaviour.
+
+### Posted records
+
+**Contract: a posted record is never edited or deleted. It is undone by a reversal that posts a mirror
+entry.** (Template 1.6.0, pass 59.)
+
+| Marker | Rule |
+|---|---|
+| `IAppendOnly` | A ledger row. Added only; any Modified or Deleted entry fails the save. |
+| `IPostable { DateTime? PostedAt }` | A document header, posted when its **stored** `PostedAt` is not null. After that it cannot be deleted, `PostedAt` never changes back, and only properties marked `[AllowedAfterPosting]` (and the audit fields) may change: a status moving to Reversed, a link to the reversing entry. |
+| `IPostableLine<THeader>` | A line, with a navigation `Header`. Once the header is posted, no line is added or deleted, and a line changes only in `[AllowedAfterPosting]` properties **(B2)**, such as a returned quantity. |
+
+**Every line change touches the header.** An `IPostable` header must also be `IVersioned`. When a line
+is added, changed or deleted, the header is saved with it, so its version check runs. A line being added
+while someone posts the same document therefore conflicts, instead of slipping into a document posted
+without it. Load the header (with the version the user loaded) to change its lines; a line whose header
+is not loaded is refused.
+
+**Posting itself.** A header posted in the current unit of work stays editable until the unit of work
+commits, so posting handlers can finish the posting. **(B3)** The same holds for its lines, which may be
+**Modified** (for example, a unit cost recorded on a sales line), but not added or deleted.
+
+**Bulk writes are refused.** `ExecuteUpdate`, `ExecuteDelete` and `ExecuteSqlRaw` against an
+append-only, postable, line or branch-scoped table throw (`GuardedTableCommandInterceptor`). A bulk
+statement cannot be checked row by row. The raw-SQL check matches text, so it is a safety net.
+
+**Triggers on ledgers.** In the migration that creates each `IAppendOnly` table, call:
+
+```csharp
+migrationBuilder.CreateTable(/* … */);
+migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENT", "core");
+```
+
+The database then refuses `UPDATE`, `DELETE` and `TRUNCATE` from any path. `DataModelGuard` fails
+startup if an append-only table lacks its enabled triggers. Posted documents have no triggers: their
+column list would have to be regenerated whenever the entity changes.
+
+**Startup also fails** when:
+
+- an append-only, postable or line type is also `ISoftDelete`;
+- a postable is not versioned;
+- a type is both append-only and postable;
+- `[AllowedAfterPosting]` is misplaced (on `PostedAt`, on a key, or on a type that is neither postable
+  nor a line).
+
+**Users are deactivated, never deleted.** The audit trail's reference to who did something can never
+become null:
+
+- The Users page has no Delete. It has "Deactivate selected", with the last-administrator guard.
+- `Permissions.Users.Delete` is retired, and the migration `DataFoundations` deletes its claims.
+- Saving a Deleted `ApplicationUser` throws, so `UserManager.DeleteAsync` fails anywhere.
+- `AuditTrail.UserId` is `ON DELETE RESTRICT`.
+
+### Branches
+
+**Contract: users see only the branches they read, write only to the branches they may write to, and
+every branch-scoped write names its branch.** (Template 1.6.0, pass 59.) Branches are not tenants:
+tenancy stays dormant with one tenant.
+
+**Tables.** `Branch` (`Code`, `Name`, `IsActive`, versioned, deactivated rather than deleted; add your
+own fields) and `UserBranch` (`UserId`, `BranchId`, `IsDefault`). The Branches page is at
+`/system/branches`. Assignments are made in the user dialog, through `SetUserBranchesCommand`.
+
+**Reading.**
+
+- An entity implementing `IMustHaveBranch { int BranchId }` is filtered by `QueryFilters.Branch` to the
+  user's **read set**: all assigned branches, active or not, or every branch for a holder of
+  `Permissions.Branches.ViewAll`. With no user, or no computed access, it reads nothing.
+- An entity that involves two branches (an inter-branch transfer) implements
+  `IBranchVisibility<TSelf>` and states its own rule. It may use only its own columns:
+
+```csharp
+public static Expression<Func<Transfer, int[], bool>> VisibleTo =>
+    (t, ids) => ids.Contains(t.FromBranchId) || ids.Contains(t.ToBranchId);
+public IEnumerable<int> InvolvedBranchIds => [FromBranchId, ToBranchId];
+```
+
+- Startup fails for a branch-scoped entity without the filter, a marker on a TPH leaf, both markers on
+  one type, or a `VisibleTo` that navigates.
+- **Reading across branches (B5)** goes through one helper, after a permission the caller names:
+
+```csharp
+var all = await branchScope.AcrossBranchesAsync(db.StockBalances.Where(s => s.ItemId == id),
+                                                Permissions.Stock.ViewOtherBranches, ct);
+```
+
+  It removes only the branch filter, from that query. Never call
+  `IgnoreQueryFilters([QueryFilters.Branch])` yourself, so that every cross-branch read can be found by
+  searching for `AcrossBranchesAsync`.
+
+**Writing.**
+
+- A command that creates or changes branch-scoped rows implements `IBranchCommand { int BranchId }`.
+  The branch is never taken from ambient state; the form fills it from the active branch.
+- `BranchAccessBehaviour` (right after authorization, outside validation and the unit of work) checks
+  it **fresh, on every send**: an assigned, active branch, or, for a holder of
+  `Permissions.Branches.WriteAll` **(B1)**, any active branch. Otherwise it throws
+  `ForbiddenAccessException` ("You are not assigned to branch HQ.").
+  - `ViewAll` never grants writing.
+  - The administrator holds `Branches.*` including `ViewAll`, has no assignment, and never holds
+    `WriteAll`.
+- The behaviour then **grants** that branch to the call chain. Saving a branch-scoped row needs a grant
+  covering it: a row saved outside a branch command, for another branch, or moved to another branch is
+  refused, naming the command.
+- **Derived writes.** Saving a two-branch document in a granted branch extends the grant to its other
+  branches for the rest of that command. A sending branch's posting may therefore write the receiving
+  branch's rows. (P59) The extension is per branch: after the transfer is saved, any row of the
+  receiving branch may be written in that command.
+- Background work under `ISystemContext` reads and writes every branch.
+
+**The active branch.** The top-bar switcher (`BranchSelector`) holds one active branch per session
+(`ActiveBranchState`). It is a form default, not a security boundary. Whether a list narrows to it is
+each module's choice.
+
+- **A brief reconnect** keeps the circuit, and with it the branch.
+- **A lost circuit** restores the branch from the tab's encrypted session storage, if it is still
+  writable.
+- **A new sign-in** starts at the default branch. Both sign-out paths forget the stored one.
+- **An assignment removed while signed in:**
+  - the next write is refused at once;
+  - the switcher moves to the default branch when it is next opened;
+  - reads drop the branch at the user's next interaction. The user context is re-read through the
+    loader's cache on every hub invocation, and assignment or permission changes clear that cache.
+
 ### Tenancy
 
 **Contract: rows record which tenant they were written in. Five surfaces are filtered by it —

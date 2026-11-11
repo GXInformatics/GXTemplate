@@ -40,6 +40,11 @@ public static class AdministratorPermissionRegistry
         "constants stay so the names are reserved and the intent is visible; grant them if and " +
         "when the surface is built.";
 
+    private const string ExcludedBranchWriteAll =
+        "Pass 59, amendment B1: writing to every branch without an assignment is a head-office " +
+        "capability given to a role deliberately, never to the bootstrap administrator. The administrator " +
+        "reads every branch (Branches.ViewAll) and writes only where it is assigned.";
+
     private const string ExcludedDashboard =
         "The dashboard is routed at @page \"/\" - it is the landing page every authenticated user " +
         "arrives on. Gating it would strand a principal without this right on a 403 at sign-in, " +
@@ -71,6 +76,13 @@ public static class AdministratorPermissionRegistry
         // granting this keeps the shipped administrator seeing what they saw, while making the
         // capability named, enforced and revocable rather than an absence of code.
         Permissions.AuditTrails.ViewAllTenants,
+
+        // Pass 59. View-all READING across branches, with no assignment: the administrator can see
+        // every branch and write to none until assigned (owner decision 10). WriteAll is excluded below.
+        Permissions.Branches.View,
+        Permissions.Branches.Create,
+        Permissions.Branches.Edit,
+        Permissions.Branches.ViewAll,
 
         Permissions.Documents.View,
         Permissions.Documents.Create,
@@ -162,7 +174,6 @@ public static class AdministratorPermissionRegistry
         Permissions.Users.View,
         Permissions.Users.Create,
         Permissions.Users.Edit,
-        Permissions.Users.Delete,
         Permissions.Users.Search,
         Permissions.Users.Export,
         Permissions.Users.Import,
@@ -206,7 +217,9 @@ public static class AdministratorPermissionRegistry
             [Permissions.Roles.ViewClaimsInRole] = ExcludedRoleSurface,
             [Permissions.Roles.ViewPermissions] = ExcludedRoleSurface,
 
-            [Permissions.Dashboards.View] = ExcludedDashboard
+            [Permissions.Dashboards.View] = ExcludedDashboard,
+
+            [Permissions.Branches.WriteAll] = ExcludedBranchWriteAll
         };
 
     /// <summary>

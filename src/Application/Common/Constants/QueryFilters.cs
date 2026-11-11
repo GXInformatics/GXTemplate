@@ -47,4 +47,12 @@ public static class QueryFilters
     /// implementors - see <c>ModelBuilderExtensions.ApplyGlobalFilters</c>.
     /// </summary>
     public const string SoftDelete = "SoftDelete";
+
+    /// <summary>
+    /// Restricts a branch-scoped entity (<c>IMustHaveBranch</c>, <c>IBranchVisibility&lt;T&gt;</c>) to the
+    /// ambient principal's branch READ set (Pass 59). Removed only through
+    /// <c>IBranchQueryScope.AcrossBranchesAsync</c>, after a named permission is checked - never by a direct
+    /// <c>IgnoreQueryFilters</c> call.
+    /// </summary>
+    public const string Branch = "Branch";
 }

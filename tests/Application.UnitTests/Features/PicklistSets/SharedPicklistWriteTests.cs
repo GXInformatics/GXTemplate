@@ -210,8 +210,9 @@ public class SharedPicklistWriteTests
         return await db.PicklistSets.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == id);
     }
 
-    private static AddEditPicklistSetCommand Edit(int id, string value) =>
-        new() { Id = id, Name = Picklist.Brand, Value = value, Text = value };
+    // Pass 59: an edit carries the version the user loaded, read here as a form would have it.
+    private AddEditPicklistSetCommand Edit(int id, string value) =>
+        new() { Id = id, Name = Picklist.Brand, Value = value, Text = value, Version = StoredAsync(id).GetAwaiter().GetResult()!.Version };
 
     // ---- the refusals ---------------------------------------------------------------------------
 
@@ -305,7 +306,7 @@ public class SharedPicklistWriteTests
 
         result.Succeeded.Should().BeTrue(result.ErrorMessage);
 
-        var created = await StoredAsync(result.Data);
+        var created = await StoredAsync(result.Data!.Id);
         created!.TenantId.Should().Be(TenantA,
             "a tenant-scoped principal creates PRIVATE rows - that is what makes the create path safe " +
             "for them without the right");

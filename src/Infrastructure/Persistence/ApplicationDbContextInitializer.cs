@@ -5,6 +5,7 @@ using CleanArchitecture.Blazor.Application.Common.Security;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Extensions;
 using Microsoft.Extensions.Options;
+using CleanArchitecture.Blazor.Infrastructure.Persistence.Rules;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence;
 
@@ -57,9 +58,16 @@ public class ApplicationDbContextInitializer
             // FIRST, before the database is touched: a model in which a tenant-marked entity is not
             // tenant-filtered must never serve a request. See TenantFilterGuard.
             TenantFilterGuard.AssertEveryTenantEntityIsFiltered(_context.Model);
+            // Pass 59: declared decimal kinds, no binary floats, sound immutability markers, a branch
+            // filter on every branch-scoped entity. See DataModelGuard.
+            DataModelGuard.AssertModel(_context.Model);
 
             if (_context.Database.IsRelational())
                 await _context.Database.MigrateAsync();
+
+            // After the migrations, which create them: every append-only table has its triggers.
+            if (_context.Database.IsRelational())
+                await DataModelGuard.AssertAppendOnlyTriggersAsync(_context);
         }
         catch (Exception ex)
         {

@@ -61,6 +61,8 @@ public class PermissionAssignmentService
             : await userManager.RemoveClaimAsync(user, claim);
 
         EnsureSucceeded(result, "update user permission", userId);
+        // Pass 59: the branch access in a user context is derived from permissions (ViewAll, WriteAll).
+        scope.ServiceProvider.GetService<IUserContextInvalidator>()?.Invalidate(userId);
     }
 
     public async Task AssignRoleAsync(PermissionModel model)
@@ -88,6 +90,8 @@ public class PermissionAssignmentService
             : await roleManager.RemoveClaimAsync(role, claim);
 
         EnsureSucceeded(result, "update role permission", roleId);
+        // Pass 59: any member's branch access may have changed.
+        scope.ServiceProvider.GetService<IUserContextInvalidator>()?.InvalidateAll();
     }
 
     public async Task AssignUserBulkAsync(IEnumerable<PermissionModel> models)
@@ -123,6 +127,7 @@ public class PermissionAssignmentService
 
             EnsureSucceeded(result, "update user permission", userId);
         }
+        scope.ServiceProvider.GetService<IUserContextInvalidator>()?.Invalidate(userId);
     }
 
     public async Task AssignRoleBulkAsync(IEnumerable<PermissionModel> models)
@@ -162,6 +167,7 @@ public class PermissionAssignmentService
 
             EnsureSucceeded(result, "update role permission", roleId);
         }
+        scope.ServiceProvider.GetService<IUserContextInvalidator>()?.InvalidateAll();
     }
 
     /// <summary>

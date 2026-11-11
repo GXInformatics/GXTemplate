@@ -116,6 +116,13 @@ public class MenuService : IMenuService
                             Href = "/system/tenants",
                             PageStatus = PageStatus.Completed
                         },
+                        // Pass 59.
+                        new()
+                        {
+                            Title = "Branches",
+                            Href = "/system/branches",
+                            PageStatus = PageStatus.Completed
+                        },
                         new()
                         {
                             Title = "Users",

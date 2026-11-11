@@ -170,7 +170,10 @@ public class GenericKeyEntityTests
     {
         foreach (var type in new[] { typeof(Document), typeof(PicklistSet), typeof(SecurityPolicy) })
         {
-            type.BaseType.Should().Be(typeof(BaseAuditableEntity), type.Name);
+            // Pass 59, owner decision 5: PicklistSet is the versioned example, so it derives from
+            // BaseVersionedEntity, which is itself a BaseAuditableEntity<int>.
+            type.BaseType.Should().Be(type == typeof(PicklistSet) ? typeof(BaseVersionedEntity) : typeof(BaseAuditableEntity), type.Name);
+            typeof(BaseAuditableEntity<int>).IsAssignableFrom(type).Should().BeTrue(type.Name);
             type.GetProperty(nameof(IEntity<int>.Id))!.PropertyType.Should().Be(typeof(int), type.Name);
             typeof(IHasDomainEvents).IsAssignableFrom(type).Should().BeTrue(type.Name);
             typeof(IAuditableEntity).IsAssignableFrom(type).Should().BeTrue(type.Name);

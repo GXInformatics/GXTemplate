@@ -30,6 +30,9 @@ public static class DependencyInjection
             // is still turned into a failure result.
             options.PipelineBehaviors = [
                 typeof(AuthorizationBehaviour<,>),
+                // Pass 59: applies only to IBranchCommand requests; refuses a branch the user may not
+                // write to, and grants the branch to the rest of the call chain when it may.
+                typeof(BranchAccessBehaviour<,>),
                 typeof(ValidationBehavior<,>),
                 typeof(ResultExceptionBehavior<,>),
                 typeof(CacheInvalidationBehaviour<,>),
@@ -43,6 +46,10 @@ public static class DependencyInjection
         // Posting transactions (Pass 58): in-transaction event handlers, dispatched by
         // TransactionBehaviour rather than by Mediator's background publisher.
         services.AddScoped<IPostingEventDispatcher, PostingEventDispatcher>();
+        services.AddScoped<CleanArchitecture.Blazor.Application.Common.Branches.IBranchQueryScope,
+            CleanArchitecture.Blazor.Application.Common.Branches.BranchQueryScope>();
+        services.AddScoped<CleanArchitecture.Blazor.Application.Features.Branches.IUserBranchDirectory,
+            CleanArchitecture.Blazor.Application.Features.Branches.UserBranchDirectory>();
         services.AddPostingEventHandlers(Assembly.GetExecutingAssembly());
        
         // Deny-by-default is enforced at dispatch time by AuthorizationBehaviour; this fails the

@@ -33,7 +33,7 @@ namespace CleanArchitecture.Blazor.Domain.Entities;
 /// marker - see <c>ApplicationDbContext.OnModelCreating</c> for why the interface is the wrong key.
 /// </para>
 /// </remarks>
-public class PicklistSet : BaseAuditableEntity, IMayBeShared, IAuditable
+public class PicklistSet : BaseVersionedEntity, IMayBeShared, IAuditable
 {
     public Picklist Name { get; set; } = Picklist.Brand;
     public string? Value { get; set; }

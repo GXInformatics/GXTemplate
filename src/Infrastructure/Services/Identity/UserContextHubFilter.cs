@@ -41,6 +41,10 @@ public class UserContextHubFilter : IHubFilter
     {
         invocationContext.Context.Items.TryGetValue(UserContextKey, out var userVal);
         var user = userVal as UserContext;
+        if (user is not null)
+        {
+            user = await RefreshAsync(invocationContext, user);
+        }
 
         invocationContext.Context.Items.TryGetValue(ClientInfoKey, out var clientInfoVal);
         var clientInfo = clientInfoVal as ClientInfo;
@@ -66,6 +70,51 @@ public class UserContextHubFilter : IHubFilter
 
         return await next(invocationContext);
 
+    }
+
+    /// <summary>
+    /// Re-reads the connection's user context through the loader (Pass 59).
+    /// </summary>
+    /// <remarks>
+    /// <b>Why on every invocation.</b> The context used to be a snapshot taken in <see cref="OnConnectedAsync"/>
+    /// and kept for the life of the connection, so a branch assignment removed while the user was signed in
+    /// stayed readable until the circuit reconnected. The loader caches per user and is invalidated when
+    /// assignments or the permissions behind them change, so this is a memory hit in the ordinary case and a
+    /// reload just after a change. The IP address is kept from the snapshot, and <c>Items</c> is updated so a
+    /// hub reading it agrees. Group membership is still decided in <see cref="OnConnectedAsync"/> only.
+    /// <para>
+    /// If the reload fails (the database is unreachable), the snapshot is used and a warning logged: reads keep
+    /// the last known read set, and writes are unaffected because the branch check reads the database itself.
+    /// A user who no longer exists gets no context, and is refused.
+    /// </para>
+    /// </remarks>
+    private async ValueTask<UserContext?> RefreshAsync(HubInvocationContext invocationContext, UserContext snapshot)
+    {
+        var principal = invocationContext.Context.User;
+        if (principal?.Identity?.IsAuthenticated != true) return snapshot;
+
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var loader = scope.ServiceProvider.GetRequiredService<IUserContextLoader>();
+            var fresh = await loader.LoadAsync(principal, invocationContext.Context.ConnectionAborted);
+            if (fresh is null)
+            {
+                invocationContext.Context.Items.Remove(UserContextKey);
+                return null;
+            }
+
+            if (ReferenceEquals(fresh, snapshot)) return snapshot;
+            fresh = fresh with { IpAddress = snapshot.IpAddress };
+            invocationContext.Context.Items[UserContextKey] = fresh;
+            return fresh;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            var logger = invocationContext.ServiceProvider.GetService<ILogger<UserContextHubFilter>>();
+            logger?.LogWarning(exception, "Reloading the user context for {UserId} failed; using the connection's snapshot.", snapshot.UserId);
+            return snapshot;
+        }
     }
 
     /// <summary>

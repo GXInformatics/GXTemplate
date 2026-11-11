@@ -18,7 +18,20 @@ public interface IApplicationDbContext: IAsyncDisposable
     DbSet<SecurityPolicy> SecurityPolicies { get; set; }
     DbSet<Tenant> Tenants { get; set; }
     DbSet<TenantUser> TenantUsers { get; set; }
+
+    /// <summary>Branches (Pass 59). Not branch-filtered: a branch row is reference data.</summary>
+    DbSet<Branch> Branches { get; set; }
+
+    /// <summary>User-to-branch assignments (Pass 59). Written only by <c>SetUserBranchesCommand</c>.</summary>
+    DbSet<UserBranch> UserBranches { get; set; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The change-tracking entry for <paramref name="entity"/> (Pass 59). Implemented by <c>DbContext.Entry</c>
+    /// itself; exposed so that <c>ApplyLoadedVersion</c> can set a concurrency token's original value
+    /// without casting to the concrete context.
+    /// </summary>
+    Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<TEntity> Entry<TEntity>(TEntity entity) where TEntity : class;
 
     /// <summary>
     /// The context's database facade, so a handler can own a transaction -

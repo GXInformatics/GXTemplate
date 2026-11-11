@@ -54,6 +54,9 @@ public class DeletePicklistSetCommandHandler : IRequestHandler<DeletePicklistSet
         foreach (var item in items)
         {
             item.AddDomainEvent(new PicklistSetDeletedEvent(item));
+            // Pass 59: a delete by id carries no user-loaded version, so it checks against the version
+            // just read - a row changed between that read and the save still refuses the delete.
+            db.UseCurrentVersion(item);
         }
         db.PicklistSets.RemoveRange(items);
         await db.SaveChangesAsync(cancellationToken);

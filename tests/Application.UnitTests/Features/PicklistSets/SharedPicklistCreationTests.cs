@@ -264,6 +264,7 @@ public class SharedPicklistCreationTests
 
         var edit = Create("stays-private", isShared: true);
         edit.Id = created.Id;
+        edit.Version = created.Version; // Pass 59: an edit carries the version the user loaded
         edit.Text = "renamed";
         var result = await AddEdit(Holder, TenantA).Handle(edit, default);
 

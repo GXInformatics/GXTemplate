@@ -1,0 +1,82 @@
+@page "/system/branches"
+@using CleanArchitecture.Blazor.Application.Features.Branches
+@attribute [Authorize(Policy = Permissions.Branches.View)]
+@inject IStringLocalizer<Branches> L
+@inject IDialogService DialogService
+
+@* Pass 59: the company's branches. A branch is deactivated, never deleted: an inactive branch stays
+   readable to its users (its history stays) and nobody can write to it. *@
+<PageTitle>@L["Branches"]</PageTitle>
+
+<MudDataGrid T="BranchDto" Items="@_branches" Loading="@_loading" Hover="true" Dense="true" data-testid="branches-grid">
+    <ToolBarContent>
+        <MudStack Row AlignItems="AlignItems.Center" Class="flex-grow-1" Justify="Justify.SpaceBetween">
+            <MudStack Row AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icons.Material.Outlined.Store" Size="Size.Large" />
+                <MudText Typo="Typo.subtitle1">@L["Branches"]</MudText>
+            </MudStack>
+            <MudStack Row Spacing="1">
+                <MudButton StartIcon="@Icons.Material.Outlined.Refresh" OnClick="LoadAsync">@AppStrings.Refresh</MudButton>
+                @if (_accessRights.Create)
+                {
+                    <MudButton StartIcon="@Icons.Material.Outlined.Add" OnClick="@(() => EditAsync(null))" data-testid="branch-new">@AppStrings.New</MudButton>
+                }
+            </MudStack>
+        </MudStack>
+    </ToolBarContent>
+    <Columns>
+        <PropertyColumn Property="x => x.Code" Title="@L["Code"]" />
+        <PropertyColumn Property="x => x.Name" Title="@L["Name"]" />
+        <TemplateColumn Title="@L["Active"]">
+            <CellTemplate>
+                <MudIcon Icon="@(context.Item.IsActive ? Icons.Material.Filled.CheckCircle : Icons.Material.Outlined.Block)"
+                         Color="@(context.Item.IsActive ? Color.Success : Color.Default)" Size="Size.Small" />
+            </CellTemplate>
+        </TemplateColumn>
+        @if (_accessRights.Edit)
+        {
+            <TemplateColumn Sortable="false">
+                <CellTemplate>
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" OnClick="@(() => EditAsync(context.Item))" />
+                </CellTemplate>
+            </TemplateColumn>
+        }
+    </Columns>
+</MudDataGrid>
+
+@code {
+    private IReadOnlyList<BranchDto> _branches = [];
+    private BranchesAccessRights _accessRights = new();
+    private bool _loading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _accessRights = await PermissionService.GetAccessRightsAsync<BranchesAccessRights>();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _branches = await Mediator.Send(new GetAllBranchesQuery());
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task EditAsync(BranchDto? branch)
+    {
+        var command = branch is null
+            ? new AddEditBranchCommand()
+            : new AddEditBranchCommand { Id = branch.Id, Code = branch.Code, Name = branch.Name, IsActive = branch.IsActive, Version = branch.Version };
+        var parameters = new DialogParameters<BranchFormDialog> { { x => x.Model, command } };
+        var dialog = await DialogService.ShowAsync<BranchFormDialog>(branch is null ? L["New branch"] : L["Edit branch"], parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false });
+        await dialog.Result;
+        await LoadAsync();
+    }
+}

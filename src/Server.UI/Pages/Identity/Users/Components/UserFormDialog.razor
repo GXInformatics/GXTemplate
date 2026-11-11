@@ -122,6 +122,9 @@
                     </MudGrid>
                 </MudItem>
 
+                @* Pass 59: branch assignments, shown to holders of Permissions.Branches.Edit. *@
+                <UserBranchesSection UserId="@Model.Id" />
+
                 <MudItem sm="6" xs="12">
                     <ReadOnlyField Value="@(Model.CreatedAt.ToLocalTime(UserProfile?.LocalTimeOffset))" Label="@L[Model.GetMemberDisplayName(x => x.CreatedAt)]" />
                 </MudItem>

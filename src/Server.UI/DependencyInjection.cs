@@ -107,6 +107,9 @@ public static class DependencyInjection
             .AddScoped<DialogServiceHelper>()
             .AddScoped<BlazorDownloadFileService>()
             .AddScoped<IUserPreferencesService, UserPreferencesService>()
+            // Pass 59: the session's active branch and where a lost circuit finds it again.
+            .AddScoped<CleanArchitecture.Blazor.Server.UI.Services.Branches.IActiveBranchStore, CleanArchitecture.Blazor.Server.UI.Services.Branches.ProtectedSessionActiveBranchStore>()
+            .AddScoped<CleanArchitecture.Blazor.Server.UI.Services.Branches.ActiveBranchState>()
             .AddScoped<IMenuService, MenuService>()
             .AddScoped<InMemoryNotificationService>()
             .AddScoped<INotificationService>(sp =>

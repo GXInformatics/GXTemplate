@@ -18,8 +18,9 @@ public static partial class Permissions
         [Description("Allows modifying existing user details")]
         public const string Edit = "Permissions.Users.Edit";
 
-        [Description("Allows deleting user accounts")]
-        public const string Delete = "Permissions.Users.Delete";
+        // Permissions.Users.Delete was retired in Pass 59: users are deactivated, never deleted, so the
+        // audit trail's reference to who did something can never become null. The migration
+        // DataFoundations deletes the claims that granted it.
 
         [Description("Allows searching for user records")]
         public const string Search = "Permissions.Users.Search";
@@ -84,7 +85,6 @@ public class UsersAccessRights
     public bool View { get; set; }
     public bool Create { get; set; }
     public bool Edit { get; set; }
-    public bool Delete { get; set; }
     public bool Search { get; set; }
     public bool Import { get; set; }
     public bool Export { get; set; }

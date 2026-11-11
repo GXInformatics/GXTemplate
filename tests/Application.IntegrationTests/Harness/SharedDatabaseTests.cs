@@ -140,7 +140,7 @@ public class MigrationModelTests
     }
 
     [Test]
-    public async Task TheReset_KeepsLookupTables_AndTruncatesATableWhoseTriggerRefusesDelete()
+    public async Task TheReset_KeepsLookupTables_AndEmptiesATableWhoseTriggersRefuseDeleteAndTruncate()
     {
         // No template table is a TBL_LK_ lookup or refuses DELETE by trigger yet, so this builds one of
         // each (tables, never a database), reads a fresh reset batch that sees them, and removes them.
@@ -153,6 +153,8 @@ public class MigrationModelTests
             CREATE OR REPLACE FUNCTION public.harness_refuse_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'append only'; END $$;
             DROP TRIGGER IF EXISTS harness_refuse_delete ON public.harness_guarded_probe;
             CREATE TRIGGER harness_refuse_delete BEFORE DELETE ON public.harness_guarded_probe FOR EACH ROW EXECUTE FUNCTION public.harness_refuse_delete();
+            DROP TRIGGER IF EXISTS harness_refuse_truncate ON public.harness_guarded_probe;
+            CREATE TRIGGER harness_refuse_truncate BEFORE TRUNCATE ON public.harness_guarded_probe FOR EACH STATEMENT EXECUTE FUNCTION public.harness_refuse_delete();
             INSERT INTO public."TBL_LK_HARNESS_PROBE" ("Name") VALUES ('seeded by a migration');
             INSERT INTO public.harness_guarded_probe VALUES (1);
             """);
@@ -162,8 +164,11 @@ public class MigrationModelTests
             await fresh.EnsureReadyAsync();
 
             fresh.ResetBatch.Should().NotContain("TBL_LK_HARNESS_PROBE")
-                .And.Contain("TRUNCATE public.harness_guarded_probe;")
-                .And.NotContain("DELETE FROM public.harness_guarded_probe;");
+                // Pass 59: an append-only table refuses TRUNCATE too, so the reset disables its user
+                // triggers around a DELETE instead.
+                .And.Contain("ALTER TABLE public.harness_guarded_probe DISABLE TRIGGER USER; DELETE FROM public.harness_guarded_probe; " +
+                             "ALTER TABLE public.harness_guarded_probe ENABLE TRIGGER USER;")
+                .And.NotContain("TRUNCATE public.harness_guarded_probe");
 
             await fresh.ResetAsync();
 

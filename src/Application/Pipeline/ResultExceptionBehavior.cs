@@ -73,7 +73,7 @@ public sealed class ResultExceptionBehavior<TRequest, TResponse> : IPipelineBeha
         }
     }
 
-    public const string ConcurrencyConflictMessage = "This record was changed by someone else. Reload and try again.";
+    public const string ConcurrencyConflictMessage = CleanArchitecture.Blazor.Application.Common.Concurrency.ConcurrencyConflict.Message;
 
     public static string UnexpectedErrorMessage(string reference) =>
         $"An unexpected error occurred. Reference: {reference}.";

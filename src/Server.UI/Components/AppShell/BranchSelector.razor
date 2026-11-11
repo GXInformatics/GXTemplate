@@ -1,0 +1,84 @@
+@using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity
+@using CleanArchitecture.Blazor.Server.UI.Services.Branches
+@inject ActiveBranchState ActiveBranch
+@inject IStringLocalizer<BranchSelector> L
+@implements IDisposable
+
+@* Pass 59: the active branch, in the top bar. It is the default a form puts on its command; the server
+   checks every branch command itself, so this is a convenience, not a gate. A user who may write to no
+   branch sees that plainly rather than an empty menu. *@
+@if (ActiveBranch.IsLoaded)
+{
+    @if (ActiveBranch.Writable.Count == 0)
+    {
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Outlined.Store"
+                 data-testid="branch-none">@L["No branch"]</MudChip>
+    }
+    else
+    {
+        <MudMenu AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter" data-testid="branch-selector">
+            <ActivatorContent>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Outlined.Store"
+                         OnClick="OpenAsync" data-testid="branch-active">
+                    @(ActiveBranch.Branch is { } b ? $"{b.Code} · {b.Name}" : L["Choose a branch"].Value)
+                </MudChip>
+            </ActivatorContent>
+            <ChildContent>
+                @foreach (var branch in ActiveBranch.Writable)
+                {
+                    <MudMenuItem OnClick="@(() => SelectAsync(branch.Id))" data-testid="@($"branch-option-{branch.Id}")">
+                        <MudText Typo="Typo.body2" Color="@(branch.Id == ActiveBranch.BranchId ? Color.Primary : Color.Default)">
+                            @branch.Code · @branch.Name
+                        </MudText>
+                    </MudMenuItem>
+                }
+            </ChildContent>
+        </MudMenu>
+    }
+}
+
+@code {
+    private string? _loadedFor;
+
+    protected override void OnInitialized()
+    {
+        ActiveBranch.Changed += OnChanged;
+        UserProfileState.Changed += OnProfileChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // After render: the session store is browser storage, reachable only once the circuit has JS.
+        if (firstRender) await LoadForAsync(UserProfileState.Value?.UserId);
+    }
+
+    private async Task LoadForAsync(string? userId)
+    {
+        if (string.IsNullOrEmpty(userId) || userId == _loadedFor) return;
+        _loadedFor = userId;
+        await ActiveBranch.LoadAsync(userId);
+    }
+
+    private async Task OpenAsync()
+    {
+        if (await ActiveBranch.RefreshAsync())
+            Snackbar.Add(L["You are no longer assigned to that branch; your default branch is now active."], Severity.Warning);
+    }
+
+    private async Task SelectAsync(int branchId)
+    {
+        if (!await ActiveBranch.SelectAsync(branchId))
+            Snackbar.Add(L["You can no longer write to that branch."], Severity.Warning);
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnProfileChanged(object? sender, UserProfile profile) =>
+        InvokeAsync(async () => { await LoadForAsync(profile?.UserId); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        ActiveBranch.Changed -= OnChanged;
+        UserProfileState.Changed -= OnProfileChanged;
+    }
+}

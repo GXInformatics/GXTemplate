@@ -76,7 +76,9 @@
                     @* Pass 52: "Settings" opened the theme drawer, which is gone. *@
                     <MudDivider Class="my-2" />
                     <div class="mx-4 mb-2">
-                        <form action="@IdentityComponentsEndpointRouteBuilderExtensions.Logout" method="post">
+                        <form action="@IdentityComponentsEndpointRouteBuilderExtensions.Logout" method="post"
+                              onsubmit="try { sessionStorage.removeItem('gx.activeBranch'); } catch { }">
+                            @* Pass 59: forget the active branch, so the next sign-in starts at the default branch. *@
                             <input type="hidden" name="ReturnUrl" value="/account/login" />
                             @* A native post: wwwroot/js/gx-busy-button.js shows its busy state (pass 52). *@
                             <GxSubmitButton Label="@L["Logout"]" BusyLabel="@L["Signing out…"]" Color="Color.Primary"

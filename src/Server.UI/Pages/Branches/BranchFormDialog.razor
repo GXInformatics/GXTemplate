@@ -1,0 +1,53 @@
+@using CleanArchitecture.Blazor.Application.Features.Branches
+@inject IStringLocalizer<Branches> L
+
+<MudDialog>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudTextField @bind-Value="Model.Code" Label="@L["Code"]" Required="true" MaxLength="20" />
+            <MudTextField @bind-Value="Model.Name" Label="@L["Name"]" Required="true" MaxLength="100" />
+            <MudSwitch T="bool" @bind-Value="Model.IsActive" Label="@L["Active"]" Color="Color.Primary" />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">@AppStrings.Cancel</MudButton>
+        <GxSubmitButton ButtonType="ButtonType.Button" Action="SubmitAsync" Label="@AppStrings.Save" BusyLabel="@AppStrings.Saving"
+                        Variant="Variant.Text" Color="Color.Primary" />
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [EditorRequired, Parameter] public AddEditBranchCommand Model { get; set; } = default!;
+
+    private MudForm _form = new();
+
+    private async Task SubmitAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid) return;
+
+        var result = await Mediator.Send(Model);
+        if (result.Succeeded)
+        {
+            // B4: a form that stays open keeps the version this save produced.
+            Model.Id = result.Data!.Id;
+            Model.Version = result.Data.Version;
+            Snackbar.Add(AppStrings.SaveSuccess, Severity.Info);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else if (ConcurrencyConflict.Is(result))
+        {
+            // Owner decision 4: Reload and discard. The page reloads the list; the edit is dropped.
+            Snackbar.Add(result.ErrorMessage, Severity.Warning);
+            MudDialog.Close(DialogResult.Ok(false));
+        }
+        else
+        {
+            Snackbar.Add(result.ErrorMessage, Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -2,12 +2,13 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using CleanArchitecture.Blazor.Application.Common.Interfaces.Identity;
+using CleanArchitecture.Blazor.Application.Common.Concurrency;
 using CleanArchitecture.Blazor.Application.Features.PicklistSets.Caching;
 namespace CleanArchitecture.Blazor.Application.Features.PicklistSets.Commands.AddEdit;
 
 [RequestAuthorize(Policy = Permissions.PicklistSets.Create)]
 [RequestAuthorize(Policy = Permissions.PicklistSets.Edit)]
-public class AddEditPicklistSetCommand : ICacheInvalidatorRequest<Result<int>>
+public class AddEditPicklistSetCommand : ICacheInvalidatorRequest<Result<Saved<int>>>, IVersionedEdit
 {
     [Description("Id")] public int Id { get; set; }
     [Description("Name")] public Picklist Name { get; set; }
@@ -36,11 +37,17 @@ public class AddEditPicklistSetCommand : ICacheInvalidatorRequest<Result<int>>
     /// </remarks>
     [Description("Shared with every tenant")] public bool IsShared { get; set; }
 
+    /// <summary>The row's version as the user loaded it (Pass 59). Required for an edit; returned new by every save.</summary>
+    public uint? Version { get; set; }
+
+    /// <inheritdoc />
+    public bool IsEdit => Id > 0;
+
     public TrackingState TrackingState { get; set; } = TrackingState.Unchanged;
     public string CacheKey => PicklistSetCacheKey.GetAllCacheKey;
     public IEnumerable<string>? Tags => PicklistSetCacheKey.Tags;}
 
-public class AddEditPicklistSetCommandHandler : IRequestHandler<AddEditPicklistSetCommand, Result<int>>
+public class AddEditPicklistSetCommandHandler : IRequestHandler<AddEditPicklistSetCommand, Result<Saved<int>>>
 {
     private readonly IApplicationDbContextFactory _dbContextFactory;
     private readonly IObjectMapper _objectMapper;
@@ -60,7 +67,7 @@ public class AddEditPicklistSetCommandHandler : IRequestHandler<AddEditPicklistS
         _userContextAccessor = userContextAccessor;
     }
 
-    public async ValueTask<Result<int>> Handle(AddEditPicklistSetCommand request, CancellationToken cancellationToken)
+    public async ValueTask<Result<Saved<int>>> Handle(AddEditPicklistSetCommand request, CancellationToken cancellationToken)
     {
         await using var db = await _dbContextFactory.CreateAsync(cancellationToken);
         var userId = _userContextAccessor.Current?.UserId;
@@ -75,18 +82,23 @@ public class AddEditPicklistSetCommandHandler : IRequestHandler<AddEditPicklistS
             // row is not found here at all; what reaches the guard is either a shared row or one of
             // this principal's own. Pass 31's ARowCannotBeReachedByIdFromAnotherTenant pins that.
             var item = await db.PicklistSets.FindAsync(request.Id, cancellationToken);
-            if (item == null) return await Result<int>.FailureAsync($"PicklistSet with id: [{request.Id}] not found.");
+            if (item == null) return await Result<Saved<int>>.FailureAsync($"PicklistSet with id: [{request.Id}] not found.");
 
             if (!await SharedPicklistWrite.IsAllowedAsync([item.TenantId], _permissionQueryService, userId))
-                return await Result<int>.FailureAsync(SharedPicklistWrite.Refused);
+                return await Result<Saved<int>>.FailureAsync(SharedPicklistWrite.Refused);
 
             // request.IsShared is NOT read here. The mapping cannot move the row either - the
             // command has no TenantId and PicklistSet.CreateAsShared has no counterpart on it - so
             // an edit leaves the row in whichever partition it was already in. See the property.
             item = _objectMapper.Map(request, item);
+            // Pass 59: the save checks against the version the user loaded, not the one just read.
+            db.ApplyLoadedVersion(item, request.Version);
             item.AddDomainEvent(new PicklistSetUpdatedEvent(item));
+            // Pass 59, B4: the result carries the NEW version, so the form's next save does not conflict
+            // with this one. Registered before the save; every save on this context refreshes it.
+            var saved = db.SavedVersionOf(item, item.Id);
             await db.SaveChangesAsync(cancellationToken);
-            return await Result<int>.SuccessAsync(item.Id);
+            return await Result<Saved<int>>.SuccessAsync(saved);
         }
         else
         {
@@ -108,7 +120,7 @@ public class AddEditPicklistSetCommandHandler : IRequestHandler<AddEditPicklistS
             // tenant-scoped caller creating a private row never reaches the permission query.
             if (!await SharedPicklistWrite.IsAllowedAsync(
                     [prospectiveTenantId], _permissionQueryService, userId))
-                return await Result<int>.FailureAsync(SharedPicklistWrite.Refused);
+                return await Result<Saved<int>>.FailureAsync(SharedPicklistWrite.Refused);
 
             var keyValue = _objectMapper.Map<PicklistSet>(request);
 
@@ -120,7 +132,7 @@ public class AddEditPicklistSetCommandHandler : IRequestHandler<AddEditPicklistS
             keyValue.AddDomainEvent(new PicklistSetCreatedEvent(keyValue));
             db.PicklistSets.Add(keyValue);
             await db.SaveChangesAsync(cancellationToken);
-            return await Result<int>.SuccessAsync(keyValue.Id);
+            return await Result<Saved<int>>.SuccessAsync(db.SavedVersionOf(keyValue, keyValue.Id));
         }
     }
 }

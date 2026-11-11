@@ -69,11 +69,12 @@
                             @AppStrings.New
                         </MudButton>
                     }
-                    @if (_accessRights.Delete)
+                    @* Pass 59: users are deactivated, never deleted, so the audit trail's "who" can never become null. *@
+                    @if (_accessRights.Deactivation)
                     {
-                        <MudButton Disabled="@(!_selectedUsers.Any())" StartIcon="@Icons.Material.Outlined.DeleteOutline"
-                                   OnClick="DeleteCheckedUsersAsync">
-                            @AppStrings.Delete
+                        <MudButton Disabled="@(!_selectedUsers.Any())" StartIcon="@Icons.Material.Outlined.PersonOff"
+                                   OnClick="DeactivateCheckedUsersAsync">
+                            @L["Deactivate selected"]
                         </MudButton>
                     }
                     <MudMenu TransformOrigin="Origin.BottomRight" AnchorOrigin="Origin.BottomRight"
@@ -127,7 +128,7 @@
         <SelectColumn ShowInFooter="false" />
         <TemplateColumn HeaderStyle="width:60px" Title="@AppStrings.Actions" Sortable="false">
             <CellTemplate>
-                @if (_accessRights.Edit || _accessRights.Delete || _accessRights.ManageRoles ||
+                @if (_accessRights.Edit || _accessRights.ManageRoles ||
                                                                 _accessRights.RestPassword || _accessRights.SendRestPasswordMail || _accessRights.ManagePermissions)
                 {
                     <MudMenu Icon="@Icons.Material.Filled.Edit" Variant="Variant.Outlined" Size="Size.Small" Dense="true"
@@ -136,10 +137,6 @@
                         @if (_accessRights.Edit)
                         {
                             <MudMenuItem OnClick="@(() => EditUserAsync(context.Item))">@AppStrings.Edit</MudMenuItem>
-                        }
-                        @if (_accessRights.Delete)
-                        {
-                            <MudMenuItem OnClick="@(() => DeleteUserAsync(context.Item))">@AppStrings.Delete</MudMenuItem>
                         }
                         @if (_accessRights.ManagePermissions)
                         {
@@ -549,104 +546,72 @@
 
 
 
-    private async Task DeleteUserAsync(ApplicationUserDto model)
+    // Pass 59: there is no delete. A user is deactivated, never deleted, so that the audit trail's
+    // reference to who did something can never become null; the context refuses a Deleted user outright.
+    // "Deactivate selected" applies the same rules as the row's active switch: Permissions.Users.Deactivation,
+    // never your own account, and never the last administrator - checked one user at a time, against the
+    // database as it stands after the previous one, so a selection of every administrator cannot pass.
+    private async Task DeactivateCheckedUsersAsync()
     {
-        var authState = await AuthState;
-        if (model.Id == authState.User.GetUserId())
+        if (!_accessRights.Deactivation)
         {
-            Snackbar.Add(L["You cannot delete your own account!"], Severity.Error);
+            Snackbar.Add(L["You do not have permission to change a user's active status"], Severity.Error);
             return;
         }
-        // Pass 52: the dialog's Confirm deletes, with progress; a refusal (the last administrator) stays in the dialog.
-        await DialogServiceHelper.ShowConfirmationDialogAsync(
-            AppStrings.DeleteConfirmationTitle,
-            string.Format(AppStrings.DeleteConfirmation, model.UserName),
-            async () =>
-            {
-                _selectedUsers = new();
-                await DeletedAsync();
-            },
-            onCancel: RefreshDataGridAsync,
-            action: () => ProcessUserDeletionAsync(model),
-            busyLabel: AppStrings.Deleting);
-    }
 
-    /// <summary>Deletes one user; null when done, else why not.</summary>
-    private async Task<string?> ProcessUserDeletionAsync(ApplicationUserDto model)
-    {
-        var user = await _userManager.FindByIdAsync(model.Id)
-        ?? throw new NotFoundException($"User not found: {model.Id}");
-
-        try
-        {
-            await _administratorProtection.EnsureNotRemovingLastAdministratorAsync(user.Id, "deleted");
-        }
-        catch (ForbiddenAccessException ex)
-        {
-            return ex.Message;
-        }
-
-        var result = await _userManager.DeleteAsync(user);
-        if (!result.Succeeded)
-        {
-            return string.Join(",", result.Errors.Select(e => e.Description));
-        }
-
-        Logger.LogInformation("User deleted: {UserName} (ID: {UserId})", user.UserName, user.Id);
-        return null;
-    }
-
-    private async Task DeletedAsync()
-    {
-        Snackbar.Add(AppStrings.DeleteSuccess, Severity.Info);
-        await RefreshDataGridAsync();
-        await UserService.RefreshAsync();
-    }
-
-    private async Task DeleteCheckedUsersAsync()
-    {
         var authState = await AuthState;
         if (_selectedUsers.Any(u => u.Id == authState.User.GetUserId()))
         {
-            Snackbar.Add(L["You cannot delete your own account!"], Severity.Error);
+            Snackbar.Add(L["You cannot deactivate your own account!"], Severity.Error);
             return;
         }
-        var message = string.Format(AppStrings.DeleteConfirmation, _selectedUsers.Count);
-        await DialogServiceHelper.ShowConfirmationDialogAsync(AppStrings.DeleteConfirmationTitle, message,
-            DeletedAsync,
+
+        var message = string.Format(L["Deactivate {0} user(s)? They will no longer be able to sign in."], _selectedUsers.Count);
+        await DialogServiceHelper.ShowConfirmationDialogAsync(L["Deactivate users"], message,
+            DeactivatedAsync,
             onCancel: RefreshDataGridAsync,
-            action: DeleteSelectedUsersAsync,
-            busyLabel: AppStrings.Deleting);
+            action: DeactivateSelectedUsersAsync,
+            busyLabel: L["Deactivating"]);
     }
 
-    /// <summary>Deletes the checked users; null when done, else why not (the rows before a failure stay deleted).</summary>
-    private async Task<string?> DeleteSelectedUsersAsync()
+    /// <summary>Deactivates the checked users; null when done, else why not (the ones before a refusal stay deactivated).</summary>
+    private async Task<string?> DeactivateSelectedUsersAsync()
     {
-        var deleteIds = _selectedUsers.Select(u => u.Id).ToArray();
-        var usersToDelete = await _userManager.Users.Where(x => deleteIds.Contains(x.Id)).ToListAsync();
-
-        try
+        foreach (var model in _selectedUsers.Where(u => u.IsActive).ToList())
         {
-            foreach (var user in usersToDelete)
+            var user = await _userManager.FindByIdAsync(model.Id);
+            if (user is null || !user.IsActive) continue;
+
+            try
             {
-                await _administratorProtection.EnsureNotRemovingLastAdministratorAsync(user.Id, "deleted");
+                await _administratorProtection.EnsureNotRemovingLastAdministratorAsync(user.Id, "deactivated");
             }
-        }
-        catch (ForbiddenAccessException ex)
-        {
-            return ex.Message;
-        }
+            catch (ForbiddenAccessException ex)
+            {
+                return ex.Message;
+            }
 
-        foreach (var user in usersToDelete)
-        {
-            var result = await _userManager.DeleteAsync(user);
+            user.IsActive = false;
+            user.LockoutEnd = DateTimeOffset.MaxValue;
+            user.LastModifiedAt = DateTime.UtcNow;
+            var result = await _userManager.UpdateAsync(user);
             if (!result.Succeeded)
             {
                 return string.Join(",", result.Errors.Select(e => e.Description));
             }
-            Logger.LogInformation("User deleted: {UserName} (ID: {UserId})", user.UserName, user.Id);
+            model.IsActive = false;
+            model.LockoutEnd = DateTimeOffset.MaxValue;
+            Logger.LogInformation("User deactivated: {UserName} (ID: {UserId})", user.UserName, user.Id);
         }
         return null;
+    }
+
+    private async Task DeactivatedAsync()
+    {
+        Snackbar.Add(L["The selected users have been deactivated"], Severity.Info);
+        _selectedUsers = new();
+        await RefreshDataGridAsync();
+        await UserService.RefreshAsync();
     }
 
     #endregion
