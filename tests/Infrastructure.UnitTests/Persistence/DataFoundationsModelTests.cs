@@ -101,7 +101,8 @@ public class DataFoundationsModelTests
         public override IDictionary<object, object?> Items { get; } = new Dictionary<object, object?>();
         public override IFeatureCollection Features { get; } = new FeatureCollection();
         public override CancellationToken ConnectionAborted => CancellationToken.None;
-        public override void Abort() { }
+        public bool Aborted { get; private set; }
+        public override void Abort() => Aborted = true;
     }
 
     private sealed class EmptyHub : Hub;
@@ -139,11 +140,26 @@ public class DataFoundationsModelTests
     }
 
     [Fact]
-    public async Task T27_AUserWhoNoLongerExistsGetsNoContext()
+    public async Task T27_AUserWithNoContext_IsRefusedAndDisconnected()
     {
+        // (P60) Pass 59 let the invocation run with no user context. Since Pass 60 (Part D item 4) a principal whose
+        // context is gone - deleted, deactivated, or locked out by an administrator - is refused: the hub method does
+        // not run and the connection is closed.
         var snapshot = new UserContext("u1", "u1", Branches: new BranchAccess(false, [1], [1], false, 1));
-        var (seen, caller) = await InvokeAsync(snapshot, fresh: null);
-        Assert.Null(seen);
+        var services = new ServiceCollection();
+        services.AddSingleton<IUserContextLoader>(new Loader(null));
+        var provider = services.BuildServiceProvider();
+        var filter = new UserContextHubFilter(provider.GetRequiredService<IServiceScopeFactory>(), new UserContextAccessor(), new ClientInfoAccessor());
+        var caller = new Caller(new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "u1")], "test")));
+        caller.Items[HubUserContext.ItemsKey] = snapshot;
+        var invocation = new HubInvocationContext(caller, provider, new EmptyHub(), typeof(EmptyHub).GetMethod(nameof(Hub.Dispose))!, Array.Empty<object?>());
+
+        var ran = false;
+        await Assert.ThrowsAsync<HubException>(async () =>
+            await filter.InvokeMethodAsync(invocation, _ => { ran = true; return ValueTask.FromResult<object?>(null); }));
+
+        Assert.False(ran);
+        Assert.True(caller.Aborted);
         Assert.False(caller.Items.ContainsKey(HubUserContext.ItemsKey));
     }
 }

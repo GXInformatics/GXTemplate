@@ -10,8 +10,13 @@ namespace CleanArchitecture.Blazor.Application.Common.ExceptionHandlers;
 /// - so the message is what the user reads. Any other exception is a fault and reaches the user as a
 /// fixed message with a reference id.
 /// <para>
-/// <see cref="ErrorCode"/> is logged with the rejection. <c>Result</c> has no code field, so it is not
-/// returned to the caller.
+/// <see cref="ErrorCode"/> is logged with the rejection and, since Pass 60, returned to the caller as
+/// <c>Result.ErrorCode</c>.
+/// </para>
+/// <para>
+/// <b>Outside a unit of work too (Pass 60).</b> Thrown by the handler of a request that is not transactional,
+/// it is turned into the same failure result by <c>ResultExceptionBehavior</c>, logged at Information. It
+/// is never shown as "An unexpected error occurred".
 /// </para>
 /// </remarks>
 public sealed class PostingRejectedException : Exception

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <!-- Pass 60, amendment C2: deliberately WRONG code, compiled, for architecture rule 1 to fail on. Two sample
+         modules (SampleAlpha, SampleBeta); each wrong case is its own type under Modules/SampleBeta/Wrong, and
+         the Razor ones are real compiled components. Nothing references this project except the test project
+         that runs the rule; it is never part of the application. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <RootNamespace>CleanArchitecture.Blazor.ArchitectureSamples</RootNamespace>
+        <AssemblyName>CleanArchitecture.Blazor.ArchitectureSamples</AssemblyName>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>false</IsTestProject>
+        <LangVersion>default</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Application\Application.csproj" />
+    </ItemGroup>
+
+</Project>

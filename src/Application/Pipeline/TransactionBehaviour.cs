@@ -256,7 +256,7 @@ public sealed class TransactionBehaviour<TRequest, TResponse> : IPipelineBehavio
     {
         _logger.LogInformation("{RequestType} was rejected and rolled back: {Reason} (code {ErrorCode})",
             typeof(TRequest).Name, rejection.Message, rejection.ErrorCode ?? "none");
-        return ResultFailureFactory.Create<TResponse>(rejection.Message);
+        return ResultFailureFactory.ForRejection<TResponse>(rejection);
     }
 
     private static TimeSpan Backoff(int attempt) =>

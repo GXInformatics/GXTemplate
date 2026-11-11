@@ -81,7 +81,15 @@ public class FusionCacheBehaviour<TRequest, TResponse> : IPipelineBehavior<TRequ
 
         var response = await _cache.GetOrSetAsync(
             cacheKey,
-            _ => next(request, cancellationToken).AsTask(),
+            async _ =>
+            {
+                // Pass 60, architecture rule 3: while the entry is filled, a read of an append-only or
+                // branch-scoped table is refused by GuardedTableCommandInterceptor. See CacheFill.
+                using (CacheFill.Begin(typeof(TRequest).Name))
+                {
+                    return await next(request, cancellationToken).ConfigureAwait(false);
+                }
+            },
             request.Tags,
             PipelineEntryOptions,
             cancellationToken

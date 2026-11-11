@@ -24,6 +24,9 @@ public interface IApplicationDbContext: IAsyncDisposable
 
     /// <summary>User-to-branch assignments (Pass 59). Written only by <c>SetUserBranchesCommand</c>.</summary>
     DbSet<UserBranch> UserBranches { get; set; }
+
+    /// <summary>Approval limits (Pass 60). Written only by the approval-limit commands.</summary>
+    DbSet<ApprovalLimit> ApprovalLimits { get; set; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
 
     /// <summary>
@@ -32,6 +35,18 @@ public interface IApplicationDbContext: IAsyncDisposable
     /// without casting to the concrete context.
     /// </summary>
     Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<TEntity> Entry<TEntity>(TEntity entity) where TEntity : class;
+
+    /// <summary>
+    /// The set of any entity in the model (Pass 60). Implemented by <c>DbContext.Set</c> itself.
+    /// </summary>
+    /// <remarks>
+    /// <b>How a module reaches its entities (amendment C3).</b> A module entity is never a DbSet property here or
+    /// on <c>ApplicationDbContext</c> - architecture rule 10 fails if one is - so that a module never edits the
+    /// shared context. Its configuration brings it into the model; handlers write <c>db.Set&lt;StockItem&gt;()</c>.
+    /// Every query filter, save rule and guard applies to it exactly as to a DbSet property: they iterate the
+    /// model, not the properties.
+    /// </remarks>
+    DbSet<TEntity> Set<TEntity>() where TEntity : class;
 
     /// <summary>
     /// The context's database facade, so a handler can own a transaction -

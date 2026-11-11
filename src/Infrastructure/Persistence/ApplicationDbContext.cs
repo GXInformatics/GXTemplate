@@ -114,6 +114,9 @@ public class ApplicationDbContext : IdentityDbContext<
     /// <summary>User-to-branch assignments (Pass 59).</summary>
     public DbSet<UserBranch> UserBranches { get; set; }
 
+    /// <summary>Approval limits by role and document type (Pass 60).</summary>
+    public DbSet<ApprovalLimit> ApprovalLimits { get; set; }
+
     /// <summary>
     /// Runs the Pass 59 data rules first, then saves, then refreshes any <c>Saved&lt;TId&gt;</c> results.
     /// The rules run before every save interceptor - see <see cref="Rules.DataRules"/>.
@@ -159,6 +162,15 @@ public class ApplicationDbContext : IdentityDbContext<
     /// </summary>
     public static readonly string ConfigurationsNamespace = typeof(AuditTrailConfiguration).Namespace!;
 
+    /// <summary>The log model's configurations' namespace, which this context never applies (Pass 60).</summary>
+    public static readonly string LogConfigurationsNamespace =
+        typeof(CleanArchitecture.Blazor.Infrastructure.Persistence.Logging.Configurations.SystemLogConfiguration).Namespace!;
+
+    /// <summary>True for a configuration of the log model, in its namespace or below it.</summary>
+    public static bool IsLogConfiguration(Type configuration) =>
+        configuration.Namespace is { } ns
+        && (ns == LogConfigurationsNamespace || ns.StartsWith(LogConfigurationsNamespace + ".", StringComparison.Ordinal));
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
 
@@ -168,11 +180,16 @@ public class ApplicationDbContext : IdentityDbContext<
         // for every IEntityTypeConfiguration<T> it finds, which ADDS T to the model - so an
         // unfiltered scan of this assembly would re-add SystemLog here however thoroughly its DbSet
         // is removed, and the migration would go on creating a SystemLogs table in the business
-        // database. Equality, not StartsWith: the log configurations live in a namespace nested
-        // under this one's parent, and a prefix match would let them back in.
+        // database.
+        //
+        // PASS 60: an EXCLUSION, where it used to be an equality on this namespace. Module entities'
+        // configurations live under Infrastructure/Modules/<M>/Configurations and must be applied, and a
+        // module entity has no DbSet (amendment C3), so its configuration is the only thing that brings it
+        // into the model. An equality silently dropped them. ConfigurationScanTests asserts that every
+        // configuration in the assembly is applied here except the log model's.
         builder.ApplyConfigurationsFromAssembly(
             Assembly.GetExecutingAssembly(),
-            t => t.Namespace == ConfigurationsNamespace);
+            t => !IsLogConfiguration(t));
 
         // NAMED since Pass 29. The single-argument overload REPLACES any filter already on an
         // entity, so with a second filter below this one had to be named or one of the two would
@@ -233,10 +250,11 @@ public class ApplicationDbContext : IdentityDbContext<
 
         // LAST, and after ApplyConfigurationsFromAssembly: the GX naming standard yields to an
         // explicit ToTable, so the configurations have to have been applied before it runs. It maps
-        // every IBusinessEntity - i.e. everything deriving from BaseEntity - to
-        // core."TBL_UPPER_SNAKE", and leaves this template's own tables (Identity, Tenants,
-        // AuditTrails, Documents, PicklistSets, DataProtectionKeys, __EFMigrationsHistory) in the
-        // default schema under their existing names. See GxNamingConventions.
+        // every IBusinessEntity - i.e. everything deriving from BaseEntity - to "TBL_UPPER_SNAKE" in
+        // its module's schema (Pass 60: [Module<T>], e.g. inv."TBL_STOCK_ITEM"), and leaves this
+        // template's own tables (Identity, Tenants, AuditTrails, Documents, PicklistSets, Branches,
+        // DataProtectionKeys, __EFMigrationsHistory) in the default schema under their existing names.
+        // See GxNamingConventions; DataModelGuard fails startup for an application entity with no module.
         builder.ApplyGxTableNaming();
     }
 

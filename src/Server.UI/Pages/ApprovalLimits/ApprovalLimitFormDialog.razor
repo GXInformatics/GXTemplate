@@ -1,0 +1,73 @@
+@using CleanArchitecture.Blazor.Application.Features.ApprovalLimits
+@inject IStringLocalizer<ApprovalLimits> L
+
+<MudDialog>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudSelect T="string" @bind-Value="Model.DocumentType" Label="@L["Document type"]" Required="true">
+                @foreach (var type in DocumentTypes)
+                {
+                    <MudSelectItem Value="@type">@type</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="Model.RoleId" Label="@L["Role"]" Required="true">
+                @foreach (var role in Roles)
+                {
+                    <MudSelectItem Value="@role.Key">@role.Value</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="int?" @bind-Value="Model.BranchId" Label="@L["Branch"]" Clearable="true"
+                       HelperText="@L["Leave empty for every branch. A branch row overrides the role's general row in that branch."]">
+                @foreach (var branch in Branches)
+                {
+                    <MudSelectItem T="int?" Value="@branch.Key">@branch.Value</MudSelectItem>
+                }
+            </MudSelect>
+            <MudNumericField T="decimal" @bind-Value="Model.MaxValue" Label="@L["Up to"]" Min="0" Format="N2" Required="true" />
+            <MudSwitch T="bool" @bind-Value="Model.IsActive" Label="@L["Active"]" Color="Color.Primary" />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">@AppStrings.Cancel</MudButton>
+        <GxSubmitButton ButtonType="ButtonType.Button" Action="SubmitAsync" Label="@AppStrings.Save" BusyLabel="@AppStrings.Saving"
+                        Variant="Variant.Text" Color="Color.Primary" />
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [EditorRequired, Parameter] public AddEditApprovalLimitCommand Model { get; set; } = default!;
+    [Parameter] public IReadOnlyList<string> DocumentTypes { get; set; } = [];
+    [Parameter] public IReadOnlyDictionary<string, string> Roles { get; set; } = new Dictionary<string, string>();
+    [Parameter] public IReadOnlyDictionary<int, string> Branches { get; set; } = new Dictionary<int, string>();
+
+    private MudForm _form = new();
+
+    private async Task SubmitAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid) return;
+
+        var result = await Mediator.Send(Model);
+        if (result.Succeeded)
+        {
+            Model.Id = result.Data!.Id;
+            Model.Version = result.Data.Version;
+            Snackbar.Add(AppStrings.SaveSuccess, Severity.Info);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else if (ConcurrencyConflict.Is(result))
+        {
+            // Owner decision 4 (pass 59): Reload and discard.
+            Snackbar.Add(result.ErrorMessage, Severity.Warning);
+            MudDialog.Close(DialogResult.Ok(false));
+        }
+        else
+        {
+            Snackbar.Add(result.ErrorMessage, Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

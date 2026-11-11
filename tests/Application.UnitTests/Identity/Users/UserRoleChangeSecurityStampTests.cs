@@ -88,7 +88,7 @@ public class UserRoleChangeSecurityStampTests
     {
         var scope = _provider.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        var user = new ApplicationUser { UserName = "victim", Email = "victim@example.com" };
+        var user = new ApplicationUser { UserName = "victim", Email = "victim@example.com", IsActive = true }; // (P60) active, as any signed-in user is
         (await userManager.CreateAsync(user, "Password123!")).Succeeded.Should().BeTrue();
         if (roles.Length > 0)
         {

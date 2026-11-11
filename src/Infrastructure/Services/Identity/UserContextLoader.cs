@@ -75,6 +75,16 @@ public class UserContextLoader : IUserContextLoader, IUserContextInvalidator
                         ctx.Options.Duration = NotFoundCacheDuration;
                         return null;
                     }
+
+                    // Pass 60, Part D item 4: a deactivated user, or one locked out by an administrator, has no
+                    // context, so the hub filter closes their connection and the cookie check signs them out. An
+                    // automatic lockout after failed sign-ins is NOT checked here (owner decision 15): it blocks new
+                    // sign-ins only. Cached briefly; the save that changes access invalidates it at once.
+                    if (!UserAccess.HasAccess(user))
+                    {
+                        ctx.Options.Duration = NotFoundCacheDuration;
+                        return null;
+                    }
                     var memberships = await userManager.Users.Where(x => x.Id == user.Id)
                         .Include(x => x.TenantUsers).ThenInclude(tu => tu.Tenant)
                         .SelectMany(x => x.TenantUsers.Where(tu => tu.Tenant != null).Select(tu => tu.Tenant!.Id))

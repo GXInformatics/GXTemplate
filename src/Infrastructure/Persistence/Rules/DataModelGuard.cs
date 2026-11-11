@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Domain.Common.Entities;
+using CleanArchitecture.Blazor.Domain.Common.Modules;
 using CleanArchitecture.Blazor.Domain.Common.Precision;
 using Microsoft.EntityFrameworkCore.Metadata;
 
@@ -29,8 +30,168 @@ public static class DataModelGuard
             CheckVersioning(entityType, problems);
             CheckImmutability(entityType, problems);
             CheckBranches(entityType, problems);
+            CheckModule(entityType, problems);
+            CheckModuleNavigations(entityType, problems);
+            CheckApprovable(entityType, problems);
         }
+        CheckModuleDefinitions(model, problems);
+        CheckTableNames(model, problems);
+        CheckApprovalDocumentTypes(model, problems);
         return problems;
+    }
+
+    // ---- Pass 60: approvals ---------------------------------------------------------------------
+
+    private static void CheckApprovable(IReadOnlyEntityType entityType, List<string> problems)
+    {
+        var clr = entityType.ClrType;
+        if (entityType.IsOwned() || !typeof(IApprovable).IsAssignableFrom(clr)) return;
+        var name = clr.Name;
+
+        if (!typeof(IVersioned).IsAssignableFrom(clr))
+            problems.Add($"{name}: is IApprovable but not IVersioned. An approval must conflict with a concurrent edit of the " +
+                         "document; derive from BaseVersionedEntity<Guid>.");
+        if (typeof(ISoftDelete).IsAssignableFrom(clr))
+            problems.Add($"{name}: is IApprovable and ISoftDelete. An approved document is never deleted, softly or otherwise.");
+
+        if (!clr.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IApprovable<>) && i.GetGenericArguments()[0] == clr))
+            problems.Add($"{name}: implements IApprovable but not IApprovable<{name}>, which declares its approval document type.");
+
+        foreach (var required in new[] { nameof(IApprovable.ApprovalValue), nameof(IApprovable.PreparedById), nameof(IApprovable.ApprovedById), nameof(IApprovable.ApprovedAt) })
+        {
+            if (entityType.FindProperty(required) is null)
+                problems.Add($"{name}.{required}: is not a mapped column. The approval reads and records the STORED values, never computed ones.");
+        }
+
+        var value = entityType.FindProperty(nameof(IApprovable.ApprovalValue))?.PropertyInfo;
+        if (value is not null && value.GetCustomAttribute<MoneyAttribute>(inherit: true) is null)
+            problems.Add($"{name}.ApprovalValue: must be [Money]; approval limits are amounts of money.");
+    }
+
+    /// <summary>Two approvable types may not share a document-type code: limits are kept against the code.</summary>
+    private static void CheckApprovalDocumentTypes(IReadOnlyModel model, List<string> problems)
+    {
+        var clashes = model.GetEntityTypes()
+            .Where(e => !e.IsOwned() && typeof(IApprovable).IsAssignableFrom(e.ClrType) && !e.ClrType.IsAbstract)
+            .Select(e => (Type: e.ClrType, Code: ApprovalDocumentTypeOf(e.ClrType)))
+            .GroupBy(x => x.Code, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1);
+        foreach (var clash in clashes)
+            problems.Add($"{string.Join(" and ", clash.Select(x => x.Type.Name))} share the approval document type '{clash.Key}'. " +
+                         "Each approvable document has its own code; approval limits are kept against it.");
+    }
+
+    internal static string ApprovalDocumentTypeOf(Type clr) =>
+        clr.GetProperty("ApprovalDocumentType", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)
+            ?.GetValue(null) as string ?? clr.Name;
+
+    // ---- Pass 60: modules and schemas -----------------------------------------------------------
+
+    private static void CheckModule(IReadOnlyEntityType entityType, List<string> problems)
+    {
+        if (entityType.IsPropertyBag) return; // a many-to-many join: named after its sides
+        var clr = entityType.ClrType;
+        var name = clr.Name;
+        var module = ModuleDefinition.Of(clr);
+
+        if (entityType.IsOwned())
+        {
+            var owner = entityType.FindOwnership()?.PrincipalEntityType;
+            if (module is not null && owner is not null && ModuleDefinition.Of(owner.ClrType)?.GetType() != module.GetType())
+                problems.Add($"{name}: is owned by {owner.ClrType.Name} but declares module {module.Name}. An owned type lives in its owner's table; remove [Module<>].");
+            return;
+        }
+
+        if (TemplateEntities.Contains(clr))
+        {
+            if (module is not null)
+                problems.Add($"{name}: is a template entity and belongs to no module, but declares [Module<{module.GetType().Name}>].");
+            return;
+        }
+
+        if (module is null)
+        {
+            problems.Add($"{name}: declares no module. Add [Module<…Module>] so its table goes to the module's schema (pass 60); " +
+                         "only the template's own entities (TemplateEntities) live outside a module.");
+            return;
+        }
+
+        if (entityType.BaseType is { } baseType && ModuleDefinition.Of(entityType.GetRootType().ClrType) is { } rootModule
+            && rootModule.GetType() != module.GetType())
+            problems.Add($"{name}: declares module {module.Name}, but its hierarchy root {entityType.GetRootType().ClrType.Name} " +
+                         $"is in {rootModule.Name}. A hierarchy lives in one module.");
+    }
+
+    /// <summary>Architecture rule 2: no navigation crosses a module boundary.</summary>
+    private static void CheckModuleNavigations(IReadOnlyEntityType entityType, List<string> problems)
+    {
+        if (entityType.IsPropertyBag) return;
+        var from = ModuleOf(entityType);
+        var navigations = entityType.GetDeclaredNavigations().Select(n => (n.Name, Target: n.TargetEntityType))
+            .Concat(entityType.GetDeclaredSkipNavigations().Select(s => (s.Name, Target: s.TargetEntityType)));
+
+        foreach (var (navigationName, target) in navigations)
+        {
+            if (target.IsOwned()) continue; // part of this entity's own table
+            var to = ModuleOf(target);
+            if (to is null) continue; // a template entity (users, branches): allowed from anywhere
+            if (from?.GetType() == to.GetType()) continue;
+
+            problems.Add($"{entityType.ClrType.Name}.{navigationName}: navigates to {target.ClrType.Name} in module {to.Name}" +
+                         (from is null ? " from a template entity" : $" from module {from.Name}") +
+                         ". No navigation crosses a module boundary: keep the id, and declare the foreign key without a navigation " +
+                         "(HasOne<T>().WithMany().HasForeignKey(...)).");
+        }
+    }
+
+    private static ModuleDefinition? ModuleOf(IReadOnlyEntityType entityType)
+    {
+        var owner = entityType;
+        while (owner.IsOwned() && owner.FindOwnership() is { } ownership) owner = ownership.PrincipalEntityType;
+        return ModuleDefinition.Of(owner.GetRootType().ClrType);
+    }
+
+    private static void CheckModuleDefinitions(IReadOnlyModel model, List<string> problems)
+    {
+        var modules = model.GetEntityTypes()
+            .Where(e => !e.IsPropertyBag)
+            .Select(e => ModuleDefinition.Of(e.ClrType))
+            .OfType<ModuleDefinition>()
+            .GroupBy(m => m.GetType())
+            .Select(g => g.First())
+            .ToList();
+
+        foreach (var module in modules)
+        {
+            if (ModuleDefinition.SchemaProblem(module.Schema) is { } problem)
+                problems.Add($"Module {module.GetType().Name}: schema {problem}.");
+            if (string.IsNullOrWhiteSpace(module.Name))
+                problems.Add($"Module {module.GetType().Name}: has no name.");
+        }
+
+        foreach (var clash in modules.GroupBy(m => m.Schema, StringComparer.Ordinal).Where(g => g.Count() > 1))
+            problems.Add($"Modules {string.Join(" and ", clash.Select(m => m.GetType().Name))} share the schema '{clash.Key}'. Each module has its own.");
+
+        foreach (var clash in modules.GroupBy(m => m.Name, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+            problems.Add($"Modules {string.Join(" and ", clash.Select(m => m.GetType().Name))} share the name '{clash.Key}'.");
+    }
+
+    /// <summary>
+    /// Two tables may not share a name in different schemas: the bulk-write guard matches tables by name in any
+    /// schema, and SQLite has no schemas at all.
+    /// </summary>
+    private static void CheckTableNames(IReadOnlyModel model, List<string> problems)
+    {
+        var tables = model.GetEntityTypes()
+            .Where(e => e.GetTableName() is not null)
+            .Select(e => (Table: e.GetTableName()!, Schema: e.GetSchema() ?? "(default)"))
+            .Distinct()
+            .GroupBy(t => t.Table, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Select(t => t.Schema).Distinct().Count() > 1);
+
+        foreach (var clash in tables)
+            problems.Add($"Table '{clash.Key}' exists in more than one schema ({string.Join(", ", clash.Select(t => t.Schema))}). " +
+                         "Table names must be unique across schemas; rename one of the entities.");
     }
 
     /// <summary>Throws, naming every offender, unless <see cref="FindProblems"/> is empty.</summary>
@@ -43,7 +204,7 @@ public static class DataModelGuard
         throw new InvalidOperationException(
             $"Data model check failed: {problems.Count} problem(s)." + Environment.NewLine +
             string.Join(Environment.NewLine, problems.Select(p => "  - " + p)) + Environment.NewLine +
-            "See the README sections \"Money and quantities\", \"Concurrency\", \"Posted records\" and \"Branches\". " +
+            "See the README sections \"Money and quantities\", \"Concurrency\", \"Posted records\", \"Branches\" and \"Modules and schemas\". " +
             "The application refuses to start rather than store data these rules exist to protect.");
     }
 

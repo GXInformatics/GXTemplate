@@ -73,7 +73,7 @@ public sealed class SinkMailService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Mail sink could not write '{Template}' for {Email}", template, to.Email);
-            return Result.Failure($"Could not write the mail sink file: {ex.Message}");
+            return Result.Failure("Could not write the mail sink file. The reason is in the application log.");
         }
     }
 

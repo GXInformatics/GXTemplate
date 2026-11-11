@@ -82,7 +82,7 @@ public sealed class MailgunMailService(
             // handler all arrive here as different types, and none of them is a reason to fault
             // whatever the caller was doing.
             logger.LogError(ex, "Could not send '{Template}' to {Email}", template, to.Email);
-            return Result.Failure($"Could not send mail: {ex.Message}");
+            return Result.Failure("Could not send mail. The reason is in the application log.");
         }
     }
 

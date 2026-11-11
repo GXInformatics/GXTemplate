@@ -6,6 +6,7 @@ using System.Linq.Expressions;
 using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Application.Common.Numerics;
 using CleanArchitecture.Blazor.Domain.Common.Entities;
+using CleanArchitecture.Blazor.Domain.Common.Modules;
 using CleanArchitecture.Blazor.Domain.Common.Precision;
 using CleanArchitecture.Blazor.Infrastructure.Persistence;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Rules;
@@ -18,8 +19,18 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.DataFoundations;
 // Pass 59 plan §5 rows 1, 2, 3, 18, 25 and 5. Each scenario is its own context type, because EF caches
 // one model per context type. No database is touched: building a model needs only the provider.
 
+// (P60) Every entity in an application model now declares a module; these test entities share one, so each
+// scenario still reports only the problem it was built for.
+public sealed class GuardModule : ModuleDefinition
+{
+    public override string Name => "Guard";
+    public override string Schema => "tguard";
+}
+
+[Module<GuardModule>]
 public class Undeclared : BaseEntity { public decimal Price { get; set; } }
 
+[Module<GuardModule>]
 public class Kinds : BaseEntity
 {
     [Money] public decimal Amount { get; set; }
@@ -28,34 +39,46 @@ public class Kinds : BaseEntity
     [Rate] public decimal? TaxRate { get; set; }
 }
 
+[Module<GuardModule>]
 public class TwoKinds : BaseEntity { [Money, Rate] public decimal Both { get; set; } }
+[Module<GuardModule>]
 public class KindOnString : BaseEntity { [Money] public string? Text { get; set; } }
+[Module<GuardModule>]
 public class Floats : BaseEntity { public double Weight { get; set; } [Approximate] public double Latitude { get; set; } }
 
+[Module<GuardModule>]
 public class SoftLedger : BaseEntity, IAppendOnly, ISoftDelete
 {
     public DateTime? DeletedAt { get; set; }
     public string? DeletedById { get; set; }
 }
 
+[Module<GuardModule>]
 public class UnversionedPostable : BaseEntity, IPostable
 {
     public DateTime? PostedAt { get; set; }
     [AllowedAfterPosting] public DateTime? Unused { get; set; }
 }
 
+[Module<GuardModule>]
 public class LedgerAndDocument : BaseVersionedEntity, IAppendOnly, IPostable { public DateTime? PostedAt { get; set; } }
 
+[Module<GuardModule>]
 public class StrayAllowed : BaseEntity { [AllowedAfterPosting] public string? Status { get; set; } }
 
+[Module<GuardModule>]
 public class PostedAtAllowed : BaseVersionedEntity, IPostable { [AllowedAfterPosting] public DateTime? PostedAt { get; set; } }
 
+[Module<GuardModule>]
 public class UnfilteredBranchRow : BaseEntity, IMustHaveBranch { public int BranchId { get; set; } }
 
+[Module<GuardModule>]
 public class TphRoot : BaseEntity { public string? Kind { get; set; } }
 public class TphBranchLeaf : TphRoot, IMustHaveBranch { public int BranchId { get; set; } }
 
+[Module<GuardModule>]
 public class Warehouse : BaseEntity { public int BranchId { get; set; } }
+[Module<GuardModule>]
 public class NavigatingTransfer : BaseEntity, IBranchVisibility<NavigatingTransfer>
 {
     public int WarehouseId { get; set; }

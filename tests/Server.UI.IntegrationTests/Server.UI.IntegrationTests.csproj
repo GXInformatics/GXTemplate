@@ -47,6 +47,8 @@
     <ItemGroup>
         <ProjectReference Include="..\..\src\Server.UI\Server.UI.csproj" />
         <ProjectReference Include="..\TestSupport\TestSupport.csproj" />
+        <!-- Pass 60, amendment C2: the compiled wrong samples for architecture rule 1. -->
+        <ProjectReference Include="..\ArchitectureSamples\ArchitectureSamples.csproj" />
     </ItemGroup>
 
 </Project>

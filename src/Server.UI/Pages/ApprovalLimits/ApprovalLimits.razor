@@ -1,0 +1,127 @@
+@page "/system/approval-limits"
+@using CleanArchitecture.Blazor.Application.Features.ApprovalLimits
+@using CleanArchitecture.Blazor.Application.Features.Branches
+@using CleanArchitecture.Blazor.Domain.Identity
+@using Microsoft.AspNetCore.Identity
+@attribute [Authorize(Policy = Permissions.ApprovalLimits.View)]
+@inject IStringLocalizer<ApprovalLimits> L
+@inject IDialogService DialogService
+
+@* Pass 60: how much each role may approve of each document type, optionally per branch. A user's limit is the highest
+   of their roles'; no row is no authority; the administrator role can hold none. Rows are deactivated, not deleted. *@
+<PageTitle>@L["Approval limits"]</PageTitle>
+
+<MudDataGrid T="ApprovalLimitDto" Items="@_limits" Loading="@_loading" Hover="true" Dense="true" data-testid="approval-limits-grid">
+    <ToolBarContent>
+        <MudStack Row AlignItems="AlignItems.Center" Class="flex-grow-1" Justify="Justify.SpaceBetween">
+            <MudStack Row AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icons.Material.Outlined.Rule" Size="Size.Large" />
+                <MudText Typo="Typo.subtitle1">@L["Approval limits"]</MudText>
+            </MudStack>
+            <MudStack Row Spacing="1">
+                <MudButton StartIcon="@Icons.Material.Outlined.Refresh" OnClick="LoadAsync">@AppStrings.Refresh</MudButton>
+                @if (_accessRights.Edit && _documentTypes.Count > 0)
+                {
+                    <MudButton StartIcon="@Icons.Material.Outlined.Add" OnClick="@(() => EditAsync(null))" data-testid="approval-limit-new">@AppStrings.New</MudButton>
+                }
+            </MudStack>
+        </MudStack>
+    </ToolBarContent>
+    <NoRecordsContent>
+        @if (_documentTypes.Count == 0)
+        {
+            <MudText Typo="Typo.body2">@L["No document in this application needs approval yet."]</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2">@L["No approval limits yet. Without a limit, nobody can approve."]</MudText>
+        }
+    </NoRecordsContent>
+    <Columns>
+        <PropertyColumn Property="x => x.DocumentType" Title="@L["Document type"]" />
+        <TemplateColumn Title="@L["Role"]">
+            <CellTemplate>@RoleName(context.Item.RoleId)</CellTemplate>
+        </TemplateColumn>
+        <TemplateColumn Title="@L["Branch"]">
+            <CellTemplate>@BranchName(context.Item.BranchId)</CellTemplate>
+        </TemplateColumn>
+        <PropertyColumn Property="x => x.MaxValue" Title="@L["Up to"]" Format="N2" />
+        <TemplateColumn Title="@L["Active"]">
+            <CellTemplate>
+                <MudIcon Icon="@(context.Item.IsActive ? Icons.Material.Filled.CheckCircle : Icons.Material.Outlined.Block)"
+                         Color="@(context.Item.IsActive ? Color.Success : Color.Default)" Size="Size.Small" />
+            </CellTemplate>
+        </TemplateColumn>
+        @if (_accessRights.Edit)
+        {
+            <TemplateColumn Sortable="false">
+                <CellTemplate>
+                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" OnClick="@(() => EditAsync(context.Item))" />
+                </CellTemplate>
+            </TemplateColumn>
+        }
+    </Columns>
+</MudDataGrid>
+
+@code {
+    private IReadOnlyList<ApprovalLimitDto> _limits = [];
+    private IReadOnlyList<string> _documentTypes = [];
+    private Dictionary<string, string> _roles = new();
+    private Dictionary<int, string> _branches = new();
+    private ApprovalLimitsAccessRights _accessRights = new();
+    private bool _loading;
+
+    [Inject] private RoleManager<ApplicationRole> RoleManager { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _accessRights = await PermissionService.GetAccessRightsAsync<ApprovalLimitsAccessRights>();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _limits = await Mediator.Send(new GetAllApprovalLimitsQuery());
+            _documentTypes = await Mediator.Send(new GetApprovalDocumentTypesQuery());
+
+            // The administrator role is left out: it can hold no limit (the administrator never approves).
+            _roles = RoleManager.Roles.Where(r => r.Name != CleanArchitecture.Blazor.Application.Common.Constants.Roles.Admin)
+                .OrderBy(r => r.Name).ToDictionary(r => r.Id, r => r.Name ?? r.Id);
+            _branches = (await Mediator.Send(new GetAllBranchesQuery())).ToDictionary(b => b.Id, b => $"{b.Code} - {b.Name}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string RoleName(string roleId) => _roles.TryGetValue(roleId, out var name) ? name : roleId;
+
+    private string BranchName(int? branchId) =>
+        branchId is null ? L["Every branch"] : _branches.TryGetValue(branchId.Value, out var name) ? name : branchId.Value.ToString();
+
+    private async Task EditAsync(ApprovalLimitDto? limit)
+    {
+        var command = limit is null
+            ? new AddEditApprovalLimitCommand { DocumentType = _documentTypes.FirstOrDefault() ?? string.Empty }
+            : new AddEditApprovalLimitCommand
+            {
+                Id = limit.Id, RoleId = limit.RoleId, DocumentType = limit.DocumentType, BranchId = limit.BranchId,
+                MaxValue = limit.MaxValue, IsActive = limit.IsActive, Version = limit.Version
+            };
+        var parameters = new DialogParameters<ApprovalLimitFormDialog>
+        {
+            { x => x.Model, command },
+            { x => x.DocumentTypes, _documentTypes },
+            { x => x.Roles, _roles },
+            { x => x.Branches, _branches }
+        };
+        var dialog = await DialogService.ShowAsync<ApprovalLimitFormDialog>(limit is null ? L["New approval limit"] : L["Edit approval limit"],
+            parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false });
+        await dialog.Result;
+        await LoadAsync();
+    }
+}

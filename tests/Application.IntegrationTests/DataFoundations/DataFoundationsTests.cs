@@ -381,7 +381,7 @@ public class DataFoundationsTests
             await FluentActions.Awaiting(() => db.TestBranchRows.Where(r => r.Name == "none").ExecuteDeleteAsync())
                 .Should().ThrowAsync<DataRuleViolationException>();
             await FluentActions.Awaiting(() => db.Database.ExecuteSqlRawAsync(
-                    "UPDATE core.\"TBL_TEST_LEDGER_ROW\" SET \"Amount\" = 0 WHERE false"))
+                    "UPDATE tdf.\"TBL_TEST_LEDGER_ROW\" SET \"Amount\" = 0 WHERE false"))
                 .Should().ThrowAsync<DataRuleViolationException>();
 
             // Not guarded: works.
@@ -401,7 +401,7 @@ public class DataFoundationsTests
         using (scope)
         await using (db)
         {
-            var table = "core.\"TBL_TEST_LEDGER_ROW\"";
+            var table = "tdf.\"TBL_TEST_LEDGER_ROW\""; // (P60) the test module's schema
             await using var connection = new NpgsqlConnection(db.Database.GetConnectionString());
             await connection.OpenAsync();
 

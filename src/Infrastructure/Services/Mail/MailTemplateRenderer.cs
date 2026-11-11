@@ -60,7 +60,7 @@ public sealed class MailTemplateRenderer(
         catch (Exception ex)
         {
             logger.LogError(ex, "Mail template {Template} could not be read from {Path}", template, path);
-            return await Result<string>.FailureAsync($"Mail template '{template}' could not be read: {ex.Message}");
+            return await Result<string>.FailureAsync($"Mail template '{template}' could not be read. The reason is in the application log.");
         }
 
         var parsed = Template.Parse(content);
@@ -79,7 +79,7 @@ public sealed class MailTemplateRenderer(
         catch (Exception ex)
         {
             logger.LogError(ex, "Mail template {Template} failed to render", template);
-            return await Result<string>.FailureAsync($"Mail template '{template}' failed to render: {ex.Message}");
+            return await Result<string>.FailureAsync($"Mail template '{template}' failed to render. The reason is in the application log.");
         }
     }
 

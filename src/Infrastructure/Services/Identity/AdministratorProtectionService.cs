@@ -89,6 +89,48 @@ public sealed class AdministratorProtectionService
     }
 
     /// <summary>
+    /// Pass 60: the administrator never approves. Refuses a role set that makes a user both a member of the
+    /// Administrator role and the holder of an approval permission, through another role in the set or a direct
+    /// claim. Called before a role rewrite is written. The approval policy's send-time check is the guarantee;
+    /// this gives the early, clear message.
+    /// </summary>
+    /// <param name="userId">The user, or null for a user not yet created (no direct claims yet).</param>
+    /// <param name="assignedRoles">The complete role set the user will hold.</param>
+    public async Task EnsureApprovalSeparationAsync(string? userId, IEnumerable<string> assignedRoles)
+    {
+        var roles = assignedRoles.ToList();
+        if (!roles.Any(IsAdministratorRole)) return;
+
+        var approvals = CleanArchitecture.Blazor.Application.Common.Approvals.ApprovalPermissions.DiscoverLoaded();
+        if (approvals.Count == 0) return;
+
+        using var scope = _scopeFactory.CreateScope();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+        foreach (var roleName in roles.Where(r => !IsAdministratorRole(r)))
+        {
+            var role = await roleManager.FindByNameAsync(roleName);
+            if (role is null) continue;
+            var approving = (await roleManager.GetClaimsAsync(role))
+                .FirstOrDefault(c => c.Type == ApplicationClaimTypes.Permission && approvals.Contains(c.Value));
+            if (approving is not null)
+                throw new ForbiddenAccessException(
+                    $"Role {roleName} approves documents ({approving.Value}), and the administrator cannot approve. " +
+                    $"A user cannot hold both {roleName} and '{AdministratorRole}'.");
+        }
+
+        if (string.IsNullOrEmpty(userId)) return;
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = await userManager.FindByIdAsync(userId);
+        if (user is null) return;
+        var direct = (await userManager.GetClaimsAsync(user))
+            .FirstOrDefault(c => c.Type == ApplicationClaimTypes.Permission && approvals.Contains(c.Value));
+        if (direct is not null)
+            throw new ForbiddenAccessException(
+                $"This user holds the approval permission {direct.Value}, and the administrator cannot approve. Remove it before " +
+                $"adding the '{AdministratorRole}' role.");
+    }
+
+    /// <summary>
     /// Convenience overload for a role-membership rewrite: only guards when the user currently holds
     /// the Administrator role and the new set does not.
     /// </summary>

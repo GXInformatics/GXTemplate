@@ -171,7 +171,10 @@ public static class SavedVersions
     }
 }
 
-/// <summary>Recognises the concurrency-conflict failure, since <c>Result</c> has no error code (Pass 59).</summary>
+/// <summary>
+/// Recognises the concurrency-conflict failure (Pass 59). Since Pass 60 the result carries
+/// <c>ErrorCode.ConcurrencyConflict</c>; the message comparison stays for a result built without the code.
+/// </summary>
 public static class ConcurrencyConflict
 {
     /// <summary>The message <c>ResultExceptionBehavior</c> returns for <c>DbUpdateConcurrencyException</c>.</summary>
@@ -179,5 +182,7 @@ public static class ConcurrencyConflict
 
     /// <summary>True when <paramref name="result"/> failed because the row changed since it was loaded.</summary>
     public static bool Is(IResult result) =>
-        !result.Succeeded && result.Errors.Any(e => string.Equals(e, Message, StringComparison.Ordinal));
+        !result.Succeeded
+        && (string.Equals(result.ErrorCode, Models.ErrorCode.ConcurrencyConflict.Value, StringComparison.Ordinal)
+            || result.Errors.Any(e => string.Equals(e, Message, StringComparison.Ordinal)));
 }

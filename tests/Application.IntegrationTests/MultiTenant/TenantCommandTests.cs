@@ -40,7 +40,7 @@ public class TenantCommandTests : TestBase
     {
         using var scope = CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        var user = new ApplicationUser { UserName = "only-" + Guid.NewGuid().ToString("N")[..8], Email = $"{Guid.NewGuid():N}@example.com" };
+        var user = new ApplicationUser { UserName = "only-" + Guid.NewGuid().ToString("N")[..8], Email = $"{Guid.NewGuid():N}@example.com", IsActive = true }; // (P60)
         (await users.CreateAsync(user)).Succeeded.Should().BeTrue();
         await users.AddClaimAsync(user, new Claim(ApplicationClaimTypes.Permission, permission));
         UseUser(user.Id);

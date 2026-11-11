@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using CleanArchitecture.Blazor.Application.Common.Approvals;
 using CleanArchitecture.Blazor.Application.Common.Branches;
 using CleanArchitecture.Blazor.Application.Common.Concurrency;
 using CleanArchitecture.Blazor.Application.Common.Numerics;
@@ -9,6 +10,7 @@ using CleanArchitecture.Blazor.Domain.Common.Precision;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Transactions;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence.Rules;
 
@@ -84,11 +86,58 @@ internal static class DataRules
         }
 
         foreach (var entry in entries) CheckPrecision(entry);
+        foreach (var entry in entries) CheckApproval(entry);
+        foreach (var entry in entries) RecordUserAccessChange(context, entry);
 
         if (postedHere is not null) RecordPostedHere(entries, postedHere);
     }
 
-    public static void AfterSave(ApplicationDbContext context) => SavedVersions.Refresh(context);
+    public static void AfterSave(ApplicationDbContext context)
+    {
+        SavedVersions.Refresh(context);
+        InvalidateChangedUsers(context);
+    }
+
+    // ---- 8. User access (Pass 60, Part D item 4) ------------------------------------------------
+
+    /// <summary>Users whose IsActive or LockoutEnd changed in this context, to invalidate after the save.</summary>
+    private static readonly ConditionalWeakTable<DbContext, HashSet<string>> AccessChanged = new();
+
+    /// <summary>
+    /// A user who LOSES access in this save - deactivated, or locked out by an administrator
+    /// (<see cref="UserAccess"/>) - gets a new security stamp in the same save, so every cookie and circuit holding
+    /// the old one fails revalidation. Any change to IsActive or LockoutEnd (reactivation included) marks the user's
+    /// cached context for invalidation after the save. Every path saves through here - both deactivation paths,
+    /// the user dialog, Identity's own lockout - so none can forget. An automatic lockout (time-limited) does not
+    /// revoke access (decision 15) and gets no new stamp. The system account is exempt.
+    /// </summary>
+    private static void RecordUserAccessChange(DbContext context, EntityEntry entry)
+    {
+        if (entry.State != EntityState.Modified || entry.Entity is not ApplicationUser user) return;
+        if (string.Equals(user.UserName, CleanArchitecture.Blazor.Application.Common.Constants.Users.System, StringComparison.Ordinal)) return;
+
+        var active = entry.Property(nameof(ApplicationUser.IsActive));
+        var lockout = entry.Property(nameof(ApplicationUser.LockoutEnd));
+        if (Equals(active.OriginalValue, active.CurrentValue) && Equals(lockout.OriginalValue, lockout.CurrentValue)) return;
+
+        var had = UserAccess.HasAccess((bool)active.OriginalValue!, (DateTimeOffset?)lockout.OriginalValue);
+        if (had && !UserAccess.HasAccess(user)) user.SecurityStamp = Guid.NewGuid().ToString("N");
+
+        AccessChanged.GetOrCreateValue(context).Add(user.Id);
+    }
+
+    private static void InvalidateChangedUsers(ApplicationDbContext context)
+    {
+        if (!AccessChanged.TryGetValue(context, out var changed) || changed.Count == 0) return;
+        var userIds = changed.ToList();
+        changed.Clear();
+
+        // The application's services, which the options carry; absent for a directly constructed context, which has
+        // no user-context cache to clear.
+        var services = context.GetService<IDbContextOptions>().FindExtension<CoreOptionsExtension>()?.ApplicationServiceProvider;
+        var invalidator = services?.GetService<IUserContextInvalidator>();
+        foreach (var userId in userIds) invalidator?.Invalidate(userId);
+    }
 
     // ---- 1. Users -----------------------------------------------------------------------------
 
@@ -289,6 +338,36 @@ internal static class DataRules
                     $"{Describe(entry)}.{property.Metadata.Name} is {value}, which has more than the {kind.Scale} decimal places a " +
                     $"{kind.KindName} value holds. Round it when you compute it (GxRound); the database would otherwise round it silently.");
         }
+    }
+
+    // ---- 7. Approvals (Pass 60) ------------------------------------------------------------------
+
+    /// <summary>
+    /// A change to <c>ApprovedById</c> or <c>ApprovedAt</c> on an <see cref="IApprovable"/> needs an
+    /// <see cref="ApprovalGrant"/> for that header - installed only by <c>ApprovalBehaviour</c> after the approval
+    /// policy passed - and <c>ApprovedById</c> must be the approver it was granted to. The loud failure for a command
+    /// that approves without being an approval command; it also refuses clearing an approval outside one.
+    /// </summary>
+    private static void CheckApproval(EntityEntry entry)
+    {
+        if (entry.Entity is not IApprovable approvable || entry.State == EntityState.Deleted) return;
+
+        var approver = entry.Property(nameof(IApprovable.ApprovedById));
+        var approvedAt = entry.Property(nameof(IApprovable.ApprovedAt));
+        var changed = entry.State == EntityState.Added
+            ? approver.CurrentValue is not null || approvedAt.CurrentValue is not null
+            : !Equals(approver.OriginalValue, approver.CurrentValue) || !Equals(approvedAt.OriginalValue, approvedAt.CurrentValue);
+        if (!changed) return;
+
+        var granted = ApprovalGrant.ApproverOf(approvable.Id);
+        if (granted is null)
+            throw new DataRuleViolationException(
+                $"{Describe(entry)} was approved outside an approval command. Implement IApprovalCommand<{entry.Metadata.ClrType.Name}> " +
+                "on the request, so that ApprovalBehaviour checks the approver, the preparer and the limit first.");
+
+        if (approver.CurrentValue is { } approvedBy && !string.Equals((string)approvedBy, granted, StringComparison.Ordinal))
+            throw new DataRuleViolationException(
+                $"{Describe(entry)}: ApprovedById is '{approvedBy}', but the approval was granted to '{granted}'. Record the approver the policy checked.");
     }
 
     private static string Describe(EntityEntry entry)

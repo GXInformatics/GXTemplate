@@ -156,6 +156,15 @@ public static class DependencyInjection
         services.AddScoped<IUnitOfWork>(p => p.GetRequiredService<UnitOfWorkManager>());
         services.AddScoped<IIdempotencyStore, IdempotencyStore>();
         services.AddScoped<IDocumentNumberAllocator, DocumentNumberAllocator>();
+        // Pass 60, amendment C4: the sanctioned insert-if-absent for rows a posting may create concurrently.
+        services.AddScoped<IInsertIfAbsent, InsertIfAbsent>();
+        // Pass 60, Part A: the approval policy ApprovalBehaviour runs inside the unit of work.
+        services.AddScoped<CleanArchitecture.Blazor.Application.Common.Approvals.IApprovalPolicy,
+            CleanArchitecture.Blazor.Infrastructure.Services.Approvals.ApprovalPolicy>();
+        services.AddScoped<CleanArchitecture.Blazor.Application.Common.Approvals.IApprovalDocumentTypes,
+            CleanArchitecture.Blazor.Infrastructure.Services.Approvals.ApprovalDocumentTypes>();
+        services.AddScoped<CleanArchitecture.Blazor.Application.Common.Approvals.IApprovalRoles,
+            CleanArchitecture.Blazor.Infrastructure.Services.Approvals.ApprovalRoles>();
 
         // The idle-timeout pair. Scoped because the provider resolves a scoped context factory; the
         // enforcer is resolved from HttpContext.RequestServices inside the cookie event, which is
@@ -386,8 +395,8 @@ public static class DependencyInjection
             var settings = sp.GetRequiredService<StorageSettings>();
             return settings.Provider.Trim().ToLowerInvariant() switch
             {
-                StorageProviderKeys.Disk => new LocalDiskFileStorage(settings),
-                StorageProviderKeys.AzureBlob => new AzureBlobFileStorage(settings),
+                StorageProviderKeys.Disk => new LocalDiskFileStorage(settings, sp.GetService<ILogger<LocalDiskFileStorage>>()),
+                StorageProviderKeys.AzureBlob => new AzureBlobFileStorage(settings, sp.GetService<ILogger<AzureBlobFileStorage>>()),
                 _ => throw new NotSupportedException(
                     $"{StorageSettings.Key}:{nameof(StorageSettings.Provider)} '{settings.Provider}' has no implementation.")
             };
@@ -504,6 +513,10 @@ public static class DependencyInjection
     /// test exists to catch, reintroduced inside the test itself.
     /// </para>
     /// </remarks>
+    /// <summary>Pass 60, decision 15: the automatic lockout is finite, so it never reads as an administrator's.</summary>
+    public static bool IsAutomaticLockoutBounded(TimeSpan lockout) =>
+        lockout > TimeSpan.Zero && lockout <= UserAccess.LongestAutomaticLockout;
+
     public static void ConfigureIdentityOptions(IdentityOptions options)
     {
         options.SignIn.RequireConfirmedAccount = true;
@@ -530,6 +543,15 @@ public static class DependencyInjection
             services.Remove(signInManagerDescriptor);
         }
         services.AddScoped<SignInManager<ApplicationUser>, AuditSignInManager<ApplicationUser>>();
+
+        // Pass 60, owner decision 15: an automatic lockout must stay time-limited, so that it can never look like an
+        // administrator's permanent lockout - which ends a user's live sessions (UserAccess). Fails the start otherwise.
+        services.AddOptions<IdentityOptions>()
+            .Validate(o => IsAutomaticLockoutBounded(o.Lockout.DefaultLockoutTimeSpan),
+                $"Identity Lockout.DefaultLockoutTimeSpan must be positive and at most {UserAccess.LongestAutomaticLockout.TotalDays:0} days: " +
+                "a longer automatic lockout would be indistinguishable from an administrator's permanent lockout, and a failed " +
+                "sign-in would end the user's live sessions (pass 60, decision 15).")
+            .ValidateOnStart();
 
         services.Configure<IdentityOptions>(options =>
         {
@@ -621,6 +643,11 @@ public static class DependencyInjection
             options.LoginPath = LOGIN_PATH;
             options.Cookie.SameSite = SameSiteMode.None;
             options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+
+            // Pass 60, Part D item 4: a user deactivated or locked out by an administrator is signed out on their
+            // next request. CHAINED after Identity's security-stamp validator, like the idle check below, and BEFORE
+            // the early return, so it applies with the idle timeout switched off too.
+            options.Events.OnValidatePrincipal = UserAccessCookieCheck.After(options.Events.OnValidatePrincipal);
 
             if (!idle.Enabled)
             {

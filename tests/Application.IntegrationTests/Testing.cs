@@ -221,7 +221,7 @@ public class Testing
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         // Email = userName produced a bare name, which Identity's EmailValidator rejects - this helper
         // could never succeed, which is why no test used it before deny-by-default required one.
-        var user = new ApplicationUser { UserName = userName, Email = $"{userName}@example.com" };
+        var user = new ApplicationUser { UserName = userName, Email = $"{userName}@example.com", IsActive = true }; // (P60) active, as any signed-in user is
         var result = await userManager.CreateAsync(user, password);
 
         if (roles.Any())

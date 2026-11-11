@@ -54,6 +54,7 @@ public class PermissionAssignmentService
         var actor = await GetActorAsync(scope);
         EnsureNotTargetingSelf(actor, userId);
         EnsureActorHolds(actor, model);
+        await EnsureNoApprovalForAdministratorAsync(userManager, [model], user, role: null);
 
         var claim = new Claim(model.ClaimType, model.ClaimValue);
         var result = model.Assigned
@@ -83,6 +84,7 @@ public class PermissionAssignmentService
         var actor = await GetActorAsync(scope);
         EnsureNotTargetingAHeldRole(actor, role.Name);
         EnsureActorHolds(actor, model);
+        await EnsureNoApprovalForAdministratorAsync(scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>(), [model], user: null, role);
 
         var claim = new Claim(model.ClaimType, model.ClaimValue);
         var result = model.Assigned
@@ -117,6 +119,7 @@ public class PermissionAssignmentService
         {
             EnsureActorHolds(actor, model);
         }
+        await EnsureNoApprovalForAdministratorAsync(userManager, list, user, role: null);
 
         foreach (var model in list)
         {
@@ -157,6 +160,7 @@ public class PermissionAssignmentService
         {
             EnsureActorHolds(actor, model);
         }
+        await EnsureNoApprovalForAdministratorAsync(scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>(), list, user: null, role);
 
         foreach (var model in list)
         {
@@ -168,6 +172,35 @@ public class PermissionAssignmentService
             EnsureSucceeded(result, "update role permission", roleId);
         }
         scope.ServiceProvider.GetService<IUserContextInvalidator>()?.InvalidateAll();
+    }
+
+    /// <summary>The approval permissions (Pass 60), found once.</summary>
+    private static readonly Lazy<IReadOnlySet<string>> ApprovalPermissionSet =
+        new(CleanArchitecture.Blazor.Application.Common.Approvals.ApprovalPermissions.DiscoverLoaded);
+
+    /// <summary>
+    /// Pass 60: the administrator never approves. Granting an approval permission directly to a member of the
+    /// administrator role, or to a role one of whose members is the administrator, is refused here. This is the
+    /// early, clear message; the approval policy's send-time check is the guarantee.
+    /// </summary>
+    private static async Task EnsureNoApprovalForAdministratorAsync(
+        UserManager<ApplicationUser> userManager, IEnumerable<PermissionModel> models, ApplicationUser? user, ApplicationRole? role)
+    {
+        if (!models.Any(m => m.Assigned && ApprovalPermissionSet.Value.Contains(m.ClaimValue))) return;
+
+        if (user is not null && await userManager.IsInRoleAsync(user, Roles.Admin))
+            throw new ForbiddenAccessException("The administrator cannot be given approval rights.");
+
+        if (role?.Name is { } roleName)
+        {
+            foreach (var member in await userManager.GetUsersInRoleAsync(roleName))
+            {
+                if (await userManager.IsInRoleAsync(member, Roles.Admin))
+                    throw new ForbiddenAccessException(
+                        $"'{member.UserName}', a member of role {roleName}, is the administrator, who cannot be given approval rights. " +
+                        "Remove them from the role first.");
+            }
+        }
     }
 
     /// <summary>

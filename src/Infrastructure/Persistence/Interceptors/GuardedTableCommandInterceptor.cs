@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Text.RegularExpressions;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Caching;
 using CleanArchitecture.Blazor.Domain.Common.Entities;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Rules;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -70,8 +71,12 @@ public sealed class GuardedTableCommandInterceptor : DbCommandInterceptor
         return ValueTask.FromResult(result);
     }
 
+    private static readonly ConcurrentDictionary<IModel, Regex?> CachedReadPatterns = new();
+
     private static void Check(DbCommand command, CommandEventData eventData)
     {
+        CheckCachedRead(command, eventData);
+
         if (eventData.CommandSource is not (CommandSource.ExecuteUpdate or CommandSource.ExecuteDelete
             or CommandSource.ExecuteSqlRaw)) return;
         if (eventData.Context is null) return;
@@ -82,6 +87,44 @@ public sealed class GuardedTableCommandInterceptor : DbCommandInterceptor
             throw new DataRuleViolationException(
                 $"A bulk {match.Groups["verb"].Value.ToUpperInvariant()} against {match.Groups["table"].Value} was refused: the table holds " +
                 "append-only, posted-document or branch-scoped rows, which change only through SaveChanges and its rules.");
+    }
+
+    /// <summary>
+    /// Architecture rule 3 (Pass 60): while a cacheable request fills its cache entry (<see cref="CacheFill"/>), SQL
+    /// that reads an append-only or branch-scoped table is refused. Such a figure would be served stale, or served
+    /// to a user with another branch read set.
+    /// </summary>
+    private static void CheckCachedRead(DbCommand command, CommandEventData eventData)
+    {
+        if (CacheFill.Current is not { } request || eventData.Context is null) return;
+
+        var pattern = CachedReadPatterns.GetOrAdd(eventData.Context.Model, BuildCachedReadPattern);
+        var match = pattern?.Match(command.CommandText);
+        if (match is { Success: true })
+            throw new DataRuleViolationException(
+                $"{request} is cacheable but reads {match.Groups["table"].Value}, which holds append-only or branch-scoped rows. " +
+                "A cached ledger or stock figure is stale until a write clears it, and a cached branch-scoped list reaches users " +
+                "with other branches; remove ICacheableRequest from this request (architecture rule 3).");
+    }
+
+    private static bool IsUncacheable(Type clr) =>
+        typeof(IAppendOnly).IsAssignableFrom(clr)
+        || typeof(IMustHaveBranch).IsAssignableFrom(clr)
+        || clr.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IBranchVisibility<>));
+
+    private static Regex? BuildCachedReadPattern(IModel model)
+    {
+        var tables = model.GetEntityTypes()
+            .Where(t => !t.IsOwned() && t.GetTableName() is not null && IsUncacheable(t.ClrType))
+            .Select(t => t.GetTableName()!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (tables.Count == 0) return null;
+
+        var names = string.Join("|", tables.Select(Regex.Escape));
+        return new Regex(
+            $"""\b(?:FROM|JOIN)\s+(?:"?\w+"?\s*\.\s*)?"?(?<table>{names})"?(?![\w"])""",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
     }
 
     internal static bool IsGuarded(Type clr) =>

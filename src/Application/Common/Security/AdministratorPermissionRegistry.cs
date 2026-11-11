@@ -66,6 +66,12 @@ public static class AdministratorPermissionRegistry
     /// </summary>
     public static readonly IReadOnlyList<string> Granted =
     [
+        // Pass 60, owner decision 10: the administrator maintains approval limits, and never approves - no
+        // [ApprovalPermission] constant may appear in this list (ValidateApprovals), and the approval policy
+        // refuses any member of the administrator role whatever it holds.
+        Permissions.ApprovalLimits.View,
+        Permissions.ApprovalLimits.Edit,
+
         Permissions.AuditTrails.View,
         Permissions.AuditTrails.Search,
         Permissions.AuditTrails.Export,
@@ -249,6 +255,34 @@ public static class AdministratorPermissionRegistry
     public static void AssertNoDivergence()
     {
         Validate(DiscoverAllPermissions(), Granted, (IReadOnlyCollection<string>)Excluded.Keys);
+        ValidateApprovals(
+            CleanArchitecture.Blazor.Application.Common.Approvals.ApprovalPermissions.Discover(typeof(Permissions).Assembly),
+            Granted, (IReadOnlyCollection<string>)Excluded.Keys);
+    }
+
+    /// <summary>
+    /// Pass 60: the administrator never approves. Every approval permission (<c>[ApprovalPermission]</c>) must be in
+    /// <see cref="Excluded"/>, with its reason, and never in <see cref="Granted"/> - which the system account is also
+    /// seeded with, so the same check keeps it from approving.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">An approval permission is granted, or not excluded.</exception>
+    public static void ValidateApprovals(
+        IReadOnlyCollection<string> approvalPermissions,
+        IReadOnlyCollection<string> grantedPermissions,
+        IReadOnlyCollection<string> excludedPermissions)
+    {
+        var granted = approvalPermissions.Where(p => grantedPermissions.Contains(p, StringComparer.Ordinal))
+            .OrderBy(p => p, StringComparer.Ordinal).ToList();
+        var notExcluded = approvalPermissions.Where(p => !excludedPermissions.Contains(p, StringComparer.Ordinal) && !granted.Contains(p))
+            .OrderBy(p => p, StringComparer.Ordinal).ToList();
+        if (granted.Count == 0 && notExcluded.Count == 0) return;
+
+        var message = new List<string> { $"{nameof(AdministratorPermissionRegistry)}: the administrator never approves (pass 60)." };
+        if (granted.Count > 0)
+            message.Add($"These approve documents and are in {nameof(Granted)}: {string.Join(", ", granted)}. Move them to {nameof(Excluded)}.");
+        if (notExcluded.Count > 0)
+            message.Add($"These approve documents and must be in {nameof(Excluded)}, with the reason: {string.Join(", ", notExcluded)}.");
+        throw new InvalidOperationException(string.Join(" ", message));
     }
 
     /// <summary>

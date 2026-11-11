@@ -34,7 +34,7 @@ namespace CleanArchitecture.Blazor.Application.IntegrationTests.DataFoundations;
 /// does not ship.
 /// </summary>
 /// <remarks>
-/// The schema is rebuilt from the model on first use (EnsureCreated, after dropping the schemas of this
+/// The schema is rebuilt from the model on first use (EnsureCreated, after dropping every schema of this
 /// throwaway database - never the database). The append-only triggers are applied with the same SQL the
 /// migration helper emits. Tests use unique values rather than a reset.
 /// </remarks>
@@ -57,18 +57,25 @@ public static class ModelHarness
 
             var database = PostgresTestDatabase.FromEnvironment(DatabaseName);
             await database.EnsureExistsAsync();
-            await using (var connection = new NpgsqlConnection(database.ConnectionString))
-            {
-                await connection.OpenAsync();
-                await using var command = new NpgsqlCommand(
-                    "DROP SCHEMA IF EXISTS core CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;", connection);
-                await command.ExecuteNonQueryAsync();
-            }
 
             var services = Build(database.ConnectionString);
             using (var scope = services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                // (P60) Every schema the model uses - the module schemas included - read from the model rather
+                // than named here, plus "core", which Pass 59's databases still hold. Never the database.
+                var schemas = db.Model.GetEntityTypes().Select(e => e.GetSchema()).OfType<string>()
+                    .Append("core").Distinct().ToList();
+                var drop = string.Concat(schemas.Select(s => $"DROP SCHEMA IF EXISTS \"{s}\" CASCADE; "))
+                           + "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;";
+                await using (var connection = new NpgsqlConnection(database.ConnectionString))
+                {
+                    await connection.OpenAsync();
+                    await using var command = new NpgsqlCommand(drop, connection);
+                    await command.ExecuteNonQueryAsync();
+                }
+
                 await db.Database.EnsureCreatedAsync();
                 var ledger = db.Model.FindEntityType(typeof(TestLedgerRow))!;
                 foreach (var sql in AppendOnlyMigrationExtensions.CreateSql(ledger.GetTableName()!, ledger.GetSchema()))
@@ -112,6 +119,13 @@ public static class ModelHarness
         // The test assembly's posting handlers (ScriptedPostingEventHandler), as Testing registers them.
         CleanArchitecture.Blazor.Application.Common.Transactions.PostingEventHandlerRegistration
             .AddPostingEventHandlers(services, typeof(ModelHarness).Assembly);
+
+        // Pass 60: the test approval permissions are policies, as the application's own are.
+        services.AddAuthorizationCore(options =>
+        {
+            foreach (var permission in new[] { TestApprovalPermissions.Approve, TestApprovalPermissions.ApprovePlain })
+                options.AddPolicy(permission, policy => policy.RequireClaim(ApplicationClaimTypes.Permission, permission));
+        });
 
         services.RemoveAll<IUserContextAccessor>();
         services.AddSingleton<IUserContextAccessor>(Accessor);

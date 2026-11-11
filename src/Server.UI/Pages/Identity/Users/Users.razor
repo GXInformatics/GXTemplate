@@ -592,7 +592,7 @@
             }
 
             user.IsActive = false;
-            user.LockoutEnd = DateTimeOffset.MaxValue;
+            user.LockoutEnd = UserAccess.AdministrativeLockoutEnd;
             user.LastModifiedAt = DateTime.UtcNow;
             var result = await _userManager.UpdateAsync(user);
             if (!result.Succeeded)
@@ -600,7 +600,7 @@
                 return string.Join(",", result.Errors.Select(e => e.Description));
             }
             model.IsActive = false;
-            model.LockoutEnd = DateTimeOffset.MaxValue;
+            model.LockoutEnd = UserAccess.AdministrativeLockoutEnd;
             Logger.LogInformation("User deactivated: {UserName} (ID: {UserId})", user.UserName, user.Id);
         }
         return null;
@@ -790,13 +790,13 @@
     private async Task DeactivateUserAsync(ApplicationUser user, ApplicationUserDto model)
     {
         user.IsActive = false;
-        user.LockoutEnd = DateTimeOffset.MaxValue;
+        user.LockoutEnd = UserAccess.AdministrativeLockoutEnd;
         user.LastModifiedAt = DateTime.UtcNow;
         var result = await _userManager.UpdateAsync(user);
         if (result.Succeeded)
         {
             model.IsActive = false;
-            model.LockoutEnd = DateTimeOffset.MaxValue;
+            model.LockoutEnd = UserAccess.AdministrativeLockoutEnd;
             Snackbar.Add(L["The user has been inactivated"], Severity.Info);
         }
         else

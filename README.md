@@ -595,6 +595,39 @@ The order must be an `OrderBy` **in the locked query itself**, not a sort applie
 PostgreSQL locks rows in the order it returns them. A caller that breaks the rule can deadlock; the
 deadlock retry is a safety net, not a licence.
 
+**A row the posting may have to create: `IInsertIfAbsent.EnsureAsync` (Pass 60, C4).** A stock balance
+or cost row may not exist yet, and another transaction may be creating the same one. Read-then-insert
+races: both read "absent", and one fails on the unique index. Ensure the row first, then lock it in
+the order above:
+
+```csharp
+await insertIfAbsent.EnsureAsync(new StockBalance { ItemId = id, WarehouseId = w, BranchId = b },
+    x => new { x.ItemId, x.WarehouseId }, ct);
+var balance = await db.Set<StockBalance>().Where(x => x.ItemId == id && x.WarehouseId == w)
+    .OrderBy(x => x.ItemId).ForUpdate().SingleAsync(ct);
+```
+
+It issues `INSERT … ON CONFLICT (key) DO NOTHING` on the unit of work's transaction. A second
+transaction waits for the first, then does nothing, so neither fails. It returns whether it inserted.
+**PostgreSQL only, and inside a unit of work only.** The key must be the primary key or exactly the
+columns of an unfiltered unique index or alternate key.
+
+**It bypasses `SaveChanges`, so it runs these rules itself:**
+
+- the branch grant;
+- the decimal kinds;
+- the creation audit fields.
+
+**It refuses:**
+
+- `IAuditable` types (the audit-trail row is written only by `SaveChanges`);
+- `IPostable` and `IPostableLine<>`;
+- tenant-scoped types;
+- an entity with pending domain events;
+- inheritance hierarchies, and owned or complex members.
+
+`IAppendOnly` and `IVersioned` rows need no check. Its file is on architecture rule 5's raw-SQL list.
+
 **Gap-free numbers: `IDocumentNumberAllocator.NextAsync(type, branchId, year)`.**
 
 - It allocates inside the unit of work only. The `DocumentSequences` row stays locked until commit,
@@ -743,7 +776,7 @@ statement cannot be checked row by row. The raw-SQL check matches text, so it is
 
 ```csharp
 migrationBuilder.CreateTable(/* … */);
-migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENT", "core");
+migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENT", "inv");   // the module's schema
 ```
 
 The database then refuses `UPDATE`, `DELETE` and `TRUNCATE` from any path. `DataModelGuard` fails
@@ -836,6 +869,296 @@ each module's choice.
   - the switcher moves to the default branch when it is next opened;
   - reads drop the branch at the user's next interaction. The user context is re-read through the
     loader's cache on every hub invocation, and assignment or permission changes clear that cache.
+
+### Approvals
+
+Pass 60. A document is prepared by one person and approved by another, within a value limit. The
+template supplies the mechanism; a module declares which documents need approval.
+
+**The rules**, checked by `IApprovalPolicy` before the handler runs, with the header locked:
+
+1. **Background work never approves.** Work in `ISystemContext` is refused.
+2. **The administrator never approves.** This applies to any member of the `Admin` role, whatever
+   other roles or permissions they hold.
+3. **Nobody approves what they prepared.** Both the submitter (`PreparedById`) and the creator
+   (`CreatedById`) are refused.
+4. **A document is approved once.**
+5. **A branch-scoped document is approved in its own branch.** The command's `BranchId` must be the
+   document's branch, or one of a two-branch document's branches. A document with no branch scope
+   skips this rule.
+6. **The approver's limit covers the stored value.** The limit is the highest over the user's roles'
+   active rows for the document type. For each role, a row for the document's branch overrides the
+   role's row with no branch; for a document with no branch scope, only rows with no branch count.
+   **No row means no authority.**
+
+There is one approval, by someone whose limit covers the value: a branch manager up to 500,000, and
+above that the Budget Holder. The value and the preparer are read from the database, never from the
+command.
+
+**Declaring an approvable document:**
+
+```csharp
+[Module<PurchasingModule>]
+public class PurchaseOrder : BaseVersionedEntity<Guid>, IApprovable<PurchaseOrder>, IMustHaveBranch, IAuditable
+{
+    public static string ApprovalDocumentType => "pur.order";   // unique; limits are kept against it
+    public int BranchId { get; set; }
+    public string? PreparedById { get; set; }
+    [Money] public decimal ApprovalValue { get; set; }          // the STORED value
+    public string? ApprovedById { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+}
+```
+
+Startup fails if an `IApprovable` is not `IVersioned`, is `ISoftDelete`, has a value that is not
+`[Money]`, keeps any of the four fields unmapped, or shares its code with another document type.
+**Branch scope is optional.** An application without branches approves without a dummy branch.
+
+**The approval command:**
+
+```csharp
+public static partial class Permissions
+{
+    public static class PurchaseOrders
+    {
+        [ApprovalPermission] public const string Approve = "Permissions.PurchaseOrders.Approve";
+    }
+}
+
+[RequestAuthorize(Policy = Permissions.PurchaseOrders.Approve)]
+public sealed class ApprovePurchaseOrderCommand : IRequest<Result>, IApprovalCommand<PurchaseOrder>,
+    IIdempotentRequest, IBranchCommand
+{
+    public Guid DocumentId { get; init; }
+    public int BranchId { get; init; }
+    public Guid RequestId { get; init; }
+}
+```
+
+The handler loads the header (the same tracked, locked instance), sets `ApprovedById` to the current
+user and `ApprovedAt`, plus whatever status the module keeps, and saves.
+
+**Startup checks on approval commands** (`RequestContractRegistry`):
+
+- the command is `IIdempotentRequest`;
+- it is `IBranchCommand` when the header is branch-scoped (and only then);
+- every policy it carries is an `[ApprovalPermission]`;
+- no request that is not an approval command carries an approval permission.
+
+**Where the check runs.** `ApprovalBehaviour` sits immediately inside `TransactionBehaviour`. On
+each attempt it:
+
+1. loads the header with `ForUpdate()`;
+2. runs the policy;
+3. installs an approval grant;
+4. calls the handler.
+
+`AuthorizationBehaviour` (the permission) and `BranchAccessBehaviour` (the branch) have already run,
+and all three read fresh from the database. A deadlock retry runs the check again. A replayed
+`RequestId` returns its recorded response without re-checking, because the approval already
+happened. A concurrent second approval waits for the lock, then reads "already approved".
+
+**What fails loudly:**
+
+- **A save that sets or clears `ApprovedById` or `ApprovedAt` outside an approval grant.** It throws:
+  "*… was approved outside an approval command. Implement IApprovalCommand<…>*". The grant must also
+  name the same approver.
+- **An approval permission in `AdministratorPermissionRegistry.Granted`** fails startup. Each
+  approval permission must be in `Excluded`, with its reason. The system account is seeded from
+  `Granted`, so it never approves either.
+- **The UI** refuses to grant an approval permission directly to an `Admin` member or to a role with
+  an `Admin` member. The user dialog refuses a role set that combines `Admin` with an approving role.
+  The `Admin` role's own permissions were already unmodifiable.
+- **A document outside the approver's branch read set** is not found: the header is loaded through
+  the branch filter, so a refusal never reveals it. (P60)
+
+**Refusals** are `ForbiddenAccessException`, like a branch refusal:
+
+| Case | Message |
+|---|---|
+| Administrator | "The administrator account cannot approve documents." |
+| System | "Background work cannot approve documents." |
+| Preparer or creator | "You prepared this {type}. Someone else must approve it." |
+| Already approved | "This {type} is already approved." |
+| Wrong branch | "This {type} belongs to branch {code}, not {code}." |
+| No limit | "You have no approval limit for {type}." |
+| Over limit | "This {type} is {value}. Your approval limit is {limit}, so it needs an approver whose limit covers it." |
+
+Each refusal is logged at Warning with the user, request, document type and id, branch, value, limit
+and a reason code (`Administrator`, `System`, `Preparer`, `AlreadyApproved`, `WrongBranch`,
+`NoLimit`, `OverLimit`). Each approval is logged at Information.
+
+**Maintaining limits:** System → Authorization → **Approval Limits** (`/system/approval-limits`),
+under `Permissions.ApprovalLimits.View` and `.Edit`.
+
+- The administrator holds both: the administrator configures limits but never approves. This means
+  the administrator can raise another user's limit; maker-checker on limits is not built.
+- The `Admin` role can hold no limit.
+- Rows are deactivated, not deleted, and every change is audited.
+- "One row per role, document type and branch" is kept by the command, not by a unique index,
+  because a nullable branch has no portable unique index.
+
+### Modules and schemas
+
+Pass 60. An application is a set of modules (for example Organisation, Catalogue, Partners,
+Inventory, Purchasing, Sales, Stock Taking, Accounting) in one solution and one `ApplicationDbContext`.
+**Each module's tables live in its own PostgreSQL schema.** The template's own tables stay in
+`public`. The template ships no module.
+
+**Declaring a module.** One definition per module, and the attribute on each of its entities:
+
+```csharp
+// src/Domain/Modules/Inventory/InventoryModule.cs
+public sealed class InventoryModule : ModuleDefinition
+{
+    public override string Name => "Inventory";   // = the folder and namespace segment
+    public override string Schema => "inv";        // 1-16 lower-case letters, written once
+}
+
+// src/Domain/Modules/Inventory/Entities/StockItem.cs
+[Module<InventoryModule>]
+public class StockItem : BaseVersionedEntity<Guid>, IMustHaveBranch { … }   // → inv."TBL_STOCK_ITEM"
+```
+
+**Startup fails** (`DataModelGuard`) for:
+
+- an application entity with no `[Module<>]` (only the template's own entities, listed in
+  `TemplateEntities`, live outside a module);
+- two modules sharing a schema or a name;
+- an invalid or reserved schema (`public`, `information_schema`, `dbo`, `sys`);
+- a TPH leaf in another module than its root;
+- **two tables with one name in different schemas.** The bulk-write guard matches tables by name,
+  and SQLite has no schemas.
+- **a navigation across modules** (architecture rule 2).
+
+**Foreign keys across modules are allowed, without a navigation** (decision 3). Declare them in the
+referencing module's configuration:
+
+```csharp
+builder.HasOne<Part>().WithMany().HasForeignKey(x => x.PartId).OnDelete(DeleteBehavior.Restrict);
+```
+
+PostgreSQL enforces a foreign key across schemas: `REFERENCES cat."TBL_PART"`. Navigations to
+template entities (users, branches) are allowed.
+
+**Migrations.** EF emits `EnsureSchema("inv")` before the module's first `CreateTable`, on
+PostgreSQL and SQL Server. Nothing is written by hand. The history table stays
+`public."__EFMigrationsHistory"`, because there is one context and one history. A module's first
+migration looks like:
+
+```csharp
+migrationBuilder.EnsureSchema(name: "inv");
+migrationBuilder.CreateTable(name: "TBL_STOCK_ITEM", schema: "inv", columns: …);
+migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENT", "inv");   // for an IAppendOnly ledger
+```
+
+**A module's schema is permanent.** Renaming one is a hand-written `RenameSchema` migration. SQL
+Server builds the same schemas. SQLite ignores them; the unique-name rule keeps its single namespace
+collision-free.
+
+**Layout:**
+
+| Layer | Folder | Holds |
+|---|---|---|
+| Domain | `src/Domain/Modules/<M>/` | `<M>Module.cs`, `Entities/`, `Contracts/` (posting events and value types other modules may use) |
+| Application | `src/Application/Modules/<M>/` | `Features/<Entity>/{Commands,Queries,DTOs,EventHandlers,Caching,Security,Specifications}`, `Contracts/` (query interfaces and DTOs offered to other modules), `<M>Permissions.cs` |
+| Infrastructure | `src/Infrastructure/Modules/<M>/` | `Configurations/`, implementations of the module's `Contracts` interfaces |
+| Server.UI | `src/Server.UI/Modules/<M>/` | `Pages/<Entity>/`, `Components/`, `<M>Menu.cs` |
+
+**Which module a type is in** is decided by the namespace segment after `Modules`, in every layer.
+A module's **published** surface is its `Contracts` namespaces. Everything else is internal to the
+module, whatever its C# accessibility.
+
+**New module checklist:**
+
+1. `Domain/Modules/<M>/<M>Module.cs`: the name and the schema.
+2. Entities under `Domain/Modules/<M>/Entities`, each `[Module<<M>Module>]`. Decimals need a kind;
+   headers are `BaseVersionedEntity<Guid>`.
+3. **No DbSet property** on `ApplicationDbContext` or `IApplicationDbContext` (architecture rule 10).
+   Handlers use `db.Set<StockItem>()`. The entity enters the model through its configuration, in
+   `Infrastructure/Modules/<M>/Configurations`, and every filter, convention, save rule and guard
+   applies to it as to any other entity.
+4. Permissions: a nested class of the partial `Permissions` in `Application/Modules/<M>`, and a
+   decision for each constant in `AdministratorPermissionRegistry` (`Granted` or `Excluded`; approval
+   permissions are always `Excluded`).
+5. A menu section: an `IMenuContributor` in `Server.UI/Modules/<M>/<M>Menu.cs`. It is registered by
+   scan and placed between "Application" and "MANAGEMENT". **No module edits `MenuService`.**
+6. Posting-event handlers: found by scan. To react to another module's posting, name the event type
+   from that module's `Contracts`.
+7. A migration for every provider in `src/Migrators` (README, "Getting started"). For each
+   `IAppendOnly` table, call `CreateAppendOnlyTrigger(table, schema)`.
+8. Run the tests. The architecture tests check the new module against all of the above.
+
+**New feature in a module:** the existing `Features/<Entity>` layout, under
+`Application/Modules/<M>/Features`, with pages under `Server.UI/Modules/<M>/Pages`. There is no code
+generator in the template. The architecture tests catch a feature placed outside its module, however
+it was made.
+
+### Architecture tests
+
+Pass 60. These ship in the test projects, so every generated project runs them on its own modules.
+Each passes on the template and fails on a deliberately wrong sample.
+
+| # | Rule | How |
+|---|---|---|
+| 1 | A module uses another only through its `Contracts`. An entity configuration may name another module's entity, for a foreign key. | IL type references (`TypeReferenceScanner`, TestSupport) over Domain, Application, Infrastructure and Server.UI. It reads generic method arguments (`Set<T>()`), lambdas and expression trees, `async` and iterator state machines, local functions, Razor components, and generic arguments in fields, base types and attributes. Compiler-generated types count against their declaring type. The six wrong cases are compiled in `tests/ArchitectureSamples`. |
+| 2 | No navigation crosses a module boundary. | `DataModelGuard`, at startup. |
+| 3 | A cacheable request does not read an append-only or branch-scoped table. | At run time: while `FusionCacheBehaviour` fills an entry, `GuardedTableCommandInterceptor` refuses SQL that reads such a table, naming the request and the table. Which table a handler reads is in its LINQ, which no static rule resolves reliably. |
+| 4 | Only `AcrossBranchesAsync` removes the branch filter, and nothing calls a bare `IgnoreQueryFilters()`. | Source scan of `src`. |
+| 5 | `ExecuteUpdate`, `ExecuteDelete`, `ExecuteSql*`, `FromSql*`, `SqlQuery*`, `GetDbConnection` and `CreateCommand` appear only in `SourceRules.RawSqlFiles` and the migrations. | Source scan. A new file is a reviewed change to the list. |
+| 6 | An `IIdempotentRequest` returns `Result` or `Result<T>`, and an approval command fits its header. | `RequestContractRegistry`, at startup. |
+| 7 | No `float`/`double` without `[Approximate]`, and no decimal without a kind. | Pass 59's `DataModelGuard`, at startup. |
+| 8 | An entity under `Modules.<M>` declares `[Module<<M>Module>]`, and no module entity sits outside a module folder. | Reflection over Domain. |
+| 10 | No DbSet of a module entity on the shared context or its interface. | Reflection. |
+
+Rule 9 (no module calls another module's commands) is part of rule 1: a command is not in `Contracts`.
+
+### Errors
+
+Pass 60.
+
+- **No exception's text reaches a user.**
+  - `ResultExceptionBehavior` turns an unexpected exception into "An unexpected error occurred.
+    Reference: …" and logs the detail.
+  - A service that catches its own exception and returns a `Result` does the same: storage uses
+    `FaultReference.Log`, and mail says the reason is in the application log.
+  - A source scan (`ErrorHandlingTests`) fails on a failure result built from an exception's
+    message. The only exceptions allowed are `NotFoundException` and `PostingRejectedException`,
+    whose messages are written for users.
+  - The three unused exception handlers (`FallbackExceptionHandler`, `NotFoundExceptionHandler`,
+    `ValidationExceptionHandler`) were deleted: nothing ran them.
+- **A business rejection keeps its message wherever it is thrown.** `PostingRejectedException` is
+  handled by `TransactionBehaviour` inside a unit of work, and by `ResultExceptionBehavior` outside
+  one. Both log at Information, never as a fault.
+- **A failure can carry a code.** `Result.ErrorCode` (and `IResult.ErrorCode`) is set through the
+  distinctly typed overload `Result.Failure(new ErrorCode("INSUFFICIENT_STOCK"), "message")`, so
+  `Failure("a", "b")` still means two messages.
+  - The pipeline sets `GX.CONCURRENCY_CONFLICT` and `GX.UNEXPECTED`.
+  - A `PostingRejectedException`'s `ErrorCode` reaches the caller.
+  - `Map` and `Bind` carry the code through.
+  - `ConcurrencyConflict.Is` checks the code first, then the message.
+  - A rejection from a nested request reaches the outer request's caller with its message but not
+    its code. (P60)
+
+### Ending a user's session
+
+Pass 60, decision 15. **A user who is deactivated, or locked out by an administrator, loses access
+on their next action and is signed out.** An administrator's lockout is permanent:
+`UserAccess.AdministrativeLockoutEnd`, which deactivation also sets. **An automatic lockout after
+failed sign-ins does not end a live session**; it only blocks new sign-ins. The two are told apart
+by value: Identity's automatic lockout is always time-limited, and startup fails if
+`Lockout.DefaultLockoutTimeSpan` is not finite.
+
+| Where | What happens |
+|---|---|
+| The save (`ApplicationDbContext`) | A user who loses access gets a new security stamp in the same save. Any change to `IsActive` or `LockoutEnd` clears the user's cached context afterwards. Every path saves through here: both deactivation paths, the user dialog, and Identity's own lockout. |
+| `UserContextLoader` | Returns no context for such a user. |
+| `UserContextHubFilter` | On the next hub invocation the method does not run, and the connection is closed (`HubException`). A reconnect is refused. |
+| The cookie (`OnValidatePrincipal`) | The next request rejects the principal and signs out, removing the server-side ticket. This runs whether or not the idle timeout is on. |
+| `IdentityRevalidatingAuthenticationStateProvider` | Also ends the circuit, as a 30-minute backstop. |
+
+The system account is inactive and permanently locked out by design. It is exempt by name, and
+`IdentityService.AuthorizeAsync`, through which background work is authorized, is unchanged.
 
 ### Tenancy
 
@@ -1338,14 +1661,15 @@ out by the stale `gx:idle:signedOut` key. None of that is reachable from the aut
 
 ### Database naming
 
-**Contract: your business models live in the `core` schema as `TBL_UPPER_SNAKE`, and you get that by
-deriving from `BaseEntity` — there is nothing to remember per entity.**
+**Contract: your business models live in their module's schema as `TBL_UPPER_SNAKE`, and you get that by
+deriving from `BaseEntity` and declaring the module (`[Module<T>]`, see "Modules and schemas").** Until
+Pass 60 every business table went to one schema, `core`; `core` is retired.
 
 | Rule | Value |
 |---|---|
-| Schema for business models | `core` |
-| Table naming | `TBL_UPPER_SNAKE` — `core."TBL_STOCK_MOVEMENT"` |
-| Lookup tables | `TBL_LK_UPPER_SNAKE` — `core."TBL_LK_ADJUSTMENT_REASON"` |
+| Schema for business models | the module's (`inv`, `pur`, …), from `[Module<T>]` |
+| Table naming | `TBL_UPPER_SNAKE` — `inv."TBL_STOCK_MOVEMENT"` |
+| Lookup tables | `TBL_LK_UPPER_SNAKE` — `inv."TBL_LK_ADJUSTMENT_REASON"` |
 | Column naming | PascalCase, quoted — EF's default, **no snake_case plugin** |
 | Applied by | one convention loop in `OnModelCreating`, not `[Table]` per entity |
 
@@ -1362,8 +1686,8 @@ the mapping strategy:
 | TPT (`UseTptMappingStrategy()`) | the root **and** every derived type, each its own table |
 | TPC (`UseTpcMappingStrategy()`) | every **concrete** type; an abstract root has no table and gets none |
 | Owned type | nothing — it is table-split into its owner |
-| Implicit many-to-many join | `TBL_` + the upper-snake of EF's join name (`SampleCourseSampleStudent` → `TBL_SAMPLE_COURSE_SAMPLE_STUDENT`), in `core`, when either side lives in `core` |
-| `ToTable(...)` **or `[Table]`** | left exactly as named, schema included |
+| Implicit many-to-many join | `TBL_` + the upper-snake of EF's join name (`SampleCourseSampleStudent` → `TBL_SAMPLE_COURSE_SAMPLE_STUDENT`), in the module's schema, when a side belongs to a module (Pass 60) |
+| `ToTable(...)` **or `[Table]`** | left exactly as named; an explicit schema is kept, and a module entity named without one goes to its module's schema (Pass 60) |
 
 Before Pass 55 a TPT derived type and an implicit join kept EF's default name in the default schema,
 `[Table]` was overridden, and a model with an abstract TPC root could not be built at all (EF refuses
@@ -1395,13 +1719,14 @@ inconsistency. Having **no** lookup tables at all is a normal outcome — a stat
 belongs in a C# enum stored as a string, not in a table.
 
 **The convention ships dormant.** The template defines no entity that reaches it — the only three
-deriving from `BaseAuditableEntity` are pinned below — so a freshly generated project has **no `core`
-schema and no `TBL_` table at all**, and its migration contains no `EnsureSchema("core")`. The schema
-appears the moment you add your first entity deriving from `BaseEntity` / `BaseAuditableEntity`. If
-you generate a project, go looking for `core`, and find nothing, that is why.
+deriving from `BaseAuditableEntity` are pinned below — so a freshly generated project has **no module
+schema and no `TBL_` table at all**, and its migration contains no `EnsureSchema`. A module's schema
+appears the moment you add the module's first entity (`[Module<T>]`). If
+you generate a project, go looking for a module schema, and find nothing, that is why.
 
-**The template's own tables stay out of `core`.** Identity, `Tenants`, `AuditTrails`, `Documents`,
-`PicklistSets`, `SecurityPolicies`, `DataProtectionKeys` and `__EFMigrationsHistory` keep their names
+**The template's own tables stay out of the module schemas.** Identity, `Tenants`, `AuditTrails`, `Documents`,
+`PicklistSets`, `SecurityPolicies`, `ProcessedRequests`, `DocumentSequences`, `Branches`, `UserBranches`,
+`ApprovalLimits`, `DataProtectionKeys` and `__EFMigrationsHistory` keep their names
 in the default schema, so opening pgAdmin shows a visible line between the framework's tables and
 your business's, and so a template upgrade never hands an existing project a rename migration.
 `Documents`, `PicklistSets` and `SecurityPolicies` derive from `BaseAuditableEntity` like any entity
@@ -1431,7 +1756,7 @@ Four consequences, because they are not obvious and they bite late:
 
 1. **Hand-written SQL must quote its identifiers.** PostgreSQL folds unquoted names to lowercase, so
    check constraints, index filters, triggers and plpgsql functions must be written
-   `core."TBL_JOURNAL_ENTRY"`, `"Status"`, `"Debit"`. A single unquoted identifier is rejected at
+   `acc."TBL_JOURNAL_ENTRY"`, `"Status"`, `"Debit"`. A single unquoted identifier is rejected at
    `database update`, so it fails loudly — but it fails *after* the model looks fine.
 
 2. **Never apply `UseSnakeCaseNamingConvention()` to `ApplicationDbContext`.** `UseDatabase` takes a
@@ -1464,8 +1789,9 @@ Four consequences, because they are not obvious and they bite late:
    again for every tenant on every start.
 
 **On SQLite the schema is ignored, not honoured.** The provider drops it and creates a bare
-`TBL_STOCK_MOVEMENT`; PostgreSQL and SQL Server both emit `EnsureSchema("core")` and a qualified
-name. That is benign — but two same-named tables in different schemas would collide on SQLite.
+`TBL_STOCK_MOVEMENT`; PostgreSQL and SQL Server both emit `EnsureSchema("inv")` and a qualified
+name. That is benign, and since Pass 60 `DataModelGuard` refuses two same-named tables in different
+schemas, so they cannot collide on SQLite.
 
 #### Upgrading an existing PostgreSQL project
 

@@ -232,6 +232,9 @@
                 {
                     await _administratorProtection.EnsureRoleRewriteKeepsAnAdministratorAsync(
                         existingUser.Id, existingRoles, Model.AssignedRoles ?? Array.Empty<string>());
+                    // Pass 60: the administrator never approves.
+                    await _administratorProtection.EnsureApprovalSeparationAsync(
+                        existingUser.Id, Model.AssignedRoles ?? Array.Empty<string>());
                 }
                 catch (ForbiddenAccessException ex)
                 {
@@ -343,6 +346,17 @@
                     TimeZoneId = Model.TimeZoneId,
                     CreatedAt = DateTime.UtcNow
                 };
+
+                // Pass 60: the administrator never approves - checked before the user is created.
+                try
+                {
+                    await _administratorProtection.EnsureApprovalSeparationAsync(null, Model.AssignedRoles ?? Array.Empty<string>());
+                }
+                catch (ForbiddenAccessException ex)
+                {
+                    Snackbar.Add(ex.Message, Severity.Error);
+                    return;
+                }
 
                 var result = await _userManager.CreateAsync(newUser);
                 if (!result.Succeeded)

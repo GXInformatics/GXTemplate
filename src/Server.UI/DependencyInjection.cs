@@ -42,6 +42,19 @@ public static class DependencyInjection
     /// <param name="services">The service collection.</param>
     /// <param name="config">The configuration.</param>
     /// <returns>The updated service collection.</returns>
+    /// <summary>
+    /// Registers every <see cref="Services.Navigation.IMenuContributor"/> in this assembly (Pass 60): one per module,
+    /// so a module's menu section needs no edit to a shared file.
+    /// </summary>
+    internal static IServiceCollection AddMenuContributors(this IServiceCollection services)
+    {
+        var contributors = typeof(DependencyInjection).Assembly.GetTypes()
+            .Where(t => t is { IsClass: true, IsAbstract: false } && typeof(Services.Navigation.IMenuContributor).IsAssignableFrom(t));
+        foreach (var contributor in contributors)
+            services.AddScoped(typeof(Services.Navigation.IMenuContributor), contributor);
+        return services;
+    }
+
     public static IServiceCollection AddServerUI(this IServiceCollection services, IConfiguration config)
     {
         services.AddRazorComponents().AddInteractiveServerComponents().AddHubOptions(options => options.MaximumReceiveMessageSize = 10 * 1024 * 1024);
@@ -110,6 +123,7 @@ public static class DependencyInjection
             // Pass 59: the session's active branch and where a lost circuit finds it again.
             .AddScoped<CleanArchitecture.Blazor.Server.UI.Services.Branches.IActiveBranchStore, CleanArchitecture.Blazor.Server.UI.Services.Branches.ProtectedSessionActiveBranchStore>()
             .AddScoped<CleanArchitecture.Blazor.Server.UI.Services.Branches.ActiveBranchState>()
+            .AddMenuContributors()
             .AddScoped<IMenuService, MenuService>()
             .AddScoped<InMemoryNotificationService>()
             .AddScoped<INotificationService>(sp =>

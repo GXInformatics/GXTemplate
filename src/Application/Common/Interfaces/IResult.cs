@@ -11,6 +11,12 @@ public interface IResult
     IReadOnlyList<string> Errors { get; init; }
 
     bool Succeeded { get; init; }
+
+    /// <summary>
+    /// An optional machine-readable code for a failure (Pass 60). A default member, so an implementer
+    /// written before it still compiles and simply has no code.
+    /// </summary>
+    string? ErrorCode => null;
 }
 /// <summary>
 /// Represents the result of an operation that includes data.

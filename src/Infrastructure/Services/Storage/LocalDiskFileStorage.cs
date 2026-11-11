@@ -17,9 +17,11 @@ public class LocalDiskFileStorage : IFileStorage
     private static readonly string NumberPattern = " ({0})";
 
     private readonly string _root;
+    private readonly ILogger? _logger;
 
-    public LocalDiskFileStorage(StorageSettings settings)
+    public LocalDiskFileStorage(StorageSettings settings, ILogger<LocalDiskFileStorage>? logger = null)
     {
+        _logger = logger;
         _root = Path.GetFullPath(Path.IsPathRooted(settings.RootPath)
             ? settings.RootPath
             : Path.Combine(Directory.GetCurrentDirectory(), settings.RootPath));
@@ -68,7 +70,7 @@ public class LocalDiskFileStorage : IFileStorage
         }
         catch (Exception ex)
         {
-            return Result<StoredFile>.Failure($"Failed to upload file: {ex.Message}");
+            return Result<StoredFile>.Failure($"Failed to upload file. Reference: {FaultReference.Log(_logger, ex, "File upload")}.");
         }
     }
 
@@ -99,7 +101,7 @@ public class LocalDiskFileStorage : IFileStorage
         }
         catch (Exception ex)
         {
-            return Result<StoredFileContent>.Failure($"Failed to read file '{key}': {ex.Message}");
+            return Result<StoredFileContent>.Failure($"Failed to read file '{key}'. Reference: {FaultReference.Log(_logger, ex, "File read")}.");
         }
     }
 
@@ -126,7 +128,7 @@ public class LocalDiskFileStorage : IFileStorage
         }
         catch (Exception ex)
         {
-            return Task.FromResult(Result.Failure($"Failed to delete file '{key}': {ex.Message}"));
+            return Task.FromResult(Result.Failure($"Failed to delete file '{key}'. Reference: {FaultReference.Log(_logger, ex, "File delete")}."));
         }
     }
 

@@ -35,3 +35,25 @@ public class UserBranchConfiguration : IEntityTypeConfiguration<UserBranch>
         builder.HasIndex(ub => ub.BranchId);
     }
 }
+
+/// <summary>Approval limits (Pass 60). A template table, in the default schema.</summary>
+public class ApprovalLimitConfiguration : IEntityTypeConfiguration<ApprovalLimit>
+{
+    public void Configure(EntityTypeBuilder<ApprovalLimit> builder)
+    {
+        builder.ToTable("ApprovalLimits");
+        builder.Property(l => l.RoleId).HasMaxLength(450).IsRequired();
+        builder.Property(l => l.DocumentType).HasMaxLength(64).IsRequired();
+
+        // Restrict both ways: a role or a branch with limits is not deleted out from under them.
+        builder.HasOne<CleanArchitecture.Blazor.Domain.Identity.ApplicationRole>().WithMany()
+            .HasForeignKey(l => l.RoleId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Branch>().WithMany().HasForeignKey(l => l.BranchId).OnDelete(DeleteBehavior.Restrict);
+
+        // The policy's lookup. "One row per (role, document type, branch)" is kept by the maintenance command, not a
+        // unique index: a nullable BranchId has no unique-index spelling all three providers accept (pass 59 met the
+        // same problem for UserBranches).
+        builder.HasIndex(l => new { l.DocumentType, l.RoleId, l.BranchId });
+        builder.Ignore(l => l.DomainEvents);
+    }
+}

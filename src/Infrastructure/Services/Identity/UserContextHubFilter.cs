@@ -100,8 +100,15 @@ public class UserContextHubFilter : IHubFilter
             var fresh = await loader.LoadAsync(principal, invocationContext.Context.ConnectionAborted);
             if (fresh is null)
             {
+                // Pass 60, Part D item 4: an authenticated principal with no context no longer exists, has been
+                // deactivated, or has been locked out by an administrator. The invocation does not run - whether it
+                // would have gone through Mediator or straight to UserManager - and the connection is closed. The
+                // client's reconnect then meets the cookie check, which signs the user out.
                 invocationContext.Context.Items.Remove(UserContextKey);
-                return null;
+                var logger = invocationContext.ServiceProvider.GetService<ILogger<UserContextHubFilter>>();
+                logger?.LogInformation("User {UserId} no longer has access; the connection was closed.", snapshot.UserId);
+                invocationContext.Context.Abort();
+                throw new HubException("Your session has ended. Sign in again.");
             }
 
             if (ReferenceEquals(fresh, snapshot)) return snapshot;
@@ -109,7 +116,7 @@ public class UserContextHubFilter : IHubFilter
             invocationContext.Context.Items[UserContextKey] = fresh;
             return fresh;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException and not HubException)
         {
             var logger = invocationContext.ServiceProvider.GetService<ILogger<UserContextHubFilter>>();
             logger?.LogWarning(exception, "Reloading the user context for {UserId} failed; using the connection's snapshot.", snapshot.UserId);
@@ -147,6 +154,12 @@ public class UserContextHubFilter : IHubFilter
                 };
 
                 context.Context.Items[UserContextKey] = userContext;
+            }
+            else
+            {
+                // Pass 60, Part D item 4: an authenticated principal with no context (deactivated, locked out by an
+                // administrator, or gone) is refused a (re)connection.
+                throw new HubException("Your session has ended. Sign in again.");
             }
         }
         await next(context);

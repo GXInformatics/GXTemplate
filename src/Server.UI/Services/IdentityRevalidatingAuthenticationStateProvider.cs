@@ -30,8 +30,12 @@ internal sealed class IdentityRevalidatingAuthenticationStateProvider(
     private async Task<bool> ValidateSecurityStampAsync(UserManager<ApplicationUser> userManager,
         ClaimsPrincipal principal)
     {
-        var user = await userManager.GetUserAsync(principal).ConfigureAwait(false);  
+        var user = await userManager.GetUserAsync(principal).ConfigureAwait(false);
         if (user is null) return false;
+
+        // Pass 60, Part D item 4: the 30-minute backstop also ends the circuit of a user deactivated or locked out by
+        // an administrator. The hub filter and the cookie check end it sooner; this is defence in depth.
+        if (!UserAccess.HasAccess(user)) return false;
 
         if (!userManager.SupportsUserSecurityStamp)
         {

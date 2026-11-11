@@ -84,7 +84,8 @@ public class UserContextAllowedTenantsTests
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var user = new ApplicationUser
         {
-            UserName = $"u{Guid.NewGuid():N}", Email = "u@example.com", TenantId = tenantId
+            UserName = $"u{Guid.NewGuid():N}", Email = "u@example.com", TenantId = tenantId,
+            IsActive = true // (P60) the loader gives a deactivated user no context
         };
         (await userManager.CreateAsync(user)).Succeeded.Should().BeTrue();
 

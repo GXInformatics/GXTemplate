@@ -47,7 +47,7 @@ public sealed class ResultExceptionBehavior<TRequest, TResponse> : IPipelineBeha
         {
             // Pass 58: its own message, because the user's remedy is specific - reload and redo.
             _logger.LogError(exception, "Concurrency conflict saving {RequestType}", typeof(TRequest).Name);
-            return ResultFailureFactory.Create<TResponse>(ConcurrencyConflictMessage);
+            return ResultFailureFactory.Create<TResponse>(ErrorCode.ConcurrencyConflict, ConcurrencyConflictMessage);
         }
         catch (DbUpdateException exception)
         {
@@ -62,6 +62,15 @@ public sealed class ResultExceptionBehavior<TRequest, TResponse> : IPipelineBeha
 
             return state.Response;
         }
+        catch (PostingRejectedException rejection)
+        {
+            // Pass 60: a business rejection is the user's message wherever it is thrown. Inside a unit of
+            // work TransactionBehaviour handles it first; this arm sees one thrown outside a unit of work.
+            // It is an outcome, not a fault: logged at Information, as TransactionBehaviour logs it.
+            _logger.LogInformation("{RequestType} was rejected: {Reason} (code {ErrorCode})",
+                typeof(TRequest).Name, rejection.Message, rejection.ErrorCode ?? "none");
+            return ResultFailureFactory.ForRejection<TResponse>(rejection);
+        }
         catch (Exception exception)
         {
             // Pass 58: the user gets a fixed message and a reference that finds this log entry, not
@@ -69,9 +78,10 @@ public sealed class ResultExceptionBehavior<TRequest, TResponse> : IPipelineBeha
             var reference = Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
             _logger.LogError(exception, "Unhandled exception occurred for request {RequestType} (reference {ErrorReference})",
                 typeof(TRequest).Name, reference);
-            return ResultFailureFactory.Create<TResponse>(UnexpectedErrorMessage(reference));
+            return ResultFailureFactory.Create<TResponse>(ErrorCode.Unexpected, UnexpectedErrorMessage(reference));
         }
     }
+
 
     public const string ConcurrencyConflictMessage = CleanArchitecture.Blazor.Application.Common.Concurrency.ConcurrencyConflict.Message;
 

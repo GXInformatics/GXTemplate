@@ -28,10 +28,13 @@ public class AzureBlobFileStorage : IFileStorage
     private readonly SemaphoreSlim _ensureContainerLock = new(1, 1);
     private bool _containerEnsured;
 
-    public AzureBlobFileStorage(StorageSettings settings)
+    public AzureBlobFileStorage(StorageSettings settings, ILogger<AzureBlobFileStorage>? logger = null)
         : this(new BlobContainerClient(settings.ConnectionString, settings.ContainerName))
     {
+        _logger = logger;
     }
+
+    private readonly ILogger? _logger;
 
     /// <summary>Test seam: lets the provider be exercised against a mocked container client.</summary>
     public AzureBlobFileStorage(BlobContainerClient container)
@@ -89,7 +92,7 @@ public class AzureBlobFileStorage : IFileStorage
         }
         catch (Exception ex)
         {
-            return Result<StoredFile>.Failure($"Failed to upload file: {ex.Message}");
+            return Result<StoredFile>.Failure($"Failed to upload file. Reference: {FaultReference.Log(_logger, ex, "File upload")}.");
         }
     }
 
@@ -120,7 +123,7 @@ public class AzureBlobFileStorage : IFileStorage
         }
         catch (Exception ex)
         {
-            return Result<StoredFileContent>.Failure($"Failed to read file '{key}': {ex.Message}");
+            return Result<StoredFileContent>.Failure($"Failed to read file '{key}'. Reference: {FaultReference.Log(_logger, ex, "File read")}.");
         }
     }
 
@@ -141,7 +144,7 @@ public class AzureBlobFileStorage : IFileStorage
         }
         catch (Exception ex)
         {
-            return Result.Failure($"Failed to delete file '{key}': {ex.Message}");
+            return Result.Failure($"Failed to delete file '{key}'. Reference: {FaultReference.Log(_logger, ex, "File delete")}.");
         }
     }
 

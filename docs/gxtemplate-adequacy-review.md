@@ -144,6 +144,15 @@ The `template` remote is neozhu/CleanArchitectureWithBlazorServer. The fork poin
 10. Fix decimal handling in Excel, add receipt and invoice PDFs, and switch Hangfire to persistent storage (J).
 11. Add a database health check and re-enable CI (K).
 
+**Status (2026-11-11).**
+
+- **Items 2, 3 and 5:** done in pass 58 (template 1.5.0).
+- **Items 1, 4 and 6, and the branch model of item 7:** done in pass 59 (1.6.0).
+- **Items 8 and 9:** done in pass 60 (1.7.0); see `docs/passes/pass60.md`.
+  - Item 8 changed in the details. Limits are kept by role, not by user, and have no currency column. The administrator is refused by role membership at send time, not by a "Super Admin" role.
+  - Item 9 changed in the details. Each module has its own schema, declared with `[Module<T>]`, and `core` is retired. The no-cached-stock rule is a runtime guard.
+- **Items 10 and 11:** pass 61.
+
 ## 7. Things to remove or switch off
 
 - **Tenant features:** the Tenants pages and feature, `TenantSelector`, and the `SwitchTenants` and `SwitchToAnyTenant` permissions. Hide them or seed a single tenant. Keep the filter machinery as the pattern for branches.

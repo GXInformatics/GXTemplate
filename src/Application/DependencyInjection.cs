@@ -37,6 +37,9 @@ public static class DependencyInjection
                 typeof(ResultExceptionBehavior<,>),
                 typeof(CacheInvalidationBehaviour<,>),
                 typeof(TransactionBehaviour<,>),
+                // Pass 60: applies only to IApprovalCommand requests; inside the unit of work so the header is
+                // locked while the approval policy reads it, and before the handler.
+                typeof(ApprovalBehaviour<,>),
                 typeof(PerformanceBehaviour<,>),
                 typeof(FusionCacheBehaviour<,>)
                 ];
@@ -55,6 +58,10 @@ public static class DependencyInjection
         // Deny-by-default is enforced at dispatch time by AuthorizationBehaviour; this fails the
         // application at startup instead, so an unmarked request cannot reach a user at all.
         RequestAuthorizationRegistry.AssertAllRequestsAreMarked(Assembly.GetExecutingAssembly());
+
+        // Pass 60: the request contracts (an idempotent request returns Result; an approval command fits its
+        // header), at startup instead of at the first send.
+        RequestContractRegistry.AssertSound(Assembly.GetExecutingAssembly());
 
         // Same idea one layer over: the administrator grant is two explicit lists rather than a
         // reflection loop, so a new permission constant cannot be granted by accident.

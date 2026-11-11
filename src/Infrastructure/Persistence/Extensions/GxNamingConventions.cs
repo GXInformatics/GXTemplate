@@ -3,6 +3,7 @@
 
 using System.Text.RegularExpressions;
 using CleanArchitecture.Blazor.Domain.Common.Entities;
+using CleanArchitecture.Blazor.Domain.Common.Modules;
 using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence.Extensions;
@@ -13,9 +14,10 @@ namespace CleanArchitecture.Blazor.Infrastructure.Persistence.Extensions;
 /// </summary>
 /// <remarks>
 /// <list type="table">
-/// <item><term>Schema</term><description><c>core</c>, for project business models only</description></item>
-/// <item><term>Tables</term><description><c>TBL_UPPER_SNAKE</c> - <c>core."TBL_STOCK_MOVEMENT"</c></description></item>
-/// <item><term>Lookups</term><description><c>TBL_LK_UPPER_SNAKE</c> - <c>core."TBL_LK_ADJUSTMENT_REASON"</c></description></item>
+/// <item><term>Schema</term><description>the entity's module schema, from <c>[Module&lt;T&gt;]</c> (Pass 60; until
+/// then every project table went to one schema, <c>core</c>)</description></item>
+/// <item><term>Tables</term><description><c>TBL_UPPER_SNAKE</c> - <c>inv."TBL_STOCK_MOVEMENT"</c></description></item>
+/// <item><term>Lookups</term><description><c>TBL_LK_UPPER_SNAKE</c> - <c>inv."TBL_LK_ADJUSTMENT_REASON"</c></description></item>
 /// <item><term>Columns</term><description>PascalCase, quoted by the provider - EF's default, with
 /// no snake_case plugin. See <c>DependencyInjection.UseDatabase</c> for why that plugin must not
 /// come near this context.</description></item>
@@ -29,9 +31,6 @@ namespace CleanArchitecture.Blazor.Infrastructure.Persistence.Extensions;
 /// </remarks>
 public static class GxNamingConventions
 {
-    /// <summary>The schema every project business model is mapped into.</summary>
-    public const string BusinessSchema = "core";
-
     /// <summary>Prefix for a business table.</summary>
     public const string TablePrefix = "TBL_";
 
@@ -52,6 +51,18 @@ public static class GxNamingConventions
         foreach (var entityType in entityTypes)
         {
             var clr = entityType.ClrType;
+
+            // PASS 60. The schema comes from the module, for every entity that declares one, whether or not
+            // it derives from BaseEntity. A schema named by hand (ToTable(name, "reporting")) wins; a table
+            // NAMED by hand without a schema still goes to its module's schema, so ToTable("Legacy") inside
+            // module Inventory is inv."Legacy", not public."Legacy". (EF records ToTable(name) as an
+            // explicit null schema, so "no schema" is tested by value, not by configuration source.)
+            // DataModelGuard fails startup for an application entity that declares no module.
+            if (!entityType.IsPropertyBag && !entityType.IsOwned() && HasOwnTable(entityType)
+                && ModuleDefinition.Of(clr) is { } module && entityType.GetSchema() is null)
+            {
+                entityType.SetSchema(module.Schema);
+            }
 
             // A type test, not a namespace string. A namespace test fails SILENTLY the day entities
             // are moved or a generated project renames its root namespace, and the tables quietly
@@ -78,10 +89,8 @@ public static class GxNamingConventions
             }
 
             // A table name chosen by hand - ToTable(...) in a configuration OR [Table] on the class -
-            // wins over the convention, and gates the schema too: a template entity that pins
-            // ToTable("Documents") must stay in the default schema, not keep its name and move to
-            // core. Until Pass 55 only ToTable was honoured; [Table] (ConfigurationSource
-            // DataAnnotation) was renamed into core.
+            // wins over the convention. A template entity that pins ToTable("Documents") declares no
+            // module, so it stays in the default schema. Until Pass 55 only ToTable was honoured.
             if (IsNamedByHand(entityType))
             {
                 continue;
@@ -89,14 +98,14 @@ public static class GxNamingConventions
 
             var prefix = typeof(ILookupEntity).IsAssignableFrom(clr) ? LookupTablePrefix : TablePrefix;
 
-            entityType.SetSchema(BusinessSchema);
             entityType.SetTableName(prefix + ToUpperSnake(clr.Name));
         }
 
         // Second pass: many-to-many JOIN tables. EF creates them as shared-type property-bag entities
-        // ("SampleCourseSampleStudent") with no CLR type to test, so the first pass never saw them and
-        // they landed in the default schema - a project's own data outside core. A join is named when
-        // at least one side it links lives in core: TBL_ + the upper-snake of EF's join name.
+        // ("SampleCourseSampleStudent") with no CLR type to test, so the first pass never saw them. A join
+        // is named when a side it links belongs to a module: TBL_ + the upper-snake of EF's join name, in
+        // the schema of that module, the declaring side's first (Pass 60). A join across two modules is
+        // refused by DataModelGuard (no navigation crosses a module boundary).
         foreach (var join in entityTypes.Where(IsJoinEntity))
         {
             if (IsNamedByHand(join))
@@ -104,15 +113,16 @@ public static class GxNamingConventions
                 continue;
             }
 
-            var linksCore = SkipNavigationsUsing(modelBuilder.Model, join)
-                .Any(s => s.DeclaringEntityType.GetRootType().GetSchema() == BusinessSchema
-                          || s.TargetEntityType.GetRootType().GetSchema() == BusinessSchema);
-            if (!linksCore)
+            var module = SkipNavigationsUsing(modelBuilder.Model, join)
+                .SelectMany(s => new[] { s.DeclaringEntityType.GetRootType().ClrType, s.TargetEntityType.GetRootType().ClrType })
+                .Select(ModuleDefinition.Of)
+                .FirstOrDefault(m => m is not null);
+            if (module is null)
             {
                 continue;
             }
 
-            join.SetSchema(BusinessSchema);
+            if (join.GetSchema() is null) join.SetSchema(module.Schema);
             join.SetTableName(TablePrefix + ToUpperSnake(join.ShortName()));
         }
 

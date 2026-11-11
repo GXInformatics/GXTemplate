@@ -48,8 +48,12 @@ public class MenuService : IMenuService
     /// link straight to a 404. Removed here, once, rather than omitted from the declaration below, so
     /// that the menu stays one readable list.
     /// </remarks>
-    public MenuService(IIdleTimeoutSettings idleTimeoutSettings)
+    public MenuService(IIdleTimeoutSettings idleTimeoutSettings, IEnumerable<IMenuContributor>? contributors = null)
     {
+        // Pass 60: the modules' sections, between "Application" and "MANAGEMENT", so a module adds its menu
+        // without editing this file.
+        _features.InsertRange(1, (contributors ?? []).OrderBy(c => c.Order).Select(c => c.Section));
+
         if (idleTimeoutSettings.Enabled) return;
 
         foreach (var section in _features)
@@ -121,6 +125,13 @@ public class MenuService : IMenuService
                         {
                             Title = "Branches",
                             Href = "/system/branches",
+                            PageStatus = PageStatus.Completed
+                        },
+                        // Pass 60.
+                        new()
+                        {
+                            Title = "Approval Limits",
+                            Href = "/system/approval-limits",
                             PageStatus = PageStatus.Completed
                         },
                         new()

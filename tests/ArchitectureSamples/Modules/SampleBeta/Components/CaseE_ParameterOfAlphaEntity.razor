@@ -1,0 +1,8 @@
+@namespace CleanArchitecture.Blazor.ArchitectureSamples.Modules.SampleBeta.Components
+@using CleanArchitecture.Blazor.ArchitectureSamples.Modules.SampleAlpha.Entities
+@* e. A Beta component with a parameter of SampleAlpha's entity type. *@
+<p>@Item?.Name</p>
+
+@code {
+    [Parameter] public SampleAlphaItem? Item { get; set; }
+}

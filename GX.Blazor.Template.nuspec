@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
     <metadata>
         <id>GX.Blazor.Template</id>
-        <version>1.6.0</version>
+        <version>1.7.0</version>
         <title>GX Blazor Server Solution Template</title>
         <authors>GX Informatics Limited</authors>
         <description>
@@ -22,6 +22,36 @@
             multi-tenant data model, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
+            1.7.0
+            - Approvals: IApprovable&lt;T&gt; documents are approved only by an IApprovalCommand&lt;T&gt;, which
+              ApprovalBehaviour checks inside the unit of work, with the header locked. Nobody approves what they
+              prepared or created. The administrator and background work never approve. The approver's limit
+              (ApprovalLimits, by role and document type, optionally per branch) must cover the stored value.
+              Branch scope is optional. [ApprovalPermission] constants may never be granted to the administrator,
+              and the UI refuses to give them to an administrator. A save that approves outside an approval
+              command fails. Approval Limits page under System > Authorization.
+            - Modules and schemas: [Module&lt;TModule&gt;] puts an entity's table in its module's schema (core is
+              retired). Startup fails for an application entity with no module, a navigation across modules,
+              or two tables with one name. Configurations under Infrastructure/Modules are applied. Modules
+              add menu sections through IMenuContributor and reach their entities through Set&lt;T&gt;(), not
+              DbSet properties.
+            - Architecture tests in every generated project:
+              - module boundaries, read from IL, including lambdas, async methods, iterators, local functions,
+                Razor components and generic arguments;
+              - no cross-module navigation;
+              - no cacheable query of ledger or branch-scoped tables (refused at run time);
+              - only AcrossBranchesAsync removes the branch filter;
+              - raw SQL only in listed files;
+              - idempotent requests return Result, checked at startup;
+              - no DbSet of a module entity.
+            - IInsertIfAbsent: a concurrency-safe INSERT ... ON CONFLICT DO NOTHING for rows a posting creates,
+              honouring the branch grant, decimal kinds and audit fields.
+            - Errors: no exception text reaches a user (the unused exception handlers were removed; mail and
+              storage return a reference); PostingRejectedException keeps its message outside a unit of work;
+              Result.ErrorCode carries a machine-readable code.
+            - A user deactivated, or locked out by an administrator, while signed in is refused on their next
+              action and signed out. A lockout from failed sign-ins only blocks new sign-ins.
+
             1.6.0
             - Money and quantities: every decimal declares [Money], [Quantity], [UnitCost] or [Rate], which sets
               its precision; startup fails for an undeclared decimal or an unmarked float/double, and a value with

@@ -192,7 +192,9 @@ public class MailDeliveryTests : IDisposable
             .SendAsync(new MailRecipient("ada@example.test"), "s", template);
 
         Assert.False(result.Succeeded);
-        Assert.Contains("the network is down", result.ErrorMessage);
+        // Pass 60 (P60): the exception's own text is logged, never returned - it can carry hosts, keys or data.
+        Assert.DoesNotContain("the network is down", result.ErrorMessage);
+        Assert.Contains("application log", result.ErrorMessage);
     }
 
     [Fact]
