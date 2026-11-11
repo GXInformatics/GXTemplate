@@ -10,6 +10,8 @@ using CleanArchitecture.Blazor.Application.Pipeline;
 using CleanArchitecture.Blazor.Domain.Identity;
 using CleanArchitecture.Blazor.Infrastructure.Configurations;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Interceptors;
+using CleanArchitecture.Blazor.Infrastructure.Persistence.Transactions;
+using CleanArchitecture.Blazor.Application.Common.Interfaces.Transactions;
 using CleanArchitecture.Blazor.Application.Common.Interfaces.MultiTenant;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Logging;
 using CleanArchitecture.Blazor.Infrastructure.Services.Mail;
@@ -134,11 +136,23 @@ public static class DependencyInjection
         {
             var databaseSettings = p.GetRequiredService<IOptions<DatabaseSettings>>().Value;
             m.AddInterceptors(p.GetServices<ISaveChangesInterceptor>());
+            // ForUpdate() -> SELECT ... FOR UPDATE (Pass 58). Stateless, so one instance; a command
+            // interceptor, so it does not take part in the save-changes ordering above.
+            m.AddInterceptors(ForUpdateCommandInterceptor.Instance);
             m.UseExceptionProcessor(databaseSettings.DBProvider);
             m.UseDatabase(databaseSettings.DBProvider, databaseSettings.ConnectionString);
         },  ServiceLifetime.Scoped);
 
         services.AddScoped<IApplicationDbContextFactory, ApplicationDbContextFactory>();
+
+        // Posting transactions (Pass 58): one scoped manager answers both for beginning units of work
+        // (TransactionBehaviour) and for "is one active" (allocator, caching, validation). The
+        // ambient unit of work itself is per logical call chain, not per scope - see UnitOfWorkScope.
+        services.AddScoped<UnitOfWorkManager>();
+        services.AddScoped<IUnitOfWorkManager>(p => p.GetRequiredService<UnitOfWorkManager>());
+        services.AddScoped<IUnitOfWork>(p => p.GetRequiredService<UnitOfWorkManager>());
+        services.AddScoped<IIdempotencyStore, IdempotencyStore>();
+        services.AddScoped<IDocumentNumberAllocator, DocumentNumberAllocator>();
 
         // The idle-timeout pair. Scoped because the provider resolves a scoped context factory; the
         // enforcer is resolved from HttpContext.RequestServices inside the cookie event, which is

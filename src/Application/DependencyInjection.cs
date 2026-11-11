@@ -23,16 +23,27 @@ public static class DependencyInjection
             options.ServiceLifetime = ServiceLifetime.Scoped;
             // AuthorizationBehaviour must stay FIRST: Mediator composes behaviours last-to-first, so
             // the first entry is the outermost and nothing runs before deny-by-default has passed.
+            //
+            // Pass 58: CacheInvalidation moved OUTSIDE Transaction, so a cache is cleared only after
+            // the transaction has committed (or the handler has returned), never before; and
+            // Transaction sits inside ResultException, so an exception it rethrows after rolling back
+            // is still turned into a failure result.
             options.PipelineBehaviors = [
                 typeof(AuthorizationBehaviour<,>),
                 typeof(ValidationBehavior<,>),
                 typeof(ResultExceptionBehavior<,>),
+                typeof(CacheInvalidationBehaviour<,>),
+                typeof(TransactionBehaviour<,>),
                 typeof(PerformanceBehaviour<,>),
-                typeof(FusionCacheBehaviour<,>),
-                typeof(CacheInvalidationBehaviour<,>)
+                typeof(FusionCacheBehaviour<,>)
                 ];
 
         });
+
+        // Posting transactions (Pass 58): in-transaction event handlers, dispatched by
+        // TransactionBehaviour rather than by Mediator's background publisher.
+        services.AddScoped<IPostingEventDispatcher, PostingEventDispatcher>();
+        services.AddPostingEventHandlers(Assembly.GetExecutingAssembly());
        
         // Deny-by-default is enforced at dispatch time by AuthorizationBehaviour; this fails the
         // application at startup instead, so an unmarked request cannot reach a user at all.

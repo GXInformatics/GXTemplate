@@ -132,6 +132,11 @@ public class Testing
         // RecordingTenantSeeder. Registered the way a project registers its own.
         services.AddScoped<ITenantSeeder, RecordingTenantSeeder>();
 
+        // The test assembly's posting event handlers (Pass 58), registered the way a project registers
+        // its own module assemblies.
+        CleanArchitecture.Blazor.Application.Common.Transactions.PostingEventHandlerRegistration
+            .AddPostingEventHandlers(services, typeof(Testing).Assembly);
+
         services.RemoveAll<IDateTime>();
         services.AddScoped<IDateTime>(_ => Clock);
         return services;

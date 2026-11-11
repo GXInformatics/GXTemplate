@@ -1,4 +1,6 @@
-﻿namespace CleanArchitecture.Blazor.Application.Pipeline;
+using System.Diagnostics;
+
+namespace CleanArchitecture.Blazor.Application.Pipeline;
 
 public sealed class ResultExceptionBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
@@ -41,8 +43,18 @@ public sealed class ResultExceptionBehavior<TRequest, TResponse> : IPipelineBeha
 
             return ResultFailureFactory.Create<TResponse>(exception.Message);
         }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            // Pass 58: its own message, because the user's remedy is specific - reload and redo.
+            _logger.LogError(exception, "Concurrency conflict saving {RequestType}", typeof(TRequest).Name);
+            return ResultFailureFactory.Create<TResponse>(ConcurrencyConflictMessage);
+        }
         catch (DbUpdateException exception)
         {
+            // Pass 58: logged. DbExceptionHandler turns it into a user-facing message and has no
+            // logger, so until now a failed save left no trace anywhere.
+            _logger.LogError(exception, "Database update failed for {RequestType}", typeof(TRequest).Name);
+
             var state = new RequestExceptionHandlerState<TResponse>();
             await new DbExceptionHandler<TRequest, TResponse, DbUpdateException>()
                 .Handle(request, exception, state, cancellationToken)
@@ -52,8 +64,17 @@ public sealed class ResultExceptionBehavior<TRequest, TResponse> : IPipelineBeha
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Unhandled exception occurred for request {RequestType}", typeof(TRequest).Name);
-            return ResultFailureFactory.Create<TResponse>($"An unexpected error occurred: {exception.Message}");
+            // Pass 58: the user gets a fixed message and a reference that finds this log entry, not
+            // the exception's own text, which can carry SQL, table names or data.
+            var reference = Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+            _logger.LogError(exception, "Unhandled exception occurred for request {RequestType} (reference {ErrorReference})",
+                typeof(TRequest).Name, reference);
+            return ResultFailureFactory.Create<TResponse>(UnexpectedErrorMessage(reference));
         }
     }
+
+    public const string ConcurrencyConflictMessage = "This record was changed by someone else. Reload and try again.";
+
+    public static string UnexpectedErrorMessage(string reference) =>
+        $"An unexpected error occurred. Reference: {reference}.";
 }

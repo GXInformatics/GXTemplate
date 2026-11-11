@@ -484,6 +484,132 @@ never published for a change the audit write subsequently rolled back.
 Audited entities are those implementing `IAuditable`. **Identity entities are not audited** — see
 Known limitations.
 
+### Posting transactions
+
+**Contract: a request marked `ITransactionalRequest` runs in one context, one connection and one
+transaction, together with every posting event it raises. All of it commits, or none of it does.**
+(Template 1.5.0, pass 58. The design and its tests are in `docs/passes/pass58-transactions-plan.md`.)
+
+PostgreSQL only. Row locks, document numbering and idempotency throw `NotSupportedException` on any
+other provider. The unit of work itself is provider-neutral.
+
+**How a transactional request runs** (`TransactionBehaviour`):
+
+1. It opens a context and a READ COMMITTED transaction.
+2. Every `IApplicationDbContextFactory.CreateAsync` inside the request returns that same context. The
+   context ignores `Dispose` until the unit of work ends, so the usual
+   `await using var db = await factory.CreateAsync(ct)` is correct as it stands.
+3. The handler runs, then the behaviour saves.
+4. **Posting events** (`PostingEvent`, raised with `AddDomainEvent`) are dispatched inline and in
+   order to `IPostingEventHandler<T>` handlers, inside the transaction. The behaviour saves after
+   each round and stops when no events remain, with a limit of 10 rounds.
+5. It commits.
+6. **Ordinary domain events** are published only after the commit, through the usual background
+   publisher.
+
+**When something goes wrong:**
+
+- **Any failure rolls everything back** and discards all events: an exception, a failure result, or a
+  failed nested request. Nothing is published.
+- **A deadlock or serialisation failure** (`40P01`, `40001`) retries the whole request, up to 3
+  attempts. Each attempt gets a fresh context and empty event buffers.
+
+Handlers are registered with `services.AddPostingEventHandlers(assembly)`. `AddApplication` already
+calls it for the Application assembly.
+
+The rules for module authors:
+
+- **Reject for business reasons with `PostingRejectedException`** ("Insufficient stock for item
+  SP-001: 2 on hand, 5 requested.").
+  - Everything rolls back, the request is not retried, and nothing is recorded for idempotency.
+  - The user sees the exception's message; the rejection is logged at Information.
+  - Any other exception is a fault: the user sees a fixed message with a reference id.
+- **Hold no state between attempts, and do not mutate the request.** A retry calls the **same
+  handler instance** with the **same request object**. This was verified against Mediator 3's
+  generated pipeline.
+- **Never use the shared context in parallel** (`Task.WhenAll` over queries); EF throws. For the same
+  reason, validators of a request sent from inside a unit of work run one at a time.
+- **No external I/O in a posting handler** (mail, HTTP, files). Put it in an ordinary domain event
+  handler, which runs after the commit.
+- **Handlers of different modules have no defined order. Dependencies go through chained events.**
+  A posting handler may raise a further posting event on an entity it saves, and the next round
+  dispatches it in the same transaction. A handler that needs another module's result subscribes to
+  **that module's** event, never to the original one:
+
+  ```
+  SalesInvoicePosted ──▶ Inventory: issues stock under lock, computes the unit cost,
+                                    raises StockIssued { ItemId, Quantity, UnitCost }
+  StockIssued        ──▶ Accounting: posts the cost of sales from UnitCost
+  ```
+
+  Accounting never handles `SalesInvoicePosted`.
+- **Nested transactional requests join.** A transactional request sent from inside a unit of work
+  joins it:
+  - it opens no transaction and does not commit;
+  - it does not dispatch or publish events, does not retry, and claims no `RequestId`.
+
+  Its failure result or exception fails the **outer** request too, even if the outer handler ignores
+  it.
+- **Cacheable queries bypass the cache inside a unit of work.** They would otherwise cache rows that
+  may still roll back.
+
+**Idempotency** (`IIdempotentRequest { Guid RequestId }`):
+
+- **Every Post, Approve and Reverse command implements it.** The page creates the `RequestId` once per
+  intended action, keeps it across a reconnect, and sends the same id on every retry.
+- **The first attempt that commits records its response.** A repeat returns that response without
+  running the handler. A repeat that arrives while the first attempt is still running **waits** for
+  it.
+- **A reused id is refused** if it comes with a different request type or a different user.
+- **Responses must be `Result` or `Result<T>`.**
+- **Rows are kept** in `ProcessedRequests` until a purge job exists (a later pass).
+
+**The document lock.** Idempotency stops one request posting twice, but it does not stop two users
+posting one draft (their `RequestId`s differ). So every Post, Approve and Reverse handler **first**:
+
+1. loads its document header with `ForUpdate()`;
+2. re-checks the status inside the transaction;
+3. returns a failure result if the status has moved.
+
+```csharp
+var header = await db.GoodsReceipts.Where(g => g.Id == request.Id).ForUpdate().SingleAsync(ct);
+if (header.Status != DocumentStatus.Approved)
+    return Result<Guid>.Failure($"The goods receipt is already {header.Status}.");
+```
+
+**Row locks: `query.ForUpdate()`** produces `SELECT … FOR UPDATE`. It throws in these cases:
+
+- outside a transaction;
+- on a query that joins (no `Include`; use `IgnoreAutoIncludes()` on entities with auto-included
+  navigations);
+- on a query with neither `ORDER BY` nor `LIMIT`.
+
+**There is one global lock order, matching the flow of a posting. Take locks in this order only:**
+
+1. the document header;
+2. the document number (`IDocumentNumberAllocator`);
+3. item cost rows, ordered by `ItemId`;
+4. stock balance rows, ordered by (`ItemId`, `WarehouseId`).
+
+The order must be an `OrderBy` **in the locked query itself**, not a sort applied afterwards:
+PostgreSQL locks rows in the order it returns them. A caller that breaks the rule can deadlock; the
+deadlock retry is a safety net, not a licence.
+
+**Gap-free numbers: `IDocumentNumberAllocator.NextAsync(type, branchId, year)`.**
+
+- It allocates inside the unit of work only. The `DocumentSequences` row stays locked until commit,
+  and a rollback returns the number, so numbers are never skipped or duplicated.
+- Postings of one type, branch and year are serialised.
+- The module formats the number (`GRN-ABJ-2026-000123`).
+
+**Keys.** Document headers use `Guid.CreateVersion7()` keys, set in the constructor, so an event
+carries the final id when it is raised. High-volume line and ledger tables keep `bigint` identity
+keys.
+
+**Not part of the unit of work:** Identity writes through `UserManager` and `RoleManager`, which use
+their own context. `ImportPicklistSetsCommand` is the template's working example of a transactional
+request.
+
 ### Tenancy
 
 **Contract: rows record which tenant they were written in. Five surfaces are filtered by it —

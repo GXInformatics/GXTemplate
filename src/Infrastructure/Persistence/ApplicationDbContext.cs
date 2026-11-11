@@ -82,6 +82,29 @@ public class ApplicationDbContext : IdentityDbContext<
     public DbSet<SecurityPolicy> SecurityPolicies { get; set; }
     public DbSet<DataProtectionKey> DataProtectionKeys { get; set; }
 
+    /// <summary>Idempotency records (Pass 58). Written only by <c>IdempotencyStore</c>, in raw SQL.</summary>
+    public DbSet<ProcessedRequest> ProcessedRequests { get; set; }
+
+    /// <summary>Gap-free document counters (Pass 58). Written only by <c>DocumentNumberAllocator</c>, in raw SQL.</summary>
+    public DbSet<DocumentSequence> DocumentSequences { get; set; }
+
+    /// <summary>
+    /// True while this context belongs to an active unit of work (Pass 58). <c>Dispose</c> then does
+    /// nothing: every handler in the unit of work gets this one context from
+    /// <c>IApplicationDbContextFactory</c> and disposes it with <c>await using</c>, and only the unit of
+    /// work, when it ends, may actually dispose it.
+    /// </summary>
+    internal bool LeasedToUnitOfWork { get; set; }
+
+    public override ValueTask DisposeAsync() =>
+        LeasedToUnitOfWork ? ValueTask.CompletedTask : base.DisposeAsync();
+
+    public override void Dispose()
+    {
+        if (LeasedToUnitOfWork) return;
+        base.Dispose();
+    }
+
     /// <summary>
     /// The business model's entity configurations. Anything outside this namespace - today, the
     /// log model under <c>Persistence.Logging.Configurations</c> - is deliberately not part of this

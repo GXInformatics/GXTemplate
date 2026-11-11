@@ -6,8 +6,13 @@ using CleanArchitecture.Blazor.Application.Features.PicklistSets.Commands.AddEdi
 
 namespace CleanArchitecture.Blazor.Application.Features.PicklistSets.Commands.Import;
 
+/// <remarks>
+/// <b>Transactional since Pass 58</b> (<see cref="ITransactionalRequest"/>): the rows are imported in one unit of
+/// work, so an import commits completely or not at all, and the cache is cleared only after it commits.
+/// It is also the template's working example of the marker, and the request the pipeline-order test reads.
+/// </remarks>
 [RequestAuthorize(Policy = Permissions.PicklistSets.Import)]
-public class ImportPicklistSetsCommand : ICacheInvalidatorRequest<Result>
+public class ImportPicklistSetsCommand : ICacheInvalidatorRequest<Result>, ITransactionalRequest
 {
     public ImportPicklistSetsCommand(string fileName, byte[] data)
     {

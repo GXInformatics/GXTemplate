@@ -24,3 +24,5 @@ global using Mapster;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.Extensions.Localization;
 global using Microsoft.Extensions.Logging;
+global using CleanArchitecture.Blazor.Application.Common.Interfaces.Transactions;
+global using CleanArchitecture.Blazor.Application.Common.Transactions;

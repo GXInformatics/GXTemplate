@@ -37,21 +37,33 @@ public class FusionCacheBehaviour<TRequest, TResponse> : IPipelineBehavior<TRequ
     private readonly IAppCache _cache;
     private readonly IUserContextAccessor _userContextAccessor;
     private readonly ILogger<FusionCacheBehaviour<TRequest, TResponse>> _logger;
+    private readonly IUnitOfWork? _unitOfWork;
 
     public FusionCacheBehaviour(
         IAppCache cache,
         IUserContextAccessor userContextAccessor,
-        ILogger<FusionCacheBehaviour<TRequest, TResponse>> logger
+        ILogger<FusionCacheBehaviour<TRequest, TResponse>> logger,
+        IUnitOfWork? unitOfWork = null
     )
     {
         _cache = cache;
         _userContextAccessor = userContextAccessor;
         _logger = logger;
+        _unitOfWork = unitOfWork;
     }
 
     public async ValueTask<TResponse> Handle(TRequest request, MessageHandlerDelegate<TRequest, TResponse> next,
         CancellationToken cancellationToken)
     {
+        // Pass 58: never read or fill the cache inside a unit of work. The query sees the transaction's
+        // own uncommitted writes, which may yet roll back; caching them would serve rows that never
+        // existed. (Optional dependency, so the unit tests can still build this from three arguments.)
+        if (_unitOfWork?.IsActive == true)
+        {
+            _logger.LogDebug("Bypassing cache for {RequestType}: a unit of work is active.", typeof(TRequest).Name);
+            return await next(request, cancellationToken).ConfigureAwait(false);
+        }
+
         var user = _userContextAccessor.Current;
 
         if (CacheScopeKey.RequiresUserContext(request.Scope) && user is null)

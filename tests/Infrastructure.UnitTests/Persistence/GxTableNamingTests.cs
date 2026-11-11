@@ -372,7 +372,9 @@ public class TemplateTablesStayOutOfCoreTests
         typeof(ApplicationUser), typeof(ApplicationRole), typeof(ApplicationUserClaim), typeof(ApplicationRoleClaim),
         typeof(ApplicationUserLogin), typeof(ApplicationUserRole), typeof(ApplicationUserToken),
         typeof(IdentityUserPasskey<string>), typeof(Tenant), typeof(TenantUser), typeof(AuditTrail), typeof(Document),
-        typeof(PicklistSet), typeof(SecurityPolicy), typeof(DataProtectionKey)
+        typeof(PicklistSet), typeof(SecurityPolicy), typeof(DataProtectionKey),
+        // Pass 58: the posting-transaction infrastructure tables.
+        typeof(ProcessedRequest), typeof(DocumentSequence)
     ];
 
     [Theory]
@@ -383,6 +385,8 @@ public class TemplateTablesStayOutOfCoreTests
     [InlineData(typeof(Document), "Documents")]
     [InlineData(typeof(PicklistSet), "PicklistSets")]
     [InlineData(typeof(SecurityPolicy), "SecurityPolicies")]
+    [InlineData(typeof(ProcessedRequest), "ProcessedRequests")]
+    [InlineData(typeof(DocumentSequence), "DocumentSequences")]
     public void ATemplateTable_KeepsItsNameAndTheDefaultSchema(Type clrType, string expectedTable)
     {
         // Document and PicklistSet derive from BaseAuditableEntity and are therefore IBusinessEntity
