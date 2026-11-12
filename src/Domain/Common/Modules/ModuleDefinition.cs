@@ -1,21 +1,23 @@
 using System.Reflection;
-using System.Text.RegularExpressions;
 
 namespace CleanArchitecture.Blazor.Domain.Common.Modules;
 
 /// <summary>
-/// One application module (Pass 60): its name and the PostgreSQL schema its tables live in.
+/// One application module (Pass 60): a code boundary. Its tables are in <c>core</c> like every business table
+/// (Pass 60c, GX convention §1.1).
 /// </summary>
 /// <remarks>
 /// An application declares one subclass per module, in <c>Domain/Modules/&lt;Name&gt;/&lt;Name&gt;Module.cs</c>,
-/// and marks each of the module's entities <c>[Module&lt;TheModule&gt;]</c>. The schema is written once, here,
-/// so a typo cannot create a second schema: <c>[Module&lt;InvtModule&gt;]</c> does not compile. The template
-/// itself ships no module. See the README section "Modules and schemas".
+/// and marks each of the module's entities <c>[Module&lt;TheModule&gt;]</c>. The module decides ownership (startup
+/// fails for an application entity without one), forbids navigations to another module's entities, composes the
+/// module's services, permissions, roles and menu, and places its code in <c>Modules/&lt;Name&gt;/</c> in every
+/// layer. It does <b>not</b> choose a schema: from Pass 60 to 1.7.1 it did, and Pass 60c removed
+/// <c>Schema</c>, so a 1.7.x definition that still overrides it no longer compiles. Delete that line.
+/// The template itself ships no module. See the README section "Modules".
 /// <code>
 /// public sealed class InventoryModule : ModuleDefinition
 /// {
 ///     public override string Name =&gt; "Inventory";
-///     public override string Schema =&gt; "inv";
 /// }
 /// </code>
 /// <para>
@@ -28,30 +30,12 @@ public abstract class ModuleDefinition
     /// <summary>The module's name, equal to its folder and namespace segment, e.g. <c>Inventory</c>.</summary>
     public abstract string Name { get; }
 
-    /// <summary>The PostgreSQL schema of the module's tables: 1 to 16 lower-case ASCII letters, e.g. <c>inv</c>.</summary>
-    public abstract string Schema { get; }
-
     /// <summary>
     /// The module's position when services are registered (Pass 60b, decision 4): lowest first, ties broken by
     /// <see cref="Name"/>. It matters only for services registered more than once, chiefly seeders, which run in
     /// registration order: give a module whose seeded rows another module's seeders read the lower number.
     /// </summary>
     public virtual int Order => 0;
-
-    /// <summary>Schemas a module may not use: the default schema, the catalogue schemas and SQL Server's default.</summary>
-    public static readonly IReadOnlySet<string> ReservedSchemas =
-        new HashSet<string>(StringComparer.Ordinal) { "public", "information_schema", "dbo", "sys" };
-
-    private static readonly Regex SchemaPattern = new("^[a-z]{1,16}$", RegexOptions.Compiled);
-
-    /// <summary>Why <paramref name="schema"/> cannot be a module schema, or null when it can.</summary>
-    public static string? SchemaProblem(string schema)
-    {
-        if (!SchemaPattern.IsMatch(schema)) return $"'{schema}' is not 1 to 16 lower-case ASCII letters";
-        if (ReservedSchemas.Contains(schema))
-            return $"'{schema}' is reserved";
-        return null;
-    }
 
     /// <summary>
     /// The module <paramref name="clr"/> declares with <c>[Module&lt;T&gt;]</c> (inherited from a base class), or
@@ -60,7 +44,7 @@ public abstract class ModuleDefinition
     public static ModuleDefinition? Of(Type clr) =>
         clr.GetCustomAttributes<ModuleAttribute>(inherit: true).FirstOrDefault()?.Module;
 
-    public override string ToString() => $"{Name} ({Schema})";
+    public override string ToString() => Name;
 }
 
 /// <summary>The non-generic face of <see cref="ModuleAttribute{TModule}"/>, so the module can be read by reflection.</summary>
@@ -71,8 +55,8 @@ public abstract class ModuleAttribute : Attribute
 }
 
 /// <summary>
-/// Places an entity in a module (Pass 60): its table goes to <c>TModule</c>'s schema.
-/// <code>[Module&lt;InventoryModule&gt;] public class StockItem : BaseVersionedEntity&lt;Guid&gt;, IMustHaveBranch { … }</code>
+/// Places an entity in a module (Pass 60): the module owns it. Its table is <c>core."TBL_…"</c> (Pass 60c).
+/// <code>[Module&lt;InventoryModule&gt;] public class StockItem : BaseVersionedEntity, IMustHaveBranch { … }   // core."TBL_STOCK_ITEMS"</code>
 /// </summary>
 /// <remarks>
 /// An application entity without it fails <c>DataModelGuard</c> at startup. A module entity is reached through

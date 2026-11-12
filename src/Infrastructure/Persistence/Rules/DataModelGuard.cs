@@ -4,6 +4,7 @@ using CleanArchitecture.Blazor.Application.Common.Constants;
 using CleanArchitecture.Blazor.Domain.Common.Entities;
 using CleanArchitecture.Blazor.Domain.Common.Modules;
 using CleanArchitecture.Blazor.Domain.Common.Precision;
+using CleanArchitecture.Blazor.Infrastructure.Persistence.Extensions;
 using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace CleanArchitecture.Blazor.Infrastructure.Persistence.Rules;
@@ -33,6 +34,10 @@ public static class DataModelGuard
             CheckModule(entityType, problems);
             CheckModuleNavigations(entityType, problems);
             CheckApprovable(entityType, problems);
+            CheckBusinessSchema(entityType, problems);
+            CheckLookup(entityType, problems);
+            CheckKey(entityType, problems);
+            CheckEnums(entityType, problems);
         }
         CheckModuleDefinitions(model, problems);
         CheckTableNames(model, problems);
@@ -50,7 +55,7 @@ public static class DataModelGuard
 
         if (!typeof(IVersioned).IsAssignableFrom(clr))
             problems.Add($"{name}: is IApprovable but not IVersioned. An approval must conflict with a concurrent edit of the " +
-                         "document; derive from BaseVersionedEntity<Guid>.");
+                         "document; derive from BaseVersionedEntity<long>.");
         if (typeof(ISoftDelete).IsAssignableFrom(clr))
             problems.Add($"{name}: is IApprovable and ISoftDelete. An approved document is never deleted, softly or otherwise.");
 
@@ -85,7 +90,121 @@ public static class DataModelGuard
         clr.GetProperty("ApprovalDocumentType", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)
             ?.GetValue(null) as string ?? clr.Name;
 
-    // ---- Pass 60: modules and schemas -----------------------------------------------------------
+    // ---- Pass 60c: the GX conventions -----------------------------------------------------------
+
+    /// <summary>
+    /// Decision Q-B: a module entity's table is never in the default schema, which holds Identity and the template's
+    /// own tables only (owner decision D2). It gets there only by a hand-named <c>ToTable(name)</c> with no schema.
+    /// </summary>
+    private static void CheckBusinessSchema(IReadOnlyEntityType entityType, List<string> problems)
+    {
+        if (entityType.IsOwned() || entityType.IsPropertyBag || entityType.GetTableName() is null) return;
+        var clr = entityType.ClrType;
+        if (TemplateEntities.Contains(clr) || ModuleDefinition.Of(clr) is null) return;
+        if (entityType.GetSchema() is null)
+            problems.Add($"{clr.Name}: a module entity whose table '{entityType.GetTableName()}' is in the default schema, which holds " +
+                         "Identity and the template's own tables only. Remove the ToTable (the convention names it " +
+                         $"core.\"{GxNamingConventions.TableNameFor(clr)}\"), or give the schema explicitly: ToTable(name, \"core\").");
+    }
+
+    /// <summary>Owner decisions D4 and Q-A2: a lookup has the fixed columns, an int key, a TBL_LK_ table in core, no decimal.</summary>
+    private static void CheckLookup(IReadOnlyEntityType entityType, List<string> problems)
+    {
+        var clr = entityType.ClrType;
+        if (entityType.IsOwned() || !typeof(ILookupEntity).IsAssignableFrom(clr)) return;
+        var name = clr.Name;
+
+        var key = entityType.FindPrimaryKey();
+        if (key is null || key.Properties.Count != 1 || key.Properties[0].Name != nameof(ILookupEntity.Id) || key.Properties[0].ClrType != typeof(int))
+            problems.Add($"{name}: is a lookup, so its key is one int column Id (owner decision D4). Derive from BaseLkEntity.");
+
+        var nameColumn = entityType.FindProperty(nameof(ILookupEntity.Name));
+        if (nameColumn is null)
+            problems.Add($"{name}.Name: is a lookup's fixed column and is not mapped. Do not Ignore it.");
+        else if (nameColumn.IsNullable)
+            problems.Add($"{name}.Name: is a lookup's fixed column and must be required.");
+        if (entityType.FindProperty(nameof(ILookupEntity.Slug)) is null)
+            problems.Add($"{name}.Slug: is a lookup's fixed column and is not mapped. Do not Ignore it.");
+
+        foreach (var property in entityType.GetProperties().Where(p => DataModelConventions.IsDecimal(p.ClrType)))
+            problems.Add($"{name}.{property.Name}: a lookup carries no decimal column (decision Q-A2). A rate or an amount makes it " +
+                         "master data with rules: derive it from BaseEntity / BaseVersionedEntity, a TBL_ table, and drop ILookupEntity.");
+
+        if (entityType.BaseType is null && entityType.GetTableName() is { } table
+            && (entityType.GetSchema() != GxNamingConventions.BusinessSchema || !table.StartsWith(GxNamingConventions.LookupTablePrefix, StringComparison.Ordinal)))
+            problems.Add($"{name}: is a lookup, so its table is core.\"{GxNamingConventions.LookupTablePrefix}…\"; it is " +
+                         $"{entityType.GetSchema() ?? "(default)"}.\"{table}\". Remove the ToTable.");
+    }
+
+    /// <summary>
+    /// Owner decisions D6 and Q-I: an application entity's key is one int or long column; documents, lines, ledgers and
+    /// approvable headers are long; lookups are int. No Guid, string or composite key.
+    /// </summary>
+    private static void CheckKey(IReadOnlyEntityType entityType, List<string> problems)
+    {
+        if (entityType.IsOwned() || entityType.IsPropertyBag || entityType.BaseType is not null) return;
+        var clr = entityType.ClrType;
+        if (TemplateEntities.Contains(clr) || !typeof(IBusinessEntity).IsAssignableFrom(clr)) return;
+        var key = entityType.FindPrimaryKey();
+        if (key is null) return; // keyless: a view or a query type, no key to judge
+        var name = clr.Name;
+
+        if (key.Properties.Count != 1)
+        {
+            problems.Add($"{name}: has a composite key ({string.Join(", ", key.Properties.Select(p => p.Name))}). Keys are one integer " +
+                         "column (owner decision D6); declare the natural key as a unique index.");
+            return;
+        }
+
+        var type = key.Properties[0].ClrType;
+        if (type != typeof(int) && type != typeof(long))
+        {
+            problems.Add($"{name}: has a {type.Name} key. Keys are integers (owner decision D6): int for master data and lookups, " +
+                         "long for document headers, lines and ledger rows. Never a Guid.");
+            return;
+        }
+
+        var mustBeLong = typeof(IPostable).IsAssignableFrom(clr) ? "IPostable"
+            : LineHeaderTypeOf(clr) is not null ? "IPostableLine<>"
+            : typeof(IAppendOnly).IsAssignableFrom(clr) ? "IAppendOnly"
+            : typeof(IApprovable).IsAssignableFrom(clr) ? "IApprovable"
+            : null;
+        if (mustBeLong is not null && type != typeof(long))
+            problems.Add($"{name}: is {mustBeLong}, a document or ledger table, so its key is long (owner decision D6). " +
+                         "Derive from BaseVersionedEntity<long> or BaseEntity<long>.");
+    }
+
+    /// <summary>Owner decision Q-H: every enum a business entity stores is declared [ExplicitValues].</summary>
+    private static void CheckEnums(IReadOnlyEntityType entityType, List<string> problems)
+    {
+        if (!GxSnakeCaseConvention.IsBusiness(entityType)) return;
+        foreach (var (path, enumType) in EnumsOf(entityType))
+        {
+            if (enumType.GetCustomAttribute<ExplicitValuesAttribute>() is null)
+                problems.Add($"{entityType.ClrType.Name}.{path}: stores enum {enumType.Name} as an integer, so every member needs an explicit " +
+                             $"value and the enum needs [ExplicitValues] (owner decision Q-H): enum {enumType.Name} {{ First = 1, Second = 2 }}.");
+        }
+    }
+
+    /// <summary>The enum types a business entity stores, with the property path, for the guard and the source test.</summary>
+    public static IEnumerable<(string Path, Type Enum)> EnumsOf(IReadOnlyEntityType entityType)
+    {
+        foreach (var property in entityType.GetDeclaredProperties())
+        {
+            var type = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
+            if (type.IsEnum) yield return (property.Name, type);
+        }
+        foreach (var complex in entityType.GetDeclaredComplexProperties())
+        {
+            foreach (var property in complex.ComplexType.GetProperties())
+            {
+                var type = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
+                if (type.IsEnum) yield return ($"{complex.Name}.{property.Name}", type);
+            }
+        }
+    }
+
+    // ---- Pass 60: modules -----------------------------------------------------------------------
 
     private static void CheckModule(IReadOnlyEntityType entityType, List<string> problems)
     {
@@ -111,7 +230,7 @@ public static class DataModelGuard
 
         if (module is null)
         {
-            problems.Add($"{name}: declares no module. Add [Module<…Module>] so its table goes to the module's schema (pass 60); " +
+            problems.Add($"{name}: declares no module. Add [Module<…Module>]: every application entity belongs to one module (pass 60); " +
                          "only the template's own entities (TemplateEntities) live outside a module.");
             return;
         }
@@ -161,16 +280,12 @@ public static class DataModelGuard
             .Select(g => g.First())
             .ToList();
 
+        // Pass 60c: a module no longer has a schema (every business table is in core), so only its name is checked.
         foreach (var module in modules)
         {
-            if (ModuleDefinition.SchemaProblem(module.Schema) is { } problem)
-                problems.Add($"Module {module.GetType().Name}: schema {problem}.");
             if (string.IsNullOrWhiteSpace(module.Name))
                 problems.Add($"Module {module.GetType().Name}: has no name.");
         }
-
-        foreach (var clash in modules.GroupBy(m => m.Schema, StringComparer.Ordinal).Where(g => g.Count() > 1))
-            problems.Add($"Modules {string.Join(" and ", clash.Select(m => m.GetType().Name))} share the schema '{clash.Key}'. Each module has its own.");
 
         foreach (var clash in modules.GroupBy(m => m.Name, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
             problems.Add($"Modules {string.Join(" and ", clash.Select(m => m.GetType().Name))} share the name '{clash.Key}'.");
@@ -178,7 +293,8 @@ public static class DataModelGuard
 
     /// <summary>
     /// Two tables may not share a name in different schemas: the bulk-write guard matches tables by name in any
-    /// schema, and SQLite has no schemas at all.
+    /// schema, and SQLite has no schemas at all. (Pass 60c: every business table is in core, where EF itself refuses
+    /// two unrelated entity types on one table; this still catches a table named by hand into another schema.)
     /// </summary>
     private static void CheckTableNames(IReadOnlyModel model, List<string> problems)
     {
@@ -204,7 +320,7 @@ public static class DataModelGuard
         throw new InvalidOperationException(
             $"Data model check failed: {problems.Count} problem(s)." + Environment.NewLine +
             string.Join(Environment.NewLine, problems.Select(p => "  - " + p)) + Environment.NewLine +
-            "See the README sections \"Money and quantities\", \"Concurrency\", \"Posted records\", \"Branches\" and \"Modules and schemas\". " +
+            "See the README sections \"Money and quantities\", \"Concurrency\", \"Posted records\", \"Branches\", \"Modules\" and \"Database naming\". " +
             "The application refuses to start rather than store data these rules exist to protect.");
     }
 

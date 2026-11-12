@@ -9,7 +9,7 @@ namespace CleanArchitecture.Blazor.Infrastructure.Persistence.Rules;
 /// </summary>
 /// <remarks>
 /// <b>Call it in the migration that creates each <c>IAppendOnly</c> table</b>, after <c>CreateTable</c>:
-/// <code>migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENT", "core");</code>
+/// <code>migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENTS");   // core, the business schema (Pass 60c)</code>
 /// The row trigger refuses <c>UPDATE</c> and <c>DELETE</c>, and the statement trigger refuses
 /// <c>TRUNCATE</c>, from every path: the application, a raw connection, psql. <c>DataModelGuard</c> checks
 /// at startup that every append-only table has both, enabled, so a forgotten call fails loudly.
@@ -22,7 +22,7 @@ public static class AppendOnlyMigrationExtensions
 {
     private const string Function = "gx_refuse_append_only_change";
 
-    public static MigrationBuilder CreateAppendOnlyTrigger(this MigrationBuilder migrationBuilder, string table, string? schema = null)
+    public static MigrationBuilder CreateAppendOnlyTrigger(this MigrationBuilder migrationBuilder, string table, string? schema = Extensions.GxNamingConventions.BusinessSchema)
     {
         if (!migrationBuilder.IsNpgsql()) return migrationBuilder;
         var target = Qualified(table, schema);
@@ -47,7 +47,7 @@ public static class AppendOnlyMigrationExtensions
     }
 
     /// <summary>Removes the triggers (for a migration's <c>Down</c>). The shared function stays.</summary>
-    public static MigrationBuilder DropAppendOnlyTrigger(this MigrationBuilder migrationBuilder, string table, string? schema = null)
+    public static MigrationBuilder DropAppendOnlyTrigger(this MigrationBuilder migrationBuilder, string table, string? schema = Extensions.GxNamingConventions.BusinessSchema)
     {
         if (!migrationBuilder.IsNpgsql()) return migrationBuilder;
         var target = Qualified(table, schema);
@@ -57,7 +57,7 @@ public static class AppendOnlyMigrationExtensions
     }
 
     /// <summary>The SQL the helper runs, for a test or a hand-built schema (EnsureCreated has no migrations).</summary>
-    public static IReadOnlyList<string> CreateSql(string table, string? schema = null)
+    public static IReadOnlyList<string> CreateSql(string table, string? schema = Extensions.GxNamingConventions.BusinessSchema)
     {
         var builder = new MigrationBuilder(Transactions.PostingSql.NpgsqlProvider);
         builder.CreateAppendOnlyTrigger(table, schema);

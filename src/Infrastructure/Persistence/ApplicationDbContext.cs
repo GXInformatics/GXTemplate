@@ -267,11 +267,11 @@ public class ApplicationDbContext : IdentityDbContext<
 
         // LAST, and after ApplyConfigurationsFromAssembly: the GX naming standard yields to an
         // explicit ToTable, so the configurations have to have been applied before it runs. It maps
-        // every IBusinessEntity - i.e. everything deriving from BaseEntity - to "TBL_UPPER_SNAKE" in
-        // its module's schema (Pass 60: [Module<T>], e.g. inv."TBL_STOCK_ITEM"), and leaves this
+        // every IBusinessEntity - i.e. everything deriving from BaseEntity - to core."TBL_PLURAL_UPPER_SNAKE"
+        // (Pass 60c: core again, whatever the module, and plural: core."TBL_STOCK_MOVEMENTS"), and leaves this
         // template's own tables (Identity, Tenants, AuditTrails, Documents, PicklistSets, Branches,
         // DataProtectionKeys, __EFMigrationsHistory) in the default schema under their existing names.
-        // See GxNamingConventions; DataModelGuard fails startup for an application entity with no module.
+        // See GxNamingConventions; GxSnakeCaseConvention (ConfigureConventions) names the columns.
         builder.ApplyGxTableNaming();
     }
 
@@ -392,6 +392,10 @@ public class ApplicationDbContext : IdentityDbContext<
     {
         base.ConfigureConventions(configurationBuilder);
         configurationBuilder.Properties<string>().HaveMaxLength(450);
+
+        // PASS 60c (owner decision D5). snake_case columns, keys, foreign keys and indexes on BUSINESS tables only; Identity,
+        // the template's tables and __EFMigrationsHistory keep their names. Never UseSnakeCaseNamingConvention() here.
+        configurationBuilder.Conventions.Add(_ => new GxSnakeCaseConvention());
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

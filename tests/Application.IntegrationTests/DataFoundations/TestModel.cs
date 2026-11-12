@@ -14,27 +14,25 @@ namespace CleanArchitecture.Blazor.Application.IntegrationTests.DataFoundations;
 // Pass 59. The template ships no ledger, no posted document and no transfer, so these test-only
 // entities stand in for them. They live in TestModelDbContext, in a database of their own.
 //
-// (P60) Every application entity declares a module, so pass 59's test entities share one, schema "tdf".
+// (P60) Every application entity declares a module, so pass 59's test entities share one. (P60c) Its tables are in
+// core, like every business table: a module no longer chooses a schema.
 
 /// <summary>The module of pass 59's test entities.</summary>
 public sealed class FoundationsTestModule : ModuleDefinition
 {
     public override string Name => "FoundationsTest";
-    public override string Schema => "tdf";
 }
 
-/// <summary>Pass 60: the first of two sample modules, schema <c>tsa</c>.</summary>
+/// <summary>Pass 60: the first of two sample modules.</summary>
 public sealed class AlphaModule : ModuleDefinition
 {
     public override string Name => "Alpha";
-    public override string Schema => "tsa";
 }
 
-/// <summary>Pass 60: the second sample module, schema <c>tsb</c>.</summary>
+/// <summary>Pass 60: the second sample module.</summary>
 public sealed class BetaModule : ModuleDefinition
 {
     public override string Name => "Beta";
-    public override string Schema => "tsb";
 }
 
 /// <summary>
@@ -89,10 +87,8 @@ public class TestStampedRow : BaseAuditableEntity
 
 /// <summary>Pass 60, Part A: a branch-scoped document that needs approval.</summary>
 [Module<FoundationsTestModule>]
-public class TestApprovableDocument : BaseVersionedEntity<Guid>, IApprovable<TestApprovableDocument>, IMustHaveBranch, IAuditable
+public class TestApprovableDocument : BaseVersionedEntity<long>, IApprovable<TestApprovableDocument>, IMustHaveBranch, IAuditable
 {
-    public TestApprovableDocument() => Id = Guid.CreateVersion7();
-
     public static string ApprovalDocumentType => "test.document";
 
     public int BranchId { get; set; }
@@ -104,10 +100,8 @@ public class TestApprovableDocument : BaseVersionedEntity<Guid>, IApprovable<Tes
 
 /// <summary>Pass 60, amendment C1: an approvable document with NO branch scope.</summary>
 [Module<FoundationsTestModule>]
-public class TestPlainApprovable : BaseVersionedEntity<Guid>, IApprovable<TestPlainApprovable>
+public class TestPlainApprovable : BaseVersionedEntity<long>, IApprovable<TestPlainApprovable>
 {
-    public TestPlainApprovable() => Id = Guid.CreateVersion7();
-
     public static string ApprovalDocumentType => "test.plain";
 
     public string? PreparedById { get; set; }
@@ -162,15 +156,13 @@ public class TestLedgerRow : BaseEntity<long>, IAppendOnly
 
 /// <summary>A document header that becomes immutable when posted.</summary>
 [Module<FoundationsTestModule>]
-public class TestPostedDocument : BaseVersionedEntity<Guid>, IPostable
+public class TestPostedDocument : BaseVersionedEntity<long>, IPostable
 {
-    public TestPostedDocument() => Id = Guid.CreateVersion7();
-
     public DateTime? PostedAt { get; set; }
 
     [AllowedAfterPosting] public string Status { get; set; } = "Draft";
 
-    [AllowedAfterPosting] public Guid? ReversedById { get; set; }
+    [AllowedAfterPosting] public long? ReversedById { get; set; }
 
     public string? Note { get; set; }
 
@@ -181,7 +173,7 @@ public class TestPostedDocument : BaseVersionedEntity<Guid>, IPostable
 [Module<FoundationsTestModule>]
 public class TestPostedLine : BaseEntity<long>, IPostableLine<TestPostedDocument>
 {
-    public Guid HeaderId { get; set; }
+    public long HeaderId { get; set; }
     public TestPostedDocument? Header { get; set; }
 
     [Quantity] public decimal Quantity { get; set; }

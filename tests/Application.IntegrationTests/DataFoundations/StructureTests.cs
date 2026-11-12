@@ -46,7 +46,7 @@ public class StructureTests
             typeof(TestModelDbContext).GetProperties().Should().NotContain(p => p.PropertyType == typeof(DbSet<AlphaThing>));
             var entity = db.Model.FindEntityType(typeof(AlphaThing))!;
             entity.Should().NotBeNull();
-            entity.GetSchema().Should().Be("tsa");
+            entity.GetSchema().Should().Be("core"); // Pass 60c: every module's tables are in core
             (entity.FindProperty(nameof(AlphaThing.OnHand))!.GetPrecision(), entity.FindProperty(nameof(AlphaThing.OnHand))!.GetScale())
                 .Should().Be((18, 4));
             entity.FindDeclaredQueryFilter(QueryFilters.Branch).Should().NotBeNull("the branch filter loop iterates the model");

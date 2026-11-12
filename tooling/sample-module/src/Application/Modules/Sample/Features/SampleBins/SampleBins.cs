@@ -4,11 +4,11 @@ using CleanArchitecture.Blazor.Domain.Modules.Sample.Entities;
 
 namespace CleanArchitecture.Blazor.Application.Modules.Sample.Features.SampleBins;
 
-public sealed record SampleBinDto(Guid Id, int BranchId, string Name, bool Announced);
+public sealed record SampleBinDto(int Id, int BranchId, string Name, bool Announced);
 
 /// <summary>Creates a bin in one branch, raising the module's published posting event.</summary>
 [RequestAuthorize(Policy = Permissions.SampleBins.Create)]
-public sealed class CreateSampleBinCommand : IRequest<Result<Guid>>, ITransactionalRequest, IBranchCommand
+public sealed class CreateSampleBinCommand : IRequest<Result<int>>, ITransactionalRequest, IBranchCommand
 {
     public int BranchId { get; init; }
     public string Name { get; init; } = string.Empty;
@@ -20,16 +20,16 @@ public sealed class CreateSampleBinCommandValidator : AbstractValidator<CreateSa
 }
 
 public sealed class CreateSampleBinCommandHandler(IApplicationDbContextFactory dbContextFactory)
-    : IRequestHandler<CreateSampleBinCommand, Result<Guid>>
+    : IRequestHandler<CreateSampleBinCommand, Result<int>>
 {
-    public async ValueTask<Result<Guid>> Handle(CreateSampleBinCommand request, CancellationToken cancellationToken)
+    public async ValueTask<Result<int>> Handle(CreateSampleBinCommand request, CancellationToken cancellationToken)
     {
         await using var db = await dbContextFactory.CreateAsync(cancellationToken);
         var bin = new SampleBin { BranchId = request.BranchId, Name = request.Name.Trim() };
-        bin.AddDomainEvent(new SampleBinCreated(bin.Id, bin.BranchId));
+        bin.AddDomainEvent(new SampleBinCreated(bin)); // reads the id at dispatch, after the save (Pass 60c)
         db.Set<SampleBin>().Add(bin);
         await db.SaveChangesAsync(cancellationToken);
-        return Result<Guid>.Success(bin.Id);
+        return Result<int>.Success(bin.Id);
     }
 }
 

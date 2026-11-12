@@ -39,42 +39,42 @@ public static class TestApprovalPermissions
 
 /// <summary>Approves a branch-scoped test document.</summary>
 [RequestAuthorize(Policy = TestApprovalPermissions.Approve)]
-public sealed class ApproveTestDocumentCommand(Guid documentId, int branchId)
+public sealed class ApproveTestDocumentCommand(long documentId, int branchId)
     : IRequest<Result<int>>, IApprovalCommand<TestApprovableDocument>, IIdempotentRequest, IBranchCommand
 {
-    public Guid DocumentId { get; } = documentId;
+    public long DocumentId { get; } = documentId;
     public int BranchId { get; } = branchId;
     public Guid RequestId { get; init; } = Guid.NewGuid();
 }
 
 /// <summary>Amendment C1: approves a document with no branch scope, and is no branch command.</summary>
 [RequestAuthorize(Policy = TestApprovalPermissions.ApprovePlain)]
-public sealed class ApproveTestPlainCommand(Guid documentId) : IRequest<Result<int>>, IApprovalCommand<TestPlainApprovable>, IIdempotentRequest
+public sealed class ApproveTestPlainCommand(long documentId) : IRequest<Result<int>>, IApprovalCommand<TestPlainApprovable>, IIdempotentRequest
 {
-    public Guid DocumentId { get; } = documentId;
+    public long DocumentId { get; } = documentId;
     public Guid RequestId { get; init; } = Guid.NewGuid();
 }
 
 /// <summary>Row 13 / 35: a branch-scoped header approved by a command that is not a branch command.</summary>
 [RequestAuthorize(Policy = TestApprovalPermissions.Approve)]
-public sealed class ApproveWithoutBranchCommand(Guid documentId) : IRequest<Result<int>>, IApprovalCommand<TestApprovableDocument>, IIdempotentRequest
+public sealed class ApproveWithoutBranchCommand(long documentId) : IRequest<Result<int>>, IApprovalCommand<TestApprovableDocument>, IIdempotentRequest
 {
-    public Guid DocumentId { get; } = documentId;
+    public long DocumentId { get; } = documentId;
     public Guid RequestId { get; init; } = Guid.NewGuid();
 }
 
 /// <summary>Row 13: not idempotent.</summary>
 [RequestAuthorize(Policy = TestApprovalPermissions.ApprovePlain)]
-public sealed class ApproveNotIdempotentCommand(Guid documentId) : IRequest<Result<int>>, IApprovalCommand<TestPlainApprovable>
+public sealed class ApproveNotIdempotentCommand(long documentId) : IRequest<Result<int>>, IApprovalCommand<TestPlainApprovable>
 {
-    public Guid DocumentId { get; } = documentId;
+    public long DocumentId { get; } = documentId;
 }
 
 /// <summary>Row 13: authorized by an ordinary permission.</summary>
 [RequestAuthorize(Policy = Permissions.PicklistSets.Edit)]
-public sealed class ApproveByOrdinaryPermissionCommand(Guid documentId) : IRequest<Result<int>>, IApprovalCommand<TestPlainApprovable>, IIdempotentRequest
+public sealed class ApproveByOrdinaryPermissionCommand(long documentId) : IRequest<Result<int>>, IApprovalCommand<TestPlainApprovable>, IIdempotentRequest
 {
-    public Guid DocumentId { get; } = documentId;
+    public long DocumentId { get; } = documentId;
     public Guid RequestId { get; init; } = Guid.NewGuid();
 }
 
@@ -152,7 +152,7 @@ public class ApprovalTests
     private static Task<TestApprovableDocument> DocumentAsync(int branch, decimal value, string preparedBy) =>
         SeedAsync(new TestApprovableDocument { BranchId = branch, ApprovalValue = value, PreparedById = preparedBy });
 
-    private static async Task<T> ReadAsync<T>(Guid id) where T : class, IApprovable
+    private static async Task<T> ReadAsync<T>(long id) where T : class, IApprovable
     {
         using var _ = Accessor.Push(ModelHarness.System);
         var (scope, db) = await ContextAsync();
@@ -164,7 +164,7 @@ public class ApprovalTests
     private static UserContext As(string userId, params int[] branches) => Reader(userId, Reads(branches));
 
     /// <summary>The handler a module would write: record the approver the policy checked.</summary>
-    private static async Task<Result<int>> RecordApprovalAsync<THeader>(IServiceProvider services, Guid id, CancellationToken ct)
+    private static async Task<Result<int>> RecordApprovalAsync<THeader>(IServiceProvider services, long id, CancellationToken ct)
         where THeader : class, IApprovable
     {
         var context = services.GetRequiredService<IUnitOfWork>().Context;

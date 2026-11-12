@@ -1,0 +1,55 @@
+@page "/sample/warehouses"
+@using CleanArchitecture.Blazor.Application.Modules.Sample.Features.Warehouses
+@attribute [Authorize(Policy = Permissions.SampleBins.View)]
+
+@* The sample module's conventions page (Pass 60c): warehouses in core."TBL_WAREHOUSES", their type from the lookup
+   core."TBL_LK_WAREHOUSE_TYPES", and the count of their rows in the ledger core."TBL_WAREHOUSE_MOVEMENTS". The route is
+   lower-case kebab under the module area (GX convention, decided in pass 60c). *@
+<PageTitle>Warehouses</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.End" Class="mb-4">
+    <MudNumericField T="int" @bind-Value="_branchId" Label="Branch id" data-testid="warehouse-branch" />
+    <MudTextField T="string" @bind-Value="_code" Label="Code" data-testid="warehouse-code" />
+    <MudTextField T="string" @bind-Value="_name" Label="Name" data-testid="warehouse-name" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync" data-testid="warehouse-create">Create</MudButton>
+</MudStack>
+@if (_message is not null)
+{
+    <MudAlert Severity="@_severity" Class="mb-4" data-testid="warehouse-message">@_message</MudAlert>
+}
+
+<MudDataGrid T="WarehouseDto" Items="@_warehouses" Dense="true" data-testid="warehouses">
+    <Columns>
+        <PropertyColumn Property="x => x.Code" Title="Code" />
+        <PropertyColumn Property="x => x.Name" Title="Name" />
+        <PropertyColumn Property="x => x.Type" Title="Type" />
+        <PropertyColumn Property="x => x.Status" Title="Status" />
+        <PropertyColumn Property="x => x.Movements" Title="Movements" />
+        <PropertyColumn Property="x => x.BranchId" Title="Branch" />
+    </Columns>
+</MudDataGrid>
+
+@code {
+    private IReadOnlyList<WarehouseDto> _warehouses = [];
+    private int _branchId;
+    private string _code = "";
+    private string _name = "";
+    private string? _message;
+    private Severity _severity = Severity.Info;
+
+    protected override async Task OnInitializedAsync() => _warehouses = await Mediator.Send(new GetWarehousesQuery());
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            var result = await Mediator.Send(new CreateWarehouseCommand { BranchId = _branchId, Code = _code, Name = _name });
+            (_message, _severity) = result.Succeeded ? ($"Created warehouse {result.Data}.", Severity.Success) : (result.ErrorMessage, Severity.Error);
+        }
+        catch (Exception exception)
+        {
+            (_message, _severity) = (exception.Message, Severity.Error);
+        }
+        _warehouses = await Mediator.Send(new GetWarehousesQuery());
+    }
+}

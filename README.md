@@ -635,9 +635,32 @@ columns of an unfiltered unique index or alternate key.
 - Postings of one type, branch and year are serialised.
 - The module formats the number (`GRN-ABJ-2026-000123`).
 
-**Keys.** Document headers use `Guid.CreateVersion7()` keys, set in the constructor, so an event
-carries the final id when it is raised. High-volume line and ledger tables keep `bigint` identity
-keys.
+**Keys (1.8.0, owner decision D6).** Keys are integer identities, as in MNEFleets:
+
+- `int` for master data and lookups;
+- `long` (`bigint`) for document headers, lines and ledger rows;
+- never a Guid. `DataModelGuard` refuses a Guid, string or composite key on an application entity. It also
+  refuses an `IPostable`, `IPostableLine<>`, `IAppendOnly` or `IApprovable` entity whose key is not `long`.
+
+Until 1.7.1 headers were `Guid.CreateVersion7()`, set in the constructor.
+
+**A posting event never captures an id before the row is saved.** A new row's identity is 0 until
+`SaveChanges`. An event raised while the row is built therefore keeps the ENTITY and reads its id when asked.
+Its handlers run after the save, in the same transaction, so by then the id is real. `BranchCreatedEvent`
+is the template's example:
+
+```csharp
+public sealed class WarehouseCreated(Warehouse warehouse) : PostingEvent
+{
+    private readonly Warehouse _warehouse = warehouse;
+    public int WarehouseId => _warehouse.Id;        // read at dispatch, after the save
+    public int BranchId { get; } = warehouse.BranchId;
+}
+```
+
+Before each event is dispatched, `TransactionBehaviour` checks it. A public `int` or `long` property whose
+name ends in `Id` and whose value is 0 fails, naming the event and the property (`PostingEventIdCheck`). An
+id that may legitimately be absent is `int?` / `long?`.
 
 **Not part of the unit of work:** Identity writes through `UserManager` and `RoleManager`, which use
 their own context. `ImportPicklistSetsCommand` is the template's working example of a transactional
@@ -776,7 +799,7 @@ statement cannot be checked row by row. The raw-SQL check matches text, so it is
 
 ```csharp
 migrationBuilder.CreateTable(/* … */);
-migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENT", "inv");   // the module's schema
+migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENTS");   // core, the default schema (1.8.0)
 ```
 
 The database then refuses `UPDATE`, `DELETE` and `TRUNCATE` from any path. `DataModelGuard` fails
@@ -921,12 +944,26 @@ public sealed class OpenDefaultLocation(IApplicationDbContextFactory factory) : 
   `IBranchDefiningCommand` and `ITransactionalRequest` too, sends `AddEditBranchCommand` as a nested
   request, and then writes its rows. Without the marker its writes are refused: the nested command's
   grant ends when it returns.
+- **(1.8.0, T10) Nested inside another request:** a branch-defining command sent from inside a request that
+  is **not** `IBranchDefiningCommand` loses its grant before the outer request's posting events are
+  dispatched. Make the outer request `IBranchDefiningCommand` as well.
 
 **Tightening the rules.** Add an `AbstractValidator<AddEditBranchCommand>` in your module's Application
 folder. `ValidationBehavior` runs it beside the template's, and the dialog shows its message on the field.
 For a unique **name**, add the message in the validator and the index in a configuration of the template's
 `Branch` in `Infrastructure/Modules/<M>/Configurations` (`builder.HasIndex(b => b.Name).IsUnique()`), with
 its migration.
+
+**The floor your rule must accept (1.8.0, T9).** The template's own tests run in your project, under your
+validators and indexes. They create branches with `TestBranches` (tests/TestSupport):
+
+- every code is **6 upper-case letters and digits, starting with a letter** (`^[A-Z][A-Z0-9]{0,5}$`);
+- every name is unique in the database;
+- a branch a test needs only as a fixture is inserted directly, not sent through your validators.
+
+A rule at least as permissive as that floor passes them. Codes of at most 6 capitals and digits, and unique
+names, is one such rule; the smoke test's sample module enforces exactly it. A stricter rule is your own
+conflict with the template's tests, and it shows up as their failure.
 
 **Replacing the screens.** In a module's (or `AppLevel`'s) Server.UI registrations:
 
@@ -972,7 +1009,7 @@ command.
 
 ```csharp
 [Module<PurchasingModule>]
-public class PurchaseOrder : BaseVersionedEntity<Guid>, IApprovable<PurchaseOrder>, IMustHaveBranch, IAuditable
+public class PurchaseOrder : BaseVersionedEntity<long>, IApprovable<PurchaseOrder>, IMustHaveBranch, IAuditable   // a bigint header (1.8.0)
 {
     public static string ApprovalDocumentType => "pur.order";   // unique; limits are kept against it
     public int BranchId { get; set; }
@@ -1002,7 +1039,7 @@ public static partial class Permissions
 public sealed class ApprovePurchaseOrderCommand : IRequest<Result>, IApprovalCommand<PurchaseOrder>,
     IIdempotentRequest, IBranchCommand
 {
-    public Guid DocumentId { get; init; }
+    public long DocumentId { get; init; }   // the header's bigint key (1.8.0; a Guid until 1.7.1)
     public int BranchId { get; init; }
     public Guid RequestId { get; init; }
 }
@@ -1071,12 +1108,23 @@ under `Permissions.ApprovalLimits.View` and `.Edit`.
 - "One row per role, document type and branch" is kept by the command, not by a unique index,
   because a nullable branch has no portable unique index.
 
-### Modules and schemas
+### Modules
 
-Pass 60. An application is a set of modules (for example Organisation, Catalogue, Partners,
+Pass 60; 1.8.0. An application is a set of modules (for example Organisation, Catalogue, Partners,
 Inventory, Purchasing, Sales, Stock Taking, Accounting) in one solution and one `ApplicationDbContext`.
-**Each module's tables live in its own PostgreSQL schema.** The template's own tables stay in
-`public`. The template ships no module.
+**A module is a code boundary.** It decides:
+
+- **ownership:** every application entity belongs to one module, and startup fails for one that does not;
+- **isolation:** no navigation crosses modules, and other modules see only its `Contracts`;
+- **composition:** its services, seeders, permissions, roles and menu;
+- **layout:** its code lives in `Modules/<M>/` in every layer.
+
+**Every module's tables are in `core`,** like every business table (GX convention §1.1, owner decision
+D1). The template's own tables stay in `public`. The template ships no module.
+
+From 1.7.0 to 1.7.1 each module had a schema of its own (`ModuleDefinition.Schema`). 1.8.0 removed it: a
+definition that still overrides `Schema` no longer compiles, so delete that line. "Upgrading to 1.8.0"
+"Database naming", Upgrading to 1.8.0, covers a database built with module schemas.
 
 **Declaring a module.** One definition per module, and the attribute on each of its entities:
 
@@ -1085,23 +1133,23 @@ Inventory, Purchasing, Sales, Stock Taking, Accounting) in one solution and one 
 public sealed class InventoryModule : ModuleDefinition
 {
     public override string Name => "Inventory";   // = the folder and namespace segment
-    public override string Schema => "inv";        // 1-16 lower-case letters, written once
 }
 
 // src/Domain/Modules/Inventory/Entities/StockItem.cs
 [Module<InventoryModule>]
-public class StockItem : BaseVersionedEntity<Guid>, IMustHaveBranch { … }   // → inv."TBL_STOCK_ITEM"
+public class StockItem : BaseVersionedEntity, IMustHaveBranch { … }   // → core."TBL_STOCK_ITEMS"
 ```
 
 **Startup fails** (`DataModelGuard`) for:
 
 - an application entity with no `[Module<>]` (only the template's own entities, listed in
   `TemplateEntities`, live outside a module);
-- two modules sharing a schema or a name;
-- an invalid or reserved schema (`public`, `information_schema`, `dbo`, `sys`);
+- two modules sharing a name;
 - a TPH leaf in another module than its root;
+- **a module entity whose table is in `public`.** That happens only through a hand-named `ToTable(name)`
+  with no schema, which stays where it was put (decision Q-B);
 - **two tables with one name in different schemas.** The bulk-write guard matches tables by name,
-  and SQLite has no schemas.
+  and SQLite has no schemas;
 - **a navigation across modules** (architecture rule 2).
 
 **Foreign keys across modules are allowed, without a navigation** (decision 3). Declare them in the
@@ -1111,23 +1159,20 @@ referencing module's configuration:
 builder.HasOne<Part>().WithMany().HasForeignKey(x => x.PartId).OnDelete(DeleteBehavior.Restrict);
 ```
 
-PostgreSQL enforces a foreign key across schemas: `REFERENCES cat."TBL_PART"`. Navigations to
-template entities (users, branches) are allowed.
+PostgreSQL enforces it: `REFERENCES core."TBL_PARTS"`. Navigations to template entities (users, branches)
+are allowed.
 
-**Migrations.** EF emits `EnsureSchema("inv")` before the module's first `CreateTable`, on
-PostgreSQL and SQL Server. Nothing is written by hand. The history table stays
-`public."__EFMigrationsHistory"`, because there is one context and one history. A module's first
-migration looks like:
+**Migrations.** EF emits `EnsureSchema("core")` before the first business `CreateTable`, on PostgreSQL and
+SQL Server. The history table stays `public."__EFMigrationsHistory"`, because there is one context and one
+history. A module's first migration looks like this; the last three lines are written by hand:
 
 ```csharp
-migrationBuilder.EnsureSchema(name: "inv");
-migrationBuilder.CreateTable(name: "TBL_STOCK_ITEM", schema: "inv", columns: …);
-migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENT", "inv");   // for an IAppendOnly ledger
+migrationBuilder.EnsureSchema(name: "core");
+migrationBuilder.CreateTable(name: "TBL_STOCK_ITEMS", schema: "core", columns: table => new { id = …, branch_id = … });
+migrationBuilder.SeedLookup("TBL_LK_ADJUSTMENT_REASONS", (1, "Damage"), (2, "Count difference"));
+migrationBuilder.ResetIdentitySequence("TBL_LK_ADJUSTMENT_REASONS");
+migrationBuilder.CreateAppendOnlyTrigger("TBL_STOCK_MOVEMENTS");   // for an IAppendOnly ledger
 ```
-
-**A module's schema is permanent.** Renaming one is a hand-written `RenameSchema` migration. SQL
-Server builds the same schemas. SQLite ignores them; the unique-name rule keeps its single namespace
-collision-free.
 
 **Layout:**
 
@@ -1142,11 +1187,20 @@ collision-free.
 A module's **published** surface is its `Contracts` namespaces. Everything else is internal to the
 module, whatever its C# accessibility.
 
+**Names (GX conventions, 1.8.0):**
+
+- class names are singular in new code (`StockMovement`; the table is `TBL_STOCK_MOVEMENTS`);
+- routes are lower-case kebab under the module area (`/inventory/stock-movements`).
+
 **New module checklist:**
 
-1. `Domain/Modules/<M>/<M>Module.cs`: the name and the schema.
-2. Entities under `Domain/Modules/<M>/Entities`, each `[Module<<M>Module>]`. Decimals need a kind;
-   headers are `BaseVersionedEntity<Guid>`.
+1. `Domain/Modules/<M>/<M>Module.cs`: the name.
+2. Entities under `Domain/Modules/<M>/Entities`, each `[Module<<M>Module>]`.
+   - Decimals need a kind.
+   - **Keys:** `int` for master data and lookups (`BaseVersionedEntity`, `BaseLkEntity`); `long` for
+     document headers, lines and ledgers (`BaseVersionedEntity<long>`, `BaseEntity<long>`); never a Guid.
+   - Lookups derive from `BaseLkEntity` / `BaseVersionedLkEntity`.
+   - Every enum an entity stores has an explicit value per member and `[ExplicitValues]`.
 3. **No DbSet property** on `ApplicationDbContext` or `IApplicationDbContext` (architecture rule 10).
    Handlers use `db.Set<StockItem>()`. The entity enters the model through its configuration, in
    `Infrastructure/Modules/<M>/Configurations`, and every filter, convention, save rule and guard
@@ -1158,14 +1212,18 @@ module, whatever its C# accessibility.
 5. A menu section: an `IMenuContributor` in `Server.UI/Modules/<M>/<M>Menu.cs`. It is registered by
    scan and placed between "Application" and "MANAGEMENT". **No module edits `MenuService`.**
 6. Posting-event handlers: found by scan. To react to another module's posting, name the event type
-   from that module's `Contracts`.
+   from that module's `Contracts`. An event about a row created in the same unit of work keeps the
+   entity and reads its id when asked ("Posting transactions", Keys).
 7. Services, seeders and `Contracts` implementations: a `ModuleServices<<M>Module>` per layer (1.7.1,
    "Module services" below). **No module edits a `DependencyInjection` file.**
 8. Roles: `AddApplicationRole` / `GrantToRole` in the module's services ("Roles" below). **No module edits
    `Roles.cs` or the initializer.**
-9. A migration for every provider in `src/Migrators` (README, "Getting started"). For each
-   `IAppendOnly` table, call `CreateAppendOnlyTrigger(table, schema)`.
+9. A migration for every provider in `src/Migrators` (README, "Getting started"). By hand, in it:
+   - `SeedLookup` and `ResetIdentitySequence` for each lookup the application ships;
+   - `CreateAppendOnlyTrigger(table)` for each `IAppendOnly` table.
 10. Run the tests. The architecture tests check the new module against all of the above.
+11. Review the new lines in `tests/Application.UnitTests/Model/tables.approved.txt`, then approve them
+    ("Database naming", The table list).
 
 #### Module services (1.7.1, pass 60b)
 
@@ -1812,83 +1870,148 @@ out by the stale `gx:idle:signedOut` key. None of that is reachable from the aut
 
 ### Database naming
 
-**Contract: your business models live in their module's schema as `TBL_UPPER_SNAKE`, and you get that by
-deriving from `BaseEntity` and declaring the module (`[Module<T>]`, see "Modules and schemas").** Until
-Pass 60 every business table went to one schema, `core`; `core` is retired.
+**Contract (1.8.0, the GX conventions in `docs/gx-conventions.md`): your business models live in `core` as
+`TBL_` + their plural name in upper snake case, with snake_case columns and integer keys. You get that by
+deriving from `BaseEntity`; there is nothing to remember per entity.** The template's own tables keep their
+names, columns and schema.
 
 | Rule | Value |
 |---|---|
-| Schema for business models | the module's (`inv`, `pur`, …), from `[Module<T>]` |
-| Table naming | `TBL_UPPER_SNAKE` — `inv."TBL_STOCK_MOVEMENT"` |
-| Lookup tables | `TBL_LK_UPPER_SNAKE` — `inv."TBL_LK_ADJUSTMENT_REASON"` |
-| Column naming | PascalCase, quoted — EF's default, **no snake_case plugin** |
-| Applied by | one convention loop in `OnModelCreating`, not `[Table]` per entity |
+| Schema for business models | `core`, whatever the module (convention §1.1, owner decision D1) |
+| Table naming | `TBL_` + the **plural** entity name in upper snake case — `StockMovement` → `core."TBL_STOCK_MOVEMENTS"` (D3) |
+| Lookup tables | `TBL_LK_` + the same — `VehicleMake` → `core."TBL_LK_VEHICLE_MAKES"` |
+| Columns | **snake_case** on business tables — `created_by_id`, `branch_id` (D5) |
+| Constraints and indexes | EF's names in lower case — `pk_tbl_warehouses`, `fk_tbl_warehouses_branches_branch_id`, `ix_tbl_warehouses_branch_id`; named by hand: `ux_tbl_…`, `ck_tbl_…` |
+| Keys | `int` for master data and lookups; `long` for headers, lines and ledgers; never a Guid (D6) |
+| Enums | stored as `integer`; every member has an explicit value (Q-H) |
+| Template tables | unchanged: Identity, `Tenants`, `AuditTrails`, `Documents`, `PicklistSets`, `SecurityPolicies`, `ProcessedRequests`, `DocumentSequences`, `Branches`, `UserBranches`, `ApprovalLimits`, `DataProtectionKeys` and `__EFMigrationsHistory` stay in `public`, PascalCase (D2) |
+| Applied by | `GxNamingConventions.ApplyGxTableNaming()` (tables), last in `OnModelCreating`, and `GxSnakeCaseConvention` (columns and constraint names), a model-finalizing convention registered in `ConfigureConventions` |
 
-`BaseEntity` implements `IBusinessEntity`, so every entity you derive from it is picked up by
-`GxNamingConventions.ApplyGxTableNaming()`, which runs last in `ApplicationDbContext.OnModelCreating`.
-Mark a table as a lookup by implementing `ILookupEntity` as well.
+`BaseEntity` implements `IBusinessEntity`, so every entity you derive from it is picked up. Until 1.7.1 the
+template differed from the conventions in several ways:
 
-**Hierarchies, joins and hand-named tables (Pass 55).** The convention names *tables*, so it follows
-the mapping strategy:
+- modules had schemas of their own;
+- table names were singular;
+- columns were PascalCase;
+- document headers were Guid v7;
+- the README advised storing enums as strings.
+
+Pass 60c brought it back to the conventions.
+
+#### Plural table names
+
+The plural is worked out from the class name by fixed rules, applied to its **last word** only. The first
+rule that matches wins:
+
+1. a fixed list of irregular words: `Person` → `People`, `Child` → `Children`, `Criterion` → `Criteria`,
+   `Index` → `Indices`, `Shelf` → `Shelves`, … (`GxNamingConventions.IrregularPlurals`);
+2. a fixed list of words left as they are: `Equipment`, `Information`, `Data`, `Series`, `Staff`,
+   `Personnel`, … (`UnchangedWords`);
+3. a name ending in a digit **fails**, asking for `[PluralName]`;
+4. an acronym: + S unless it ends in S (`VAT` → `VATS`);
+5. ends in *s* but not *ss / us / is / as / os*: already plural, unchanged. So `StoreMovement` and
+   `StoreMovements` both give `TBL_STORE_MOVEMENTS`;
+6. *sis* → *ses* (`Analysis` → `Analyses`);
+7. *s, x, z, ch, sh* → + es (`Status` → `Statuses`, `Box` → `Boxes`, `Branch` → `Branches`);
+8. consonant + *y* → *ies* (`Category` → `Categories`); vowel + *y* → + s (`Day` → `Days`);
+9. otherwise + s.
+
+`PluralisationTests` pins every rule and every list entry. **Where the rules give the wrong word,** put
+`[PluralName("…")]` on the class, giving the plural of the WHOLE class name:
+`[PluralName("StockHistory")]` keeps a singular on purpose.
+
+**The table list.** `tests/Application.UnitTests/Model/tables.approved.txt` lists every table of the model,
+one line each: `core.TBL_WAREHOUSES <- Warehouse [Inventory]`. `ModelTableListTests` fails when the model
+differs from it, printing the lines added and removed. Check each name, then approve the new list:
+
+```
+GX_APPROVE_TABLES=1 dotnet test tests/Application.UnitTests --filter ModelTableListTests
+```
+
+The file is your application's data (owner decision Q-D). Editing it is not editing a template test, and
+every rename shows in review before a migration exists.
+
+#### Hierarchies, joins and hand-named tables
+
+The convention names *tables*, so it follows the mapping strategy:
 
 | Shape | What gets a `TBL_` name |
 |---|---|
 | TPH (EF's default) | the root only — every derived type shares its table |
 | TPT (`UseTptMappingStrategy()`) | the root **and** every derived type, each its own table |
 | TPC (`UseTpcMappingStrategy()`) | every **concrete** type; an abstract root has no table and gets none |
-| Owned type | nothing — it is table-split into its owner |
-| Implicit many-to-many join | `TBL_` + the upper-snake of EF's join name (`SampleCourseSampleStudent` → `TBL_SAMPLE_COURSE_SAMPLE_STUDENT`), in the module's schema, when a side belongs to a module (Pass 60) |
-| `ToTable(...)` **or `[Table]`** | left exactly as named; an explicit schema is kept, and a module entity named without one goes to its module's schema (Pass 60) |
+| Owned type | nothing — it is table-split into its owner; its columns are `owner_property` (`price_amount`) |
+| Implicit many-to-many join | `TBL_` + the upper snake of EF's join name with its last word plural (`SampleCourseSampleStudent` → `TBL_SAMPLE_COURSE_SAMPLE_STUDENTS`), in `core` when either side is |
+| `ToTable(...)` **or `[Table]`** | left exactly as named, schema included. **Without a schema it stays in the default schema** (as before Pass 60, D1), and `DataModelGuard` refuses a module entity there (Q-B). Name the schema (`ToTable("x", "core")`), or let the convention name it |
 
-Before Pass 55 a TPT derived type and an implicit join kept EF's default name in the default schema,
-`[Table]` was overridden, and a model with an abstract TPC root could not be built at all (EF refuses
-to map an abstract type to the table the convention gave it).
+#### Lookups
 
-**Keys, events and transactions (Pass 55).**
+**A lookup is a reference list that users pick from** (MNEFleets' practice; owner decision Q-A1): banks,
+units of measure, vehicle makes, adjustment reasons. Implement `ILookupEntity` by deriving from
+**`BaseLkEntity`**, or from **`BaseVersionedLkEntity`** for one users edit. Its table is `TBL_LK_` in `core`.
 
-- **Keys can be any type.** `BaseEntity<TKey>` and `BaseAuditableEntity<TKey>` (and
-  `BaseAuditableSoftDeleteEntity<TKey>`) take `int`, `long`, `Guid` or `string`; `BaseEntity` and
-  `BaseAuditableEntity` are the `int` forms, so existing entities are unchanged. Domain events are
-  dispatched for every `IHasDomainEvents` and audit fields stamped for every `IAuditableEntity`,
-  whatever the base. One consequence: `BaseAuditableEntity` is now `BaseEntity<int>`, not
-  `BaseEntity` — test for an interface, never for a base class.
+- **The fixed columns** are MNEFleets': `id` (int), `name` (required), `slug` (optional). `DataModelGuard`
+  refuses a lookup that lacks them, has another key, or sits outside `core."TBL_LK_…"`.
+- **Further columns are allowed:** a code, an active flag, a sort order, a description, a foreign key to
+  another lookup, the audit and version columns.
+- **A decimal column is not allowed.** A rate or an amount makes the table master data with rules, so it
+  belongs in `TBL_`. The guard says so (Q-A2).
+- **Seeding is by migration, with explicit ids,** because code may name a seeded row by its id. Then reset
+  the identity sequence in the same migration, or the first row a user adds collides with id 1:
+  ```csharp
+  migrationBuilder.SeedLookup("TBL_LK_WAREHOUSE_TYPES", (1, "Main"), (2, "In transit"));   // id, name, slug
+  migrationBuilder.ResetIdentitySequence("TBL_LK_WAREHOUSE_TYPES");
+  ```
+- **Editing:** the template ships no lookup editor. A lookup users maintain gets a page in its module
+  (Q-A4).
+- **Tests:** the test database's reset puts every lookup a test wrote back to its migrated state, seeded
+  ids included, and the sequence with it (pass 60c, G1). A lookup no test wrote is not touched.
+
+#### Columns, constraints, enums, lengths and times
+
+- **snake_case columns on business tables only.** `GxSnakeCaseConvention` rewrites column, key,
+  foreign-key and index names exactly as the EFCore.NamingConventions plug-in would, so names match
+  MNEFleets' (`employees_id`, `bh_order_id`). It visits business entity types only: Identity, the template's
+  tables and `__EFMigrationsHistory` are never touched. A column or constraint **named by hand is left
+  alone.**
+- **Constraints named by hand** on a business table: a unique index must start `ux_tbl_` and a check
+  constraint `ck_tbl_`. Anything else fails the model build, naming each one (Q-E).
+- **SQL fragments written by hand** (`HasFilter`, `HasCheckConstraint`, computed columns) name the snake
+  column. Write them with `GxSql.Column(nameof(X.Prop))`, which gives `"prop"`, so a rename follows.
+- **Enums are stored as integers,** and the stored number is the contract. Put `[ExplicitValues]` on every
+  enum an entity stores, and give each member a value:
+  ```csharp
+  [ExplicitValues] public enum WarehouseStatus { Open = 1, Closed = 2 }
+  ```
+  `DataModelGuard` refuses an enum without the attribute. The shipped `ConventionSourceTests` reads each
+  such enum's source and fails on a member without `= value` (Q-H).
+- **String lengths.** A length reaches the database only when it is set in the entity configuration
+  (`builder.Property(x => x.Code).HasMaxLength(10)`). `[StringLength]` / `[MaxLength]` on the property alone
+  is overridden by the model-wide default of 450 (`ConfigureConventions`), as in MNEFleets. Making the
+  attribute win is queued for the next pass (Q-G).
+- **Times are `timestamptz`,** holding UTC, and Npgsql's legacy timestamp switch stays forbidden. This is a
+  named departure from MNEFleets, which keeps `timestamp without time zone` (owner decision Q-F).
+
+#### Keys, events and transactions (Pass 55)
+
+- **Keys:** since 1.8.0 they are integers ("Posting transactions", Keys). `BaseEntity<TKey>` and
+  `BaseAuditableEntity<TKey>` (and `BaseAuditableSoftDeleteEntity<TKey>`) still take any key type for the
+  template's own entities. `DataModelGuard` allows only `int` and `long` on application entities.
+  `BaseEntity` and `BaseAuditableEntity` are the `int` forms. Test for an interface, never for a base
+  class.
 - **A handler can own a transaction.** `IApplicationDbContext.Database` exposes the facade, so
   `await using var tx = await db.Database.BeginTransactionAsync(ct)` works from Application without a
   cast; audit rows join that transaction and roll back with it.
 
-**What counts as a lookup.** One question: *does any code branch on this row's value?*
+**The convention ships dormant.** The template defines no business entity, so a freshly generated project
+has **no `core` schema and no `TBL_` table at all**, and its migrations contain no `EnsureSchema`. `core`
+appears with the first module entity.
 
-- **No** → it is a lookup (`TBL_LK_`). The application treats every row identically; it is code plus
-  description and nothing else, and a client can safely add rows without a developer.
-- **Yes** → it is not a lookup (`TBL_`), however small or dropdown-ish it looks. A tax code carrying
-  rates and GL mappings is `TBL_`; so is an account that posting rules resolve to.
+`GxTableNamingTests`, `PluralisationTests`, `TemplateTablesStayOutOfCoreTests`, `CoreSchemaTests` and
+`ModelTableListTests` assert all of the above. They also assert that a second `dotnet ef migrations add`
+produces an *empty* migration.
 
-Deliberately a two-way split. Resist a third category for "master data with behaviour": the boundary
-between a master and a transactional document is a spectrum (versioned price lists, BOMs with
-lifecycle states), so a third category produces per-entity judgement calls and therefore
-inconsistency. Having **no** lookup tables at all is a normal outcome — a status the code switches on
-belongs in a C# enum stored as a string, not in a table.
-
-**The convention ships dormant.** The template defines no entity that reaches it — the only three
-deriving from `BaseAuditableEntity` are pinned below — so a freshly generated project has **no module
-schema and no `TBL_` table at all**, and its migration contains no `EnsureSchema`. A module's schema
-appears the moment you add the module's first entity (`[Module<T>]`). If
-you generate a project, go looking for a module schema, and find nothing, that is why.
-
-**The template's own tables stay out of the module schemas.** Identity, `Tenants`, `AuditTrails`, `Documents`,
-`PicklistSets`, `SecurityPolicies`, `ProcessedRequests`, `DocumentSequences`, `Branches`, `UserBranches`,
-`ApprovalLimits`, `DataProtectionKeys` and `__EFMigrationsHistory` keep their names
-in the default schema, so opening pgAdmin shows a visible line between the framework's tables and
-your business's, and so a template upgrade never hands an existing project a rename migration.
-`Documents`, `PicklistSets` and `SecurityPolicies` derive from `BaseAuditableEntity` like any entity
-of yours, and stay put only because their configurations call `ToTable(...)` explicitly — which the
-convention yields to, on schema as well as name.
-
-`GxTableNamingTests` and `TemplateTablesStayOutOfCoreTests` assert all of the above, including the
-acronym handling (`UomConversion` → `TBL_UOM_CONVERSION`, not `TBL_U_OM_CONVERSION`) and that a
-second `dotnet ef migrations add` produces an *empty* migration.
-
-**`ModelMatchesMigrationsTests` now asserts that emptiness for all three providers, on every test
+**`ModelMatchesMigrationsTests` asserts that emptiness for all three providers, on every test
 run, without a database.** `HasPendingModelChanges()` compares the context's model with the snapshot
 compiled into each migrations assembly; both are in-memory, so the check costs about a second and
 needs no server. If you change an entity or an `IEntityTypeConfiguration` and do not regenerate,
@@ -1905,25 +2028,25 @@ Version 3 or later, and it reads that from the options' *application* service pr
 
 Four consequences, because they are not obvious and they bite late:
 
-1. **Hand-written SQL must quote its identifiers.** PostgreSQL folds unquoted names to lowercase, so
-   check constraints, index filters, triggers and plpgsql functions must be written
-   `acc."TBL_JOURNAL_ENTRY"`, `"Status"`, `"Debit"`. A single unquoted identifier is rejected at
-   `database update`, so it fails loudly — but it fails *after* the model looks fine.
+1. **Hand-written SQL must quote the TABLE names.** They are upper case (`core."TBL_JOURNAL_ENTRIES"`),
+   and PostgreSQL folds an unquoted name to lower case. Business columns are lower case and need no
+   quotes (`amount`, `branch_id`). The template's own tables' columns still do (`"IsDefault"`). An
+   unquoted mistake is rejected at `database update`, so it fails loudly, but only after the model looks
+   fine.
 
-2. **Never apply `UseSnakeCaseNamingConvention()` to `ApplicationDbContext`.** `UseDatabase` takes a
-   `snakeCaseNaming` flag and only `LogDbContext` sets it, because Serilog's PostgreSQL sink owns
-   that table and writes snake_case columns. On the business context the plugin also rewrites EF's
-   *migration history* model, creating `__EFMigrationsHistory` with `migration_id` /
-   `product_version`; the day it is removed, EF queries `"MigrationId"` and fails with
-   `42703: column "MigrationId" does not exist` — a database that can be neither migrated forward nor
-   inspected, recoverable only by hand-altering EF's own bookkeeping table.
+2. **Never apply `UseSnakeCaseNamingConvention()` to `ApplicationDbContext`.** Business tables get
+   snake_case from `GxSnakeCaseConvention`, which visits business tables only. The plug-in rewrites the
+   WHOLE model: Identity, the template's tables, and EF's *migration history* model, creating
+   `__EFMigrationsHistory` with `migration_id` / `product_version`. The day it is removed, EF queries
+   `"MigrationId"` and fails with `42703: column "MigrationId" does not exist`. That is a database that can
+   be neither migrated forward nor inspected, recoverable only by hand-altering EF's own bookkeeping table.
+   `UseDatabase` takes a `snakeCaseNaming` flag, and only `LogDbContext` sets it, because Serilog's
+   PostgreSQL sink owns that table.
 
-3. **`ApplyConfigurationsFromAssembly`'s namespace filter is case-sensitive.** Both contexts filter
-   by `t.Namespace == …Namespace`, computed from a `typeof(...)` rather than a string literal, for
-   exactly this reason: a hard-coded namespace whose casing does not match (`Ims.` vs `IMS.`) drops
-   **every** configuration silently — no check constraints, no unique indexes, no row versions — and
-   the application still builds and boots. Keep it type-derived, or assert the configuration count
-   in a test.
+3. **`ApplyConfigurationsFromAssembly`'s predicate is load-bearing.** Since Pass 60 it applies every
+   configuration in the Infrastructure assembly except the log model's. `ConfigurationScanTests` asserts
+   it, because a configuration the scan drops falls back to conventions silently: no check constraints,
+   no unique indexes, no row versions, and the application still builds and boots.
 
 4. **Seeders must be idempotent per item, never per "has anything been seeded".** This is the
    template's own seeding pattern, in `ApplicationDbContextInitializer.EnsureRoleAsync`: each role is
@@ -1940,35 +2063,47 @@ Four consequences, because they are not obvious and they bite late:
    again for every tenant on every start.
 
 **On SQLite the schema is ignored, not honoured.** The provider drops it and creates a bare
-`TBL_STOCK_MOVEMENT`; PostgreSQL and SQL Server both emit `EnsureSchema("inv")` and a qualified
-name. That is benign, and since Pass 60 `DataModelGuard` refuses two same-named tables in different
-schemas, so they cannot collide on SQLite.
+`TBL_STOCK_MOVEMENTS`; PostgreSQL and SQL Server both emit `EnsureSchema("core")` and a qualified name.
+`DataModelGuard` refuses two same-named tables in different schemas, so they cannot collide on SQLite.
 
-#### Upgrading an existing PostgreSQL project
+#### Upgrading to 1.8.0 from 1.7.x
 
-Adopting this standard renames every table and every column on a project that was previously
-snake_cased — and those databases also carry a snake_cased `__EFMigrationsHistory`, which blocks EF
-before it can apply anything at all. **This is a deliberate, tested exercise per project, not a
-template bump.**
+1.8.0 moves business tables from module schemas to `core`, makes their names plural and their columns
+snake_case, and takes Guid keys out. The template's own tables do not change, so a project with no module
+yet has nothing to migrate.
 
-If the project has **no deployed database**, do not migrate: delete its migrations and regenerate a
-single clean initial. Far better than layering hundreds of renames into the first page of its
-history.
+**Code changes, every project:**
 
-Otherwise:
+- delete `Schema` from each `ModuleDefinition` (it no longer compiles);
+- change document headers from `BaseVersionedEntity<Guid>` to `BaseVersionedEntity<long>`, and remove any
+  `Id = Guid.CreateVersion7()`;
+- make each approval command's `DocumentId` a `long`;
+- make every posting event that carried a new row's id keep the entity instead;
+- move lookups to `BaseLkEntity` / `BaseVersionedLkEntity`;
+- put `[ExplicitValues]` and member values on stored enums;
+- rewrite hand-written SQL fragments with `GxSql.Column`;
+- rename hand-named unique indexes to `ux_tbl_…`;
+- approve the table list.
 
-1. Take a backup, and confirm it restores. Not "confirm it exists".
-2. Rename EF's own bookkeeping first, or nothing else can run:
-   ```sql
-   ALTER TABLE "__EFMigrationsHistory" RENAME COLUMN migration_id  TO "MigrationId";
-   ALTER TABLE "__EFMigrationsHistory" RENAME COLUMN product_version TO "ProductVersion";
-   ```
-3. Generate the rename migration against the new conventions and **read every operation** — confirm
-   they are `RenameTable` / `RenameColumn`, never drop-and-create. EF will happily generate the
-   latter, and it takes the data with it.
-4. Re-point any hand-written SQL — views, functions, triggers, reports, scripts outside EF — at the
-   new quoted identifiers. EF does not find these for you, and they fail at the point of use.
-5. Rehearse the whole sequence on a restored copy of production before touching production.
+**A project with no deployed database: regenerate, do not migrate.** Delete its module migrations, then
+`dotnet ef migrations add <Module>` once per provider. On each development and test database, delete those
+migrations' `__EFMigrationsHistory` rows and `DROP SCHEMA <module schema> CASCADE`. Never drop the
+database.
+
+**A deployed project:** one migration per provider, generated and then **read operation by operation**.
+
+1. Take a backup and confirm it restores. Not "confirm it exists".
+2. `EnsureSchema("core")`.
+3. One `RenameTable(name: "TBL_WAREHOUSE", schema: "inv", newName: "TBL_WAREHOUSES", newSchema: "core")`
+   per table. Confirm EF emitted renames, never a drop and a create: those take the data with them.
+4. `RenameColumn` for every column. Primary keys, foreign keys and indexes are dropped and re-added under
+   their new names. That is safe, but it rebuilds them, so plan the time.
+5. A Guid key becomes `bigint` by hand: a new identity column, every foreign key re-pointed, the old
+   key dropped.
+6. Append-only triggers follow their table. `DataModelGuard` re-checks them at startup.
+7. `DROP SCHEMA <module schema>`, without `CASCADE`, so it fails if anything was left behind.
+8. Re-point any SQL outside EF (views, reports, scripts) at the new names, and rehearse the whole
+   sequence on a restored copy of production first.
 
 ---
 

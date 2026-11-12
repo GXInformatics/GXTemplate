@@ -27,6 +27,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using NUnit.Framework;
 using static CleanArchitecture.Blazor.Application.IntegrationTests.Testing;
+using CleanArchitecture.Blazor.TestSupport;
 
 namespace CleanArchitecture.Blazor.Application.IntegrationTests.DataFoundations;
 
@@ -226,7 +227,7 @@ public class PicklistVersionTests : TestBase
     [Test]
     public async Task T27_RemovingAnAssignmentRefusesTheNextWriteAtOnce_AndTheNextLoadDropsItFromReads()
     {
-        var branch = (await SendAsync(new AddEditBranchCommand { Code = "R" + Guid.NewGuid().ToString("N")[..6], Name = "Refresh" })).Data!.Id;
+        var branch = (await SendAsync(new AddEditBranchCommand { Code = TestBranches.NewCode(), Name = TestBranches.NewName("Refresh") })).Data!.Id;
         var userId = await CreateLimitedUserAsync();
 
         (await SendAsync(new SetUserBranchesCommand { UserId = userId, BranchIds = [branch], DefaultBranchId = branch })).Succeeded.Should().BeTrue();

@@ -15,7 +15,8 @@ public sealed class SampleMenu : IMenuContributor
         Title = Title,
         SectionItems = new List<MenuSectionItemModel>
         {
-            new() { Title = "Bins", Icon = Icons.Material.Filled.Inventory2, Href = "/sample/bins" }
+            new() { Title = "Bins", Icon = Icons.Material.Filled.Inventory2, Href = "/sample/bins" },
+            new() { Title = "Warehouses", Icon = Icons.Material.Filled.Warehouse, Href = "/sample/warehouses" }
         }
     };
 }

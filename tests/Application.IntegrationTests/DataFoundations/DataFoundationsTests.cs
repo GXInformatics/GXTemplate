@@ -195,7 +195,7 @@ public class DataFoundationsTests
         await FluentActions.Awaiting(() => Change(d => d.PostedAt = null)).Should().ThrowAsync<DataRuleViolationException>();
 
         // A reversal: status and link, which are [AllowedAfterPosting].
-        var reversal = Guid.CreateVersion7();
+        var reversal = 9_000_001L; // Pass 60c: headers are bigint (owner decision D6)
         await Change(d => { d.Status = "Reversed"; d.ReversedById = reversal; });
 
         var delete = () => InAsync(ModelHarness.System, async db =>
@@ -375,13 +375,13 @@ public class DataFoundationsTests
         await using (db)
         {
             await FluentActions.Awaiting(() => db.TestLedgerRows.ExecuteUpdateAsync(s => s.SetProperty(r => r.Amount, 0m)))
-                .Should().ThrowAsync<DataRuleViolationException>().WithMessage("*TBL_TEST_LEDGER_ROW*");
+                .Should().ThrowAsync<DataRuleViolationException>().WithMessage("*TBL_TEST_LEDGER_ROWS*");
             await FluentActions.Awaiting(() => db.TestPostedDocuments.Where(d => d.Note == "none").ExecuteDeleteAsync())
                 .Should().ThrowAsync<DataRuleViolationException>();
             await FluentActions.Awaiting(() => db.TestBranchRows.Where(r => r.Name == "none").ExecuteDeleteAsync())
                 .Should().ThrowAsync<DataRuleViolationException>();
             await FluentActions.Awaiting(() => db.Database.ExecuteSqlRawAsync(
-                    "UPDATE tdf.\"TBL_TEST_LEDGER_ROW\" SET \"Amount\" = 0 WHERE false"))
+                    "UPDATE core.\"TBL_TEST_LEDGER_ROWS\" SET amount = 0 WHERE false"))
                 .Should().ThrowAsync<DataRuleViolationException>();
 
             // Not guarded: works.
@@ -401,11 +401,11 @@ public class DataFoundationsTests
         using (scope)
         await using (db)
         {
-            var table = "tdf.\"TBL_TEST_LEDGER_ROW\""; // (P60) the test module's schema
+            var table = "core.\"TBL_TEST_LEDGER_ROWS\""; // (P60c) core, plural, snake_case columns
             await using var connection = new NpgsqlConnection(db.Database.GetConnectionString());
             await connection.OpenAsync();
 
-            foreach (var sql in new[] { $"UPDATE {table} SET \"Amount\" = 1 WHERE \"Id\" = {row.Id}", $"DELETE FROM {table} WHERE \"Id\" = {row.Id}", $"TRUNCATE {table}" })
+            foreach (var sql in new[] { $"UPDATE {table} SET amount = 1 WHERE id = {row.Id}", $"DELETE FROM {table} WHERE id = {row.Id}", $"TRUNCATE {table}" })
             {
                 var act = async () => { await using var c = new NpgsqlCommand(sql, connection); await c.ExecuteNonQueryAsync(); };
                 (await act.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be(PostgresErrorCodes.RestrictViolation, sql);

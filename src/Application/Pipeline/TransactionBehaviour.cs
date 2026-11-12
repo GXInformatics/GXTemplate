@@ -198,6 +198,9 @@ public sealed class TransactionBehaviour<TRequest, TResponse> : IPipelineBehavio
 
             foreach (var postingEvent in postingEvents)
             {
+                // Pass 60c (decision Q-J): the save above has assigned every new row's id; an event still holding 0
+                // captured it too early, and its handlers would write rows pointing at nothing.
+                PostingEventIdCheck.Assert(postingEvent);
                 await _dispatcher.DispatchAsync(postingEvent, cancellationToken).ConfigureAwait(false);
                 if (session.HasFailed) return;
             }

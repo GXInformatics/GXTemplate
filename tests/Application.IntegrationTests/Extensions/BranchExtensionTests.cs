@@ -17,6 +17,7 @@ using CleanArchitecture.Blazor.Domain.Common;
 using CleanArchitecture.Blazor.Domain.Entities;
 using CleanArchitecture.Blazor.Domain.Events;
 using CleanArchitecture.Blazor.Infrastructure.Persistence.Rules;
+using CleanArchitecture.Blazor.TestSupport;
 using FluentAssertions;
 using FluentValidation;
 using Mediator;
@@ -74,12 +75,19 @@ public class BranchExtensionTests
     public async Task Ready() => await RootAsync();
 
     [SetUp]
-    public void Arm() => BranchEventProbe.Reset();
+    public void Arm() { BranchEventProbe.Reset(); _tag = TestBranches.NewTag(); }
 
     [TearDown]
     public void Disarm() => BranchEventProbe.Reset();
 
-    private static string Code() => "E" + Guid.NewGuid().ToString("N")[..8];
+    // Pass 60c (T9): codes and names any application's tightened branch rule accepts (TestBranches.CodeFloor), and
+    // names unique in the model database, which is never reset between tests. One tag per test keeps a renamed branch's
+    // name stable within the test.
+    private static string Code() => TestBranches.NewCode();
+
+    private static string _tag = TestBranches.NewTag();
+
+    private static string N(string label) => label + " " + _tag;
 
     /// <summary>A branch maintainer with no branch assignment, as the administrator is.</summary>
     private static async Task<UserContext> MaintainerAsync()
@@ -128,33 +136,33 @@ public class BranchExtensionTests
         var user = await MaintainerAsync();
         var code = Code();
 
-        var created = await SendAsync(user, new AddEditBranchCommand { Code = code, Name = "North" });
+        var created = await SendAsync(user, new AddEditBranchCommand { Code = code, Name = N("North") });
         created.Succeeded.Should().BeTrue(created.ErrorMessage);
         var id = created.Data!.Id;
         BranchEventProbe.Seen.Should().ContainSingle().Which.Should().BeOfType<BranchCreatedEvent>()
             .Which.BranchId.Should().Be(id, "the id is read after the save");
 
         BranchEventProbe.Seen.Clear();
-        var renamed = await SendAsync(user, new AddEditBranchCommand { Id = id, Code = code, Name = "North Yard", Version = created.Data.Version });
+        var renamed = await SendAsync(user, new AddEditBranchCommand { Id = id, Code = code, Name = N("North Yard"), Version = created.Data.Version });
         renamed.Succeeded.Should().BeTrue(renamed.ErrorMessage);
         var changed = BranchEventProbe.Seen.Should().ContainSingle().Which.Should().BeOfType<BranchChangedEvent>().Subject;
-        (changed.OldName, changed.Name, changed.Reactivated).Should().Be(("North", "North Yard", false));
+        (changed.OldName, changed.Name, changed.Reactivated).Should().Be((N("North"), N("North Yard"), false));
 
         BranchEventProbe.Seen.Clear();
         var deactivated = await SendAsync(user, new AddEditBranchCommand
-            { Id = id, Code = code, Name = "North Yard", IsActive = false, Version = renamed.Data!.Version });
+            { Id = id, Code = code, Name = N("North Yard"), IsActive = false, Version = renamed.Data!.Version });
         deactivated.Succeeded.Should().BeTrue(deactivated.ErrorMessage);
         BranchEventProbe.Seen.Should().ContainSingle().Which.Should().BeOfType<BranchDeactivatingEvent>().Which.BranchId.Should().Be(id);
 
         BranchEventProbe.Seen.Clear();
         var reactivated = await SendAsync(user, new AddEditBranchCommand
-            { Id = id, Code = code, Name = "North Yard", IsActive = true, Version = deactivated.Data!.Version });
+            { Id = id, Code = code, Name = N("North Yard"), IsActive = true, Version = deactivated.Data!.Version });
         reactivated.Succeeded.Should().BeTrue(reactivated.ErrorMessage);
         BranchEventProbe.Seen.Should().ContainSingle().Which.Should().BeOfType<BranchChangedEvent>().Which.Reactivated.Should().BeTrue();
 
         BranchEventProbe.Seen.Clear();
         (await SendAsync(user, new AddEditBranchCommand
-            { Id = id, Code = code, Name = "North Yard", IsActive = true, Version = reactivated.Data!.Version })).Succeeded.Should().BeTrue();
+            { Id = id, Code = code, Name = N("North Yard"), IsActive = true, Version = reactivated.Data!.Version })).Succeeded.Should().BeTrue();
         BranchEventProbe.Seen.Should().BeEmpty("an edit that changes nothing raises nothing");
     }
 
@@ -165,19 +173,19 @@ public class BranchExtensionTests
     {
         var user = await MaintainerAsync();
         var code = Code();
-        var created = (await SendAsync(user, new AddEditBranchCommand { Code = code, Name = "South" })).Data!;
+        var created = (await SendAsync(user, new AddEditBranchCommand { Code = code, Name = N("South") })).Data!;
 
         BranchEventProbe.Script = (_, e, _) => e is BranchDeactivatingEvent
             ? throw new PostingRejectedException($"Branch {code} still has open stock counts.")
             : Task.CompletedTask;
 
         var result = await SendAsync(user, new AddEditBranchCommand
-            { Id = created.Id, Code = code, Name = "South renamed", IsActive = false, Version = created.Version });
+            { Id = created.Id, Code = code, Name = N("South renamed"), IsActive = false, Version = created.Version });
 
         result.Succeeded.Should().BeFalse();
         result.ErrorMessage.Should().Be($"Branch {code} still has open stock counts.");
         var stored = await BranchAsync(created.Id);
-        (stored.IsActive, stored.Name, stored.Version).Should().Be((true, "South", created.Version), "everything rolled back");
+        (stored.IsActive, stored.Name, stored.Version).Should().Be((true, N("South"), created.Version), "everything rolled back");
     }
 
     // ---- 11 --------------------------------------------------------------------------------------------
@@ -188,7 +196,7 @@ public class BranchExtensionTests
         var user = await MaintainerAsync();
         BranchEventProbe.Script = (sp, e, ct) => e is BranchCreatedEvent c ? WriteRowAsync(sp, c.BranchId, ct) : Task.CompletedTask;
 
-        var created = await SendAsync(user, new AddEditBranchCommand { Code = Code(), Name = "East" });
+        var created = await SendAsync(user, new AddEditBranchCommand { Code = Code(), Name = N("East") });
 
         created.Succeeded.Should().BeTrue(created.ErrorMessage);
         (await RowsInAsync(created.Data!.Id)).Should().Be(1);
@@ -202,7 +210,7 @@ public class BranchExtensionTests
         var code = Code();
         BranchEventProbe.Script = (sp, e, ct) => e is BranchCreatedEvent ? WriteRowAsync(sp, other, ct) : Task.CompletedTask;
 
-        var created = await SendAsync(user, new AddEditBranchCommand { Code = code, Name = "West" });
+        var created = await SendAsync(user, new AddEditBranchCommand { Code = code, Name = N("West") });
 
         created.Succeeded.Should().BeFalse();
         (await RowsInAsync(other)).Should().Be(0);
@@ -249,7 +257,7 @@ public class BranchExtensionTests
             await WriteRowAsync(sp, c.BranchId, ct);
         };
 
-        var created = await SendAsync(user, new AddEditBranchCommand { Code = Code(), Name = "Retry" });
+        var created = await SendAsync(user, new AddEditBranchCommand { Code = Code(), Name = N("Retry") });
 
         created.Succeeded.Should().BeTrue(created.ErrorMessage);
         attempts.Should().Be(2);
@@ -269,7 +277,7 @@ public class BranchExtensionTests
 
         MessageHandlerDelegate<DefineBranchWithRowCommand, Result<int>> handler = async (r, ct) =>
         {
-            var saved = await sp.GetRequiredService<IMediator>().Send(new AddEditBranchCommand { Code = r.Code, Name = "Defined" }, ct);
+            var saved = await sp.GetRequiredService<IMediator>().Send(new AddEditBranchCommand { Code = r.Code, Name = N("Defined") }, ct);
             if (!saved.Succeeded) return Result<int>.Failure(saved.Errors);
             await WriteRowAsync(sp, saved.Data!.Id, ct); // after the nested send has returned
             return Result<int>.Success(saved.Data.Id);
@@ -366,7 +374,7 @@ public class BranchRuleTighteningTests
         var name = "Unique " + Guid.NewGuid().ToString("N")[..6];
         var code = new string(Guid.NewGuid().ToString("N").Where(char.IsLetter).Take(3).Select(char.ToUpperInvariant).ToArray()).PadRight(3, 'Q');
         TestModuleBranchValidator.Enabled = false;
-        (await SendAsync(new AddEditBranchCommand { Code = "N" + Guid.NewGuid().ToString("N")[..6], Name = name })).Succeeded.Should().BeTrue();
+        (await SendAsync(new AddEditBranchCommand { Code = TestBranches.NewCode(), Name = name })).Succeeded.Should().BeTrue();
         TestModuleBranchValidator.Enabled = true;
         await FluentActions.Awaiting(() => SendAsync(new AddEditBranchCommand { Code = code, Name = name }))
             .Should().ThrowAsync<FluentValidation.ValidationException>().WithMessage("*" + TestModuleBranchValidator.NameMessage + "*");

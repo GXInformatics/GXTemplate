@@ -10,7 +10,7 @@ namespace CleanArchitecture.Blazor.Application.Common.Approvals;
 public interface IApprovalCommand
 {
     /// <summary>The header to approve. Its value and preparer are read from the database, never from the command.</summary>
-    Guid DocumentId { get; }
+    long DocumentId { get; }
 }
 
 /// <summary>
@@ -123,9 +123,9 @@ public interface IApprovalPolicy
 /// </summary>
 public static class ApprovalGrant
 {
-    private sealed class Node(Guid headerId, string approverId, Node? parent)
+    private sealed class Node(long headerId, string approverId, Node? parent)
     {
-        public Guid HeaderId { get; } = headerId;
+        public long HeaderId { get; } = headerId;
         public string ApproverId { get; } = approverId;
         public Node? Parent { get; } = parent;
     }
@@ -133,14 +133,14 @@ public static class ApprovalGrant
     private static readonly AsyncLocal<Node?> Ambient = new();
 
     /// <summary>The approver granted <paramref name="headerId"/> in this call chain, or null.</summary>
-    public static string? ApproverOf(Guid headerId)
+    public static string? ApproverOf(long headerId)
     {
         for (var node = Ambient.Value; node is not null; node = node.Parent)
             if (node.HeaderId == headerId) return node.ApproverId;
         return null;
     }
 
-    public static IDisposable Begin(Guid headerId, string approverId)
+    public static IDisposable Begin(long headerId, string approverId)
     {
         var node = new Node(headerId, approverId, Ambient.Value);
         Ambient.Value = node;

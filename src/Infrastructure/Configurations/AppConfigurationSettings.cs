@@ -32,7 +32,7 @@ public class AppConfigurationSettings : IApplicationSettings, IValidatableObject
     /// <summary>
     ///     Current application version
     /// </summary>
-    public string Version { get; set; } = "1.7.1";
+    public string Version { get; set; } = "1.8.0";
 
     /// <summary>
     ///     Application framework

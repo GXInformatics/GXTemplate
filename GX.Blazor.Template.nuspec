@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
     <metadata>
         <id>GX.Blazor.Template</id>
-        <version>1.7.1</version>
+        <version>1.8.0</version>
         <title>GX Blazor Server Solution Template</title>
         <authors>GX Informatics Limited</authors>
         <description>
@@ -22,6 +22,28 @@
             multi-tenant data model, deny-by-default authorization and transactional auditing.
         </summary>
         <releaseNotes>
+            1.8.0 (BREAKING: the GX conventions restored; see the README, "Database naming", Upgrading to 1.8.0)
+            - Every business table is in core again, whatever its module; ModuleDefinition.Schema is removed. A module
+              is a code boundary: ownership, no cross-module navigation, composition, layout. A table named by hand
+              with no schema stays where it was put, and startup refuses a module entity's table in public.
+            - Table names are TBL_ + the PLURAL entity name (StockMovement -> core."TBL_STOCK_MOVEMENTS"), by fixed
+              rules with [PluralName] for exceptions; tables.approved.txt lists every table and changes in review.
+            - Business columns, keys, foreign keys and indexes are snake_case (created_by_id, pk_tbl_x, fk_..., ix_...),
+              by GxSnakeCaseConvention, never the naming plug-in: Identity, the template's tables and the migration
+              history are untouched. Hand-named unique indexes are ux_tbl_..., check constraints ck_tbl_...; GxSql.Column
+              names a column in hand-written SQL.
+            - Lookups: BaseLkEntity / BaseVersionedLkEntity (id, name, slug), a reference list users pick from; no
+              decimal column; seeded by migration with SeedLookup and ResetIdentitySequence. The test reset restores
+              every lookup a test wrote to its migrated state.
+            - Keys are integers: int for master data and lookups, long for headers, lines and ledgers; no Guid key.
+              IApprovable.Id and IApprovalCommand.DocumentId are long. A posting event that captured a new row's id
+              (0) before the save fails at dispatch.
+            - Enums are stored as integers with explicit member values ([ExplicitValues], checked at startup and in
+              source).
+            - Template tests are independent of an application's branch rules (T9: floor-safe codes, unique names)
+              and declare no plainly named entity (T11). Every pass plan carries "GX conventions touched" (D7);
+              docs/gx-conventions.md ships with the template.
+
             1.7.1
             - Module services: a ModuleServices&lt;TModule&gt; per module per layer (and one AppLevelServices for code
               that belongs to no module) registers the module's services, seeders and Contracts implementations,
@@ -179,6 +201,8 @@
              <readme> elements above look. -->
         <file src=".template.config\icon.png" target="icon.png"/>
         <file src="README.md" target="README.md"/>
+        <!-- Pass 60c (decision Q-K): the GX conventions travel with the template, so a generated project's plans can cite them. -->
+        <file src="docs\gx-conventions.md" target="content\docs\gx-conventions.md"/>
 
         <!--
             Everything the template instantiates, under content/.
@@ -215,7 +239,7 @@
             same until the assertion in build/pack.csproj refused it.
         -->
         <file src=".\**" target="content"
-              exclude="**\*.exe;**\*.nuspec;**\*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;**\docs\**;**\doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;**\src\Server.UI\Files\**;**\src\Server.UI\log\**;**\src\Server.UI\appsettings.Development.json;**\GXTemplate-passes\**;**\build\**;**\tooling\**;**\Directory.Build.props;**\.claude\**;**\.claude;**\.vscode\**;**\.vscode;**\.idea\**;**\.idea;**\.cursor\**;**\.cursor;**\.DS_Store;**\Thumbs.db;**\*.swp"/>
+              exclude="**\*.exe;**\*.nuspec;**\*.nupkg;**\bin\**;**\obj\**;**\.vs\**;**\.git\**;**\.github\**;**\wwwroot\dist\**;**\docs\**;**\doc\**;**\launchSettings.json;**\*.user;**\*.filelist;**\*.db;**\*.db-shm;**\*.db-wal;**\src\Server.UI\Files\**;**\src\Server.UI\log\**;**\src\Server.UI\appsettings.Development.json;**\GXTemplate-passes\**;**\CLAUDE.md;**\build\**;**\tooling\**;**\Directory.Build.props;**\.claude\**;**\.claude;**\.vscode\**;**\.vscode;**\.idea\**;**\.idea;**\.cursor\**;**\.cursor;**\.DS_Store;**\Thumbs.db;**\*.swp"/>
     </files>
 
 </package>

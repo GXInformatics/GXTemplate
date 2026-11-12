@@ -62,7 +62,7 @@ public class TenantStampingByMarkerTests
         using var conn = new NpgsqlConnection(_connectionString);
         conn.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT \"TenantId\" FROM {TenantProbeDbContext.Schema}.\"TenantProbes\" WHERE \"Note\" = @n";
+        cmd.CommandText = $"SELECT tenant_id FROM {TenantProbeDbContext.Schema}.\"TenantProbes\" WHERE note = @n";
         cmd.Parameters.AddWithValue("n", note);
         return cmd.ExecuteScalar() as string;
     }

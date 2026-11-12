@@ -23,7 +23,6 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Extensions.Samples.Modu
     public sealed class HookAlphaModule : ModuleDefinition
     {
         public override string Name => "HookAlpha";
-        public override string Schema => "hka";
         public override int Order => 2;
     }
 
@@ -87,7 +86,6 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.Extensions.Samples.Modu
     public sealed class HookBetaModule : ModuleDefinition
     {
         public override string Name => "HookBeta";
-        public override string Schema => "hkb";
         public override int Order => 1;
     }
 

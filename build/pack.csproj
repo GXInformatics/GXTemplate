@@ -139,6 +139,12 @@
     <Error Condition="Exists('$(_PackageAssertDir)\content\src\Server.UI\appsettings.Development.json')"
            Text="The package CONTAINS content/src/Server.UI/appsettings.Development.json: the maintainer's own local settings file, with whatever password it holds. Check the nuspec exclude for **\src\Server.UI\appsettings.Development.json, and do not distribute this package." />
 
+    <!-- Pass 60c: the GX conventions ship (decision Q-K); the template repository's own working rules do not. -->
+    <Error Condition="!Exists('$(_PackageAssertDir)\content\docs\gx-conventions.md')"
+           Text="The package is missing content/docs/gx-conventions.md. A generated project's plans cite it (owner decision D7), and PassPlanRulesTests reads plans against it." />
+    <Error Condition="Exists('$(_PackageAssertDir)\content\CLAUDE.md')"
+           Text="The package CONTAINS content/CLAUDE.md: the template repository's working rules, which would overwrite a generated project's own. Check the nuspec exclude for **\CLAUDE.md." />
+
     <!--
         Editor and agent state (Pass 56). .claude is the one that has actually shipped - 1.2.0 carried
         content/.claude/_._ - so it is asserted, not only excluded.

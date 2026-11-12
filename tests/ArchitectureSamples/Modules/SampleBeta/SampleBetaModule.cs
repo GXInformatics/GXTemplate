@@ -5,5 +5,4 @@ namespace CleanArchitecture.Blazor.ArchitectureSamples.Modules.SampleBeta;
 public sealed class SampleBetaModule : ModuleDefinition
 {
     public override string Name => "SampleBeta";
-    public override string Schema => "sbeta";
 }

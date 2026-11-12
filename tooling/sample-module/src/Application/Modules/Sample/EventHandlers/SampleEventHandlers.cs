@@ -27,3 +27,19 @@ public sealed class AnnounceSampleBin(IApplicationDbContextFactory dbContextFact
         await db.SaveChangesAsync(cancellationToken);
     }
 }
+
+/// <summary>
+/// A new warehouse's opening movement, in the transaction that created it (Pass 60c). It writes a row pointing at the
+/// warehouse's id, which exists only because the event read it after the save.
+/// </summary>
+public sealed class OpenWarehouseLedger(IApplicationDbContextFactory dbContextFactory) : IPostingEventHandler<WarehouseCreated>
+{
+    public const string OpeningNote = "Opened";
+
+    public async ValueTask Handle(WarehouseCreated postingEvent, CancellationToken cancellationToken)
+    {
+        await using var db = await dbContextFactory.CreateAsync(cancellationToken);
+        db.Set<WarehouseMovement>().Add(new WarehouseMovement { WarehouseId = postingEvent.WarehouseId, Quantity = 0m, Note = OpeningNote });
+        await db.SaveChangesAsync(cancellationToken);
+    }
+}

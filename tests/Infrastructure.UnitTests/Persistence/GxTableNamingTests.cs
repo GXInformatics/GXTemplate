@@ -14,13 +14,11 @@ namespace CleanArchitecture.Blazor.Infrastructure.UnitTests.Persistence;
 
 #region Sample model
 
-// Pass 60: every sample is in one module, so its tables go to the module schema "smp" where they
-// used to go to "core".
+// Every sample is in one module. Pass 60 put a module's tables in a schema of its own ("smp"); Pass 60c
+// (owner decision D1) put every business table back in core, whatever its module.
 public sealed class SampleModule : ModuleDefinition
 {
-    public const string SchemaName = "smp";
     public override string Name => "Sample";
-    public override string Schema => SchemaName;
 }
 
 // Stands in for the "throwaway project with two entities" the standard asks you to verify against,
@@ -31,11 +29,13 @@ public class SampleWidget : BaseAuditableEntity
 {
     public string? Name { get; set; }
     public SampleMoney? Price { get; set; }
+    public int? KindId { get; set; }
+    public SampleWidgetKind? Kind { get; set; }
 }
 
-/// <summary>Code and description, nothing branches on it - the lookup test, answered "no".</summary>
+/// <summary>A lookup (Pass 60c): BaseLkEntity's fixed columns plus a code and a description.</summary>
 [Module<SampleModule>]
-public class SampleWidgetKind : BaseEntity, ILookupEntity
+public class SampleWidgetKind : BaseLkEntity
 {
     public string? Code { get; set; }
     public string? Description { get; set; }
@@ -130,14 +130,21 @@ public class SampleMentor : BaseEntity
     public ICollection<SampleCourse> Courses { get; set; } = new List<SampleCourse>();
 }
 
-/// <summary>Pass 60: named by hand WITHOUT a schema, inside a module - so its module's schema still applies.</summary>
+/// <summary>Named by hand WITHOUT a schema, inside a module: it stays where it was put (Pass 60c, owner decision D1).</summary>
 [Module<SampleModule>]
 public class SampleNamedInModule : BaseEntity
 {
     public string? Note { get; set; }
 }
 
-/// <summary>Pass 60: a business entity with no module. It gets its TBL_ name and no schema; DataModelGuard refuses it.</summary>
+/// <summary>Pass 60c: a column and a unique index named by hand - both kept, the index under the ux_tbl_ rule.</summary>
+[Module<SampleModule>]
+public class SampleHandNamedColumn : BaseEntity
+{
+    public string Label { get; set; } = "";
+}
+
+/// <summary>A business entity with no module: core like any other (Pass 60c); DataModelGuard refuses it for the missing module.</summary>
 public class SampleOrphan : BaseEntity
 {
     public string? Note { get; set; }
@@ -164,7 +171,7 @@ internal static class SampleShapes
 
         builder.Entity<SampleCourse>().HasMany(c => c.Students).WithMany(s => s.Courses);
         builder.Entity<SampleCourse>().HasMany(c => c.Mentors).WithMany(m => m.Courses)
-            .UsingEntity("CourseMentor", j => j.ToTable("COURSE_MENTORS", SampleModule.SchemaName));
+            .UsingEntity("CourseMentor", j => j.ToTable("COURSE_MENTORS", GxNamingConventions.BusinessSchema));
     }
 }
 
@@ -186,6 +193,8 @@ internal sealed class SampleContext(DbContextOptions<SampleContext> options) : D
         builder.Entity<SamplePinnedThing>().ToTable("legacy_things", "reporting");
         builder.Entity<SampleNamedInModule>().ToTable("legacy_plain");
         builder.Entity<SampleOrphan>();
+        builder.Entity<SampleHandNamedColumn>().Property(x => x.Label).HasColumnName("Label");
+        builder.Entity<SampleHandNamedColumn>().HasIndex(x => x.Label).IsUnique().HasDatabaseName("ux_tbl_sample_hand_named_columns_label");
         SampleShapes.Configure(builder);
 
         for (var i = 0; i < ApplyCount; i++)
@@ -193,6 +202,10 @@ internal sealed class SampleContext(DbContextOptions<SampleContext> options) : D
             builder.ApplyGxTableNaming();
         }
     }
+
+    // Pass 60c: the columns and constraint names, as ApplicationDbContext registers them.
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder) =>
+        configurationBuilder.Conventions.Add(_ => new GxSnakeCaseConvention());
 }
 
 /// <summary>
@@ -222,6 +235,8 @@ internal sealed class ApplyCountModelCacheKeyFactory : Microsoft.EntityFramework
 /// </remarks>
 public class GxTableNamingTests
 {
+    private const string Core = GxNamingConventions.BusinessSchema;
+
     // The provider only has to be enough to build a model; nothing here opens a connection.
     private static SampleContext Sample(int applyCount = 1) =>
         new(new DbContextOptionsBuilder<SampleContext>()
@@ -237,19 +252,19 @@ public class GxTableNamingTests
     }
 
     [Fact]
-    public void ABusinessEntity_BecomesTblUpperSnake_InItsModulesSchema()
+    public void ABusinessEntity_BecomesCoreTblPluralUpperSnake()
     {
         using var db = Sample();
 
-        Assert.Equal(("TBL_SAMPLE_WIDGET", SampleModule.SchemaName), Mapping<SampleWidget>(db));
+        Assert.Equal(("TBL_SAMPLE_WIDGETS", Core), Mapping<SampleWidget>(db));
     }
 
     [Fact]
-    public void ALookupEntity_BecomesTblLkUpperSnake_InItsModulesSchema()
+    public void ALookupEntity_BecomesCoreTblLkPluralUpperSnake()
     {
         using var db = Sample();
 
-        Assert.Equal(("TBL_LK_SAMPLE_WIDGET_KIND", SampleModule.SchemaName),
+        Assert.Equal(("TBL_LK_SAMPLE_WIDGET_KINDS", Core),
             Mapping<SampleWidgetKind>(db));
     }
 
@@ -271,8 +286,8 @@ public class GxTableNamingTests
         // schema-strategy change wearing a rename's clothes.
         using var db = Sample();
 
-        Assert.Equal(("TBL_SAMPLE_ANIMAL", SampleModule.SchemaName), Mapping<SampleAnimal>(db));
-        Assert.Equal(("TBL_SAMPLE_ANIMAL", SampleModule.SchemaName), Mapping<SampleDog>(db));
+        Assert.Equal(("TBL_SAMPLE_ANIMALS", Core), Mapping<SampleAnimal>(db));
+        Assert.Equal(("TBL_SAMPLE_ANIMALS", Core), Mapping<SampleDog>(db));
     }
 
     [Fact]
@@ -325,8 +340,8 @@ public class GxTableNamingTests
         // kept EF's default name ("SampleTruck") in the default schema.
         using var db = Sample();
 
-        Assert.Equal(("TBL_SAMPLE_VEHICLE", SampleModule.SchemaName), Mapping<SampleVehicle>(db));
-        Assert.Equal(("TBL_SAMPLE_TRUCK", SampleModule.SchemaName), Mapping<SampleTruck>(db));
+        Assert.Equal(("TBL_SAMPLE_VEHICLES", Core), Mapping<SampleVehicle>(db));
+        Assert.Equal(("TBL_SAMPLE_TRUCKS", Core), Mapping<SampleTruck>(db));
     }
 
     [Fact]
@@ -335,18 +350,18 @@ public class GxTableNamingTests
         using var db = Sample();
 
         Assert.Null(Mapping<SampleShape>(db).Table);
-        Assert.Equal(("TBL_SAMPLE_CIRCLE", SampleModule.SchemaName), Mapping<SampleCircle>(db));
-        Assert.Equal(("TBL_SAMPLE_SQUARE", SampleModule.SchemaName), Mapping<SampleSquare>(db));
+        Assert.Equal(("TBL_SAMPLE_CIRCLES", Core), Mapping<SampleCircle>(db));
+        Assert.Equal(("TBL_SAMPLE_SQUARES", Core), Mapping<SampleSquare>(db));
     }
 
     [Fact]
-    public void AnImplicitManyToManyJoin_IsNamedIntoItsModulesSchema()
+    public void AnImplicitManyToManyJoin_IsNamedIntoCore_WithItsLastWordPlural()
     {
         // The join is a property bag with no CLR type of its own, so the IBusinessEntity test never
         // saw it: the project's own link table sat in the default schema as "SampleCourseSampleStudent".
         using var db = Sample();
 
-        Assert.Equal(("TBL_SAMPLE_COURSE_SAMPLE_STUDENT", SampleModule.SchemaName),
+        Assert.Equal(("TBL_SAMPLE_COURSE_SAMPLE_STUDENTS", Core),
             JoinMapping(db, "SampleCourseSampleStudent"));
     }
 
@@ -356,26 +371,124 @@ public class GxTableNamingTests
         using var db = Sample();
 
         // Named by hand (ToTable on the join), so it keeps that name - not TBL_COURSE_MENTOR.
-        Assert.Equal(("COURSE_MENTORS", SampleModule.SchemaName), JoinMapping(db, "CourseMentor"));
+        Assert.Equal(("COURSE_MENTORS", Core), JoinMapping(db, "CourseMentor"));
     }
 
     [Fact]
-    public void ATableNamedByHandWithoutASchema_StillGoesToItsModulesSchema()
+    public void ATableNamedByHandWithoutASchema_StaysWhereItWasPut()
     {
-        // Pass 60. ToTable("legacy_plain") inside a module is smp."legacy_plain", not public."legacy_plain":
-        // the name was chosen by hand, the schema was not, and a module's tables all live in its schema.
+        // Pass 60c (owner decision D1): as before Pass 60. ToTable("legacy_plain") is public."legacy_plain", module or
+        // not; DataModelGuard then refuses a MODULE entity there (decision Q-B), which ModuleGuardTests asserts.
         using var db = Sample();
 
-        Assert.Equal(("legacy_plain", SampleModule.SchemaName), Mapping<SampleNamedInModule>(db));
+        Assert.Equal(("legacy_plain", (string?)null), Mapping<SampleNamedInModule>(db));
     }
 
     [Fact]
-    public void AnEntityWithNoModule_GetsItsTblNameAndNoSchema()
+    public void AnEntityWithNoModule_IsInCoreLikeAnyOther()
     {
-        // Pass 60. The convention does not invent a schema; DataModelGuard fails startup for this entity.
+        // Pass 60c: the module plays no part in naming. DataModelGuard fails startup for this entity's missing module.
         using var db = Sample();
 
-        Assert.Equal(("TBL_SAMPLE_ORPHAN", (string?)null), Mapping<SampleOrphan>(db));
+        Assert.Equal(("TBL_SAMPLE_ORPHANS", Core), Mapping<SampleOrphan>(db));
+    }
+
+    // ---- Pass 60c: snake_case columns and constraint names (owner decision D5) --------------------
+
+    private static string Column<T>(DbContext db, string property) =>
+        db.Model.FindEntityType(typeof(T))!.FindProperty(property)!.GetColumnName();
+
+    [Fact]
+    public void BusinessColumns_AreSnakeCase()
+    {
+        using var db = Sample();
+
+        Assert.Equal("id", Column<SampleWidget>(db, "Id"));
+        Assert.Equal("name", Column<SampleWidget>(db, nameof(SampleWidget.Name)));
+        Assert.Equal("created_by_id", Column<SampleWidget>(db, nameof(SampleWidget.CreatedById)));
+        Assert.Equal("last_modified_at", Column<SampleWidget>(db, nameof(SampleWidget.LastModifiedAt)));
+        Assert.Equal("good_boy", Column<SampleDog>(db, nameof(SampleDog.GoodBoy)));
+        Assert.Equal("payload_tonnes", Column<SampleTruck>(db, nameof(SampleTruck.PayloadTonnes)));
+        Assert.Equal("discriminator", db.Model.FindEntityType(typeof(SampleAnimal))!.FindDiscriminatorProperty()!.GetColumnName());
+    }
+
+    [Fact]
+    public void AnOwnedTypesColumns_AreSnakeCase_WithTheOwnersPrefix()
+    {
+        using var db = Sample();
+        var price = db.Model.FindEntityType(typeof(SampleWidget))!.FindNavigation(nameof(SampleWidget.Price))!.TargetEntityType;
+
+        Assert.Equal("price_amount", price.FindProperty(nameof(SampleMoney.Amount))!.GetColumnName());
+        Assert.Equal("price_currency", price.FindProperty(nameof(SampleMoney.Currency))!.GetColumnName());
+    }
+
+    [Fact]
+    public void ALookupsFixedColumns_AreIdNameSlug()
+    {
+        using var db = Sample();
+
+        Assert.Equal("id", Column<SampleWidgetKind>(db, "Id"));
+        Assert.Equal("name", Column<SampleWidgetKind>(db, nameof(SampleWidgetKind.Name)));
+        Assert.Equal("slug", Column<SampleWidgetKind>(db, nameof(SampleWidgetKind.Slug)));
+    }
+
+    [Fact]
+    public void KeysForeignKeysAndIndexes_AreEfsDefaultNames_InLowerCase()
+    {
+        using var db = Sample();
+
+        Assert.Equal("pk_tbl_sample_widgets", db.Model.FindEntityType(typeof(SampleWidget))!.FindPrimaryKey()!.GetName());
+
+        var join = db.Model.FindEntityType("SampleCourseSampleStudent")!;
+        Assert.Equal(["courses_id", "students_id"], join.GetProperties().Select(p => p.GetColumnName()).Order().ToArray());
+        // fk_<table>_<principal table>_<column>, lower case. These two are longer than PostgreSQL's 63 characters, so EF
+        // cuts them to 63, exactly as MNEFleets' fk_tbl_accessory_charges_tbl_lk_approval_status_approval_statu.
+        var foreignKeys = join.GetForeignKeys().Select(fk => fk.GetConstraintName()!).Order().ToArray();
+        Assert.Equal(2, foreignKeys.Length);
+        Assert.All(foreignKeys, name =>
+        {
+            Assert.StartsWith("fk_tbl_sample_course_sample_students_tbl_sample_", name);
+            Assert.True(name.Length <= 63, name);
+            Assert.Equal(name.ToLowerInvariant(), name);
+        });
+        Assert.Equal("fk_tbl_sample_widgets_tbl_lk_sample_widget_kinds_kind_id",
+            db.Model.FindEntityType(typeof(SampleWidget))!.GetForeignKeys().Single().GetConstraintName());
+        Assert.Equal(["ix_tbl_sample_course_sample_students_students_id"],
+            join.GetIndexes().Select(i => i.GetDatabaseName()!).ToArray());
+    }
+
+    [Fact]
+    public void AColumnNamedByHand_IsKept()
+    {
+        using var db = Sample();
+
+        // A hand-named table keeps its name; its columns are still a business entity's, so snake_case.
+        Assert.Equal("note", Column<SamplePinnedThing>(db, nameof(SamplePinnedThing.Note)));
+        Assert.Equal("Label", Column<SampleHandNamedColumn>(db, nameof(SampleHandNamedColumn.Label)));
+        Assert.Equal("ux_tbl_sample_hand_named_columns_label",
+            db.Model.FindEntityType(typeof(SampleHandNamedColumn))!.GetIndexes().Single().GetDatabaseName());
+    }
+
+    [Theory]
+    [InlineData("Id", "id")]
+    [InlineData("CreatedById", "created_by_id")]
+    [InlineData("EmployeesId", "employees_id")]          // MNEFleets, S:68
+    [InlineData("RaisedById", "raised_by_id")]           // MNEFleets, S:78
+    [InlineData("TripKitsId", "trip_kits_id")]
+    [InlineData("BHOrderId", "bh_order_id")]             // an acronym run, then a word
+    [InlineData("Address_Street", "address_street")]     // EF's owned-type column
+    [InlineData("SKU", "sku")]
+    [InlineData("Line2Total", "line2total")]             // the plug-in's own rule: no break after a digit
+    [InlineData("xmin", "xmin")]
+    public void ToSnake_IsTheNamingPluginsRewrite(string name, string expected)
+    {
+        Assert.Equal(expected, GxSnakeCaseConvention.ToSnake(name));
+    }
+
+    [Fact]
+    public void GxSqlColumn_QuotesTheSnakeColumn()
+    {
+        Assert.Equal("\"is_main\"", GxSql.Column("IsMain"));
     }
 
     [Theory]
@@ -394,7 +507,7 @@ public class GxTableNamingTests
 /// The other half of the standard: what the convention must NOT touch.
 /// </summary>
 /// <remarks>
-/// Business models go to their module's schema (Pass 60; until then <c>core</c>); the template's own
+/// Business models go to <c>core</c> (Pass 60 moved them to a schema per module; Pass 60c moved them back); the template's own
 /// infrastructure tables stay where they are.
 /// That line is the practical value of the schema split when someone opens pgAdmin, and it is what
 /// keeps a template upgrade from handing every existing GX project a rename migration.
@@ -438,6 +551,7 @@ public class TemplateTablesStayOutOfCoreTests
     [InlineData(typeof(DocumentSequence), "DocumentSequences")]
     [InlineData(typeof(Branch), "Branches")]
     [InlineData(typeof(UserBranch), "UserBranches")]
+    [InlineData(typeof(ApprovalLimit), "ApprovalLimits")]
     public void ATemplateTable_KeepsItsNameAndTheDefaultSchema(Type clrType, string expectedTable)
     {
         // Document and PicklistSet derive from BaseAuditableEntity and are therefore IBusinessEntity
@@ -452,11 +566,11 @@ public class TemplateTablesStayOutOfCoreTests
     }
 
     [Fact]
-    public void NoTemplateEntity_IsMappedIntoAModuleSchema()
+    public void NoTemplateEntity_IsMappedIntoTheCoreSchema()
     {
-        // Module schemas hold the project's own business models and nothing of the template's.
-        // HasDefaultSchema(...) - the wrong way to do this - fails here by sweeping Identity in with
-        // everything else. Pass 60: every template table is in the DEFAULT schema, not merely out of one.
+        // core holds the project's own business models and nothing of the template's (owner decision D2).
+        // HasDefaultSchema("core") - the wrong way to do this - fails here by sweeping Identity in with
+        // everything else. Every template table is in the DEFAULT schema, not merely out of core.
         using var db = BusinessContext();
 
         var templateTypesInCore = db.Model.GetEntityTypes()
@@ -468,10 +582,10 @@ public class TemplateTablesStayOutOfCoreTests
     }
 
     [Fact]
-    public void EveryTableOutsideAModuleSchema_IsOneOfTheTemplates()
+    public void EveryTableOutsideCore_IsOneOfTheTemplates()
     {
         // The other direction, and what keeps the list above honest: a project's own table belongs in
-        // its module's schema, and a table the template adds must be listed there, or this names it.
+        // core, and a table the template adds must be listed in TemplateEntities, or this names it.
         //
         // Pass 55: over a PROJECT-shaped model (see ProjectShapedContext), and counting TABLES:
         //   - a type with no table of its own - the abstract TPC root, a TPH leaf - owns nothing to
@@ -483,7 +597,7 @@ public class TemplateTablesStayOutOfCoreTests
 
         var unlisted = db.Model.GetEntityTypes()
             .Where(e => e.GetTableName() is not null && !e.IsOwned())
-            .Where(e => e.GetSchema() is null && !TemplateEntityTypes.Contains(e.ClrType))
+            .Where(e => e.GetSchema() != GxNamingConventions.BusinessSchema && !TemplateEntityTypes.Contains(e.ClrType))
             .Select(e => e.HasSharedClrType ? e.Name : e.ClrType.Name)
             .ToArray();
 
@@ -497,29 +611,64 @@ public class TemplateTablesStayOutOfCoreTests
         // "nothing outside core" assertion would be true of a model that no longer has them.
         using var db = BusinessContext();
 
-        Assert.Equal(SampleModule.SchemaName, db.Model.FindEntityType(typeof(SampleTruck))!.GetSchema());
-        Assert.Equal("TBL_SAMPLE_TRUCK", db.Model.FindEntityType(typeof(SampleTruck))!.GetTableName());
-        Assert.Equal("TBL_SAMPLE_COURSE_SAMPLE_STUDENT", db.Model.FindEntityType("SampleCourseSampleStudent")!.GetTableName());
+        Assert.Equal(GxNamingConventions.BusinessSchema, db.Model.FindEntityType(typeof(SampleTruck))!.GetSchema());
+        Assert.Equal("TBL_SAMPLE_TRUCKS", db.Model.FindEntityType(typeof(SampleTruck))!.GetTableName());
+        Assert.Equal("TBL_SAMPLE_COURSE_SAMPLE_STUDENTS", db.Model.FindEntityType("SampleCourseSampleStudent")!.GetTableName());
     }
 
     [Fact]
-    public void OnPostgres_TheBusinessModelIsNotSnakeCased()
+    public void OnPostgres_TheTemplateTablesAndTheHistoryAreNotSnakeCased_AndTheBusinessTablesAre()
     {
-        // EFCore.NamingConventions must not reach this context. Beyond rewriting the GX table names,
-        // it rewrites EF's own migration-history model: __EFMigrationsHistory gets migration_id /
-        // product_version columns, and the day the plugin is removed EF queries "MigrationId" and
+        // Pass 60c (owner decision D5): business tables get snake_case from GxSnakeCaseConvention, and NOTHING
+        // else does. EFCore.NamingConventions must still not reach this context: beyond the business tables it
+        // rewrites Identity, the template's tables and EF's own migration-history model - __EFMigrationsHistory gets
+        // migration_id / product_version columns, and the day the plugin is removed EF queries "MigrationId" and
         // fails with 42703, leaving a database that can be neither migrated forward nor inspected.
-        // This test is cheap; recovering from that means hand-editing EF's bookkeeping table.
         using var db = BusinessContext();
 
-        var snakeCased = db.Model.GetEntityTypes()
-            .SelectMany(e => e.GetProperties()
-                .Select(p => p.GetColumnName())
-                .Append(e.GetTableName() ?? string.Empty))
-            .Where(name => name.Contains('_') && name == name.ToLowerInvariant())
-            .Distinct()
+        var templateSnakeCased = db.Model.GetEntityTypes()
+            .Where(e => TemplateEntityTypes.Contains(e.ClrType))
+            .SelectMany(e => e.GetProperties().Select(p => $"{e.ClrType.Name}.{p.GetColumnName()}"))
+            .Where(name => name.Split('.')[1] is var column && column.Contains('_') && column == column.ToLowerInvariant())
             .ToArray();
+        Assert.Empty(templateSnakeCased);
 
-        Assert.Empty(snakeCased);
+        var businessNotSnake = db.Model.GetEntityTypes()
+            .Where(e => !e.IsPropertyBag && !TemplateEntityTypes.Contains(e.ClrType) && e.GetTableName() is not null)
+            .SelectMany(e => e.GetProperties().Select(p => p.GetColumnName()))
+            .Where(column => column != column.ToLowerInvariant())
+            .ToArray();
+        Assert.Empty(businessNotSnake);
+
+        var history = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IHistoryRepository>(db).GetCreateScript();
+        Assert.Contains("\"MigrationId\"", history);
+        Assert.Contains("\"ProductVersion\"", history);
+    }
+
+    [Fact]
+    public void AHandNamedUniqueIndexOrCheckConstraint_WithoutTheGxPrefix_FailsTheModelBuild()
+    {
+        // Pass 60c (decision Q-E): on a business table a unique index named by hand starts ux_tbl_, a check
+        // constraint ck_tbl_. Both offenders are named in one failure.
+        using var db = new BadConstraintContext(new DbContextOptionsBuilder<BadConstraintContext>().UseNpgsql("Host=none").Options);
+
+        var thrown = Assert.Throws<InvalidOperationException>(() => db.Model);
+        Assert.Contains("'IX_Bad_Label'", thrown.Message);
+        Assert.Contains("'label_positive'", thrown.Message);
+        Assert.Contains("ux_tbl_", thrown.Message);
+        Assert.Contains("ck_tbl_", thrown.Message);
+    }
+
+    private sealed class BadConstraintContext(DbContextOptions<BadConstraintContext> options) : DbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            builder.Entity<SampleHandNamedColumn>().HasIndex(x => x.Label).IsUnique().HasDatabaseName("IX_Bad_Label");
+            builder.Entity<SampleHandNamedColumn>().ToTable(t => t.HasCheckConstraint("label_positive", "length(\"Label\") > 0"));
+            builder.ApplyGxTableNaming();
+        }
+
+        protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder) =>
+            configurationBuilder.Conventions.Add(_ => new GxSnakeCaseConvention());
     }
 }

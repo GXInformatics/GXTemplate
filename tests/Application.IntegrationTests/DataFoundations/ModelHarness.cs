@@ -63,23 +63,36 @@ public static class ModelHarness
             {
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-                // (P60) Every schema the model uses - the module schemas included - read from the model rather
-                // than named here, plus "core", which Pass 59's databases still hold. Never the database.
-                var schemas = db.Model.GetEntityTypes().Select(e => e.GetSchema()).OfType<string>()
-                    .Append("core").Distinct().ToList();
-                var drop = string.Concat(schemas.Select(s => $"DROP SCHEMA IF EXISTS \"{s}\" CASCADE; "))
-                           + "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;";
+                // (P60c) EVERY user schema of this harness's own throwaway database, read from the catalogue: the
+                // model's (core), and any an earlier template left behind (Pass 60's module schemas tdf, tsa, tsb).
+                // EnsureCreated skips the whole model when ANY table exists, so one leftover schema with a table in it
+                // meant core was never created. Never the database.
+                var schemas = new List<string>();
                 await using (var connection = new NpgsqlConnection(database.ConnectionString))
                 {
                     await connection.OpenAsync();
+                    await using (var list = new NpgsqlCommand(
+                        "SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema'", connection))
+                    await using (var reader = await list.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync()) schemas.Add(reader.GetString(0));
+                    }
+
+                    var drop = string.Concat(schemas.Select(s => $"DROP SCHEMA IF EXISTS \"{s.Replace("\"", "\"\"")}\" CASCADE; "))
+                               + "CREATE SCHEMA IF NOT EXISTS public;";
                     await using var command = new NpgsqlCommand(drop, connection);
                     await command.ExecuteNonQueryAsync();
                 }
 
                 await db.Database.EnsureCreatedAsync();
-                var ledger = db.Model.FindEntityType(typeof(TestLedgerRow))!;
-                foreach (var sql in AppendOnlyMigrationExtensions.CreateSql(ledger.GetTableName()!, ledger.GetSchema()))
-                    await db.Database.ExecuteSqlRawAsync(sql);
+                // (P60c) Every append-only table in the model, as the migrations would give each one - not only
+                // TestLedgerRow. The test model is built on the real context, so in a generated project it also holds
+                // the application's own ledgers, and T19's "no table lacks its trigger" would otherwise fail there.
+                var ledgers = db.Model.GetEntityTypes()
+                    .Where(t => !t.IsOwned() && t.BaseType is null && typeof(CleanArchitecture.Blazor.Domain.Common.Entities.IAppendOnly).IsAssignableFrom(t.ClrType) && t.GetTableName() is not null);
+                foreach (var ledger in ledgers)
+                    foreach (var sql in AppendOnlyMigrationExtensions.CreateSql(ledger.GetTableName()!, ledger.GetSchema()))
+                        await db.Database.ExecuteSqlRawAsync(sql);
             }
 
             _root = services;
@@ -197,7 +210,7 @@ public static class ModelHarness
         var services = await RootAsync();
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var branch = new Branch { Code = "B" + Guid.NewGuid().ToString("N")[..8], Name = "Branch", IsActive = active };
+        var branch = new Branch { Code = TestBranches.NewCode(), Name = TestBranches.NewName("Branch"), IsActive = active }; // (P60c, T9) floor-safe, unique
         db.Branches.Add(branch);
         await db.SaveChangesAsync();
         return branch.Id;

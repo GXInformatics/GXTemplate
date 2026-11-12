@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using static CleanArchitecture.Blazor.Application.IntegrationTests.Testing;
+using CleanArchitecture.Blazor.TestSupport;
 
 namespace CleanArchitecture.Blazor.Application.IntegrationTests.Extensions;
 
@@ -20,7 +21,7 @@ public class DefaultBranchTests : TestBase
 {
     private static async Task<int> BranchAsync(bool active = true)
     {
-        var created = await SendAsync(new AddEditBranchCommand { Code = "D" + Guid.NewGuid().ToString("N")[..6], Name = "Default test", IsActive = active });
+        var created = await SendAsync(new AddEditBranchCommand { Code = TestBranches.NewCode(), Name = TestBranches.NewName("Default test"), IsActive = active });
         created.Succeeded.Should().BeTrue(created.ErrorMessage);
         return created.Data!.Id;
     }

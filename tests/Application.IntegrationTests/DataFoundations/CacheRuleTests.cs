@@ -51,7 +51,7 @@ public class CacheRuleTests
     {
         await FluentActions.Invoking(() => ThroughTheCacheAsync(db => db.TestLedgerRows.CountAsync()))
             .Should().ThrowAsync<DataRuleViolationException>()
-            .WithMessage("*CachedProbe is cacheable but reads TBL_TEST_LEDGER_ROW*");
+            .WithMessage("*CachedProbe is cacheable but reads TBL_TEST_LEDGER_ROWS*");
     }
 
     [Test]
@@ -59,12 +59,12 @@ public class CacheRuleTests
     {
         await FluentActions.Invoking(() => ThroughTheCacheAsync(db => db.TestBranchRows.CountAsync()))
             .Should().ThrowAsync<DataRuleViolationException>()
-            .WithMessage("*CachedProbe*TBL_TEST_BRANCH_ROW*");
+            .WithMessage("*CachedProbe*TBL_TEST_BRANCH_ROWS*");
 
         // A join brings the table in just the same.
         await FluentActions.Invoking(() => ThroughTheCacheAsync(db =>
                 db.PicklistSets.Where(p => db.TestBranchRows.Any(r => r.Name == p.Value)).CountAsync()))
-            .Should().ThrowAsync<DataRuleViolationException>().WithMessage("*TBL_TEST_BRANCH_ROW*");
+            .Should().ThrowAsync<DataRuleViolationException>().WithMessage("*TBL_TEST_BRANCH_ROWS*");
     }
 
     [Test]

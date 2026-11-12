@@ -6,6 +6,5 @@ namespace CleanArchitecture.Blazor.Domain.Modules.Sample;
 public sealed class SampleModule : ModuleDefinition
 {
     public override string Name => "Sample";
-    public override string Schema => "smp";
     public override int Order => 10;
 }

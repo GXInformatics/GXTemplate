@@ -19,8 +19,8 @@ namespace CleanArchitecture.Blazor.Domain.Common.Entities;
 /// </remarks>
 public interface IApprovable
 {
-    /// <summary>The header's key; document headers are Guid v7 (pass 58).</summary>
-    Guid Id { get; }
+    /// <summary>The header's key: document headers are bigint identity (Pass 60c, owner decision D6; Guid v7 until 1.7.1).</summary>
+    long Id { get; }
 
     /// <summary>Who submitted the document for approval. Neither they nor its creator may approve it.</summary>
     string? PreparedById { get; }
@@ -37,7 +37,7 @@ public interface IApprovable
 }
 
 /// <summary>
-/// An approvable document type with its code (Pass 60): <c>public class PurchaseOrder : BaseVersionedEntity&lt;Guid&gt;,
+/// An approvable document type with its code (Pass 60): <c>public class PurchaseOrder : BaseVersionedEntity&lt;long&gt;,
 /// IApprovable&lt;PurchaseOrder&gt;</c>. A separate interface because a static abstract member would stop
 /// <see cref="IApprovable"/> itself being used as a type argument.
 /// </summary>

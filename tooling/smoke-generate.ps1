@@ -469,9 +469,14 @@ try {
 
     Step 'no Docker artefacts and no template-repository-only files'
     foreach ($name in 'Dockerfile', 'docker-compose.yml', 'docker-compose.override.yml', 'docker-compose.dcproj', '.dockerignore', 'launchSettings.json',
-                      'GXTemplate-passes', 'tooling', 'Directory.Build.props', 'build', 'docs', '.template.config') {
+                      'GXTemplate-passes', 'tooling', 'Directory.Build.props', 'build', '.template.config') {
         if (Test-Path (Join-Path $out $name)) { Fail "$name was generated" } else { Pass "no $name" }
     }
+    # (P60c) docs/ ships exactly one file, the GX conventions (the nuspec and build/pack.csproj assert it). The pass
+    # reports, the audit and every other repository document stay behind.
+    $shippedDocs = @(if (Test-Path (Join-Path $out 'docs')) {
+        Get-ChildItem (Join-Path $out 'docs') -Recurse -File | ForEach-Object { $_.FullName.Substring($out.Length + 1).Replace('\', '/') } })
+    Check (($shippedDocs.Count -eq 1) -and ($shippedDocs[0] -eq 'docs/gx-conventions.md')) 'docs holds gx-conventions.md and nothing else' ($shippedDocs -join ', ')
     $dockerHits = @($projectFiles | Select-String -Pattern 'Docker' -SimpleMatch)
     if ($dockerHits.Count -gt 0) { Fail "Docker still referenced in $($dockerHits[0].Path.Substring($out.Length + 1))" } else { Pass 'no Docker property in any project file' }
 
@@ -608,6 +613,23 @@ try {
                         foreach ($generated in @(Get-ChildItem -Path $migrator.FullName -Recurse -File -Filter '*_SampleModule*.cs')) {
                             $id = $generated.Name.Substring(0, $generated.Name.IndexOf('_'))
                             $text = [IO.File]::ReadAllText($generated.FullName).Replace("${id}_SampleModule", '20990101000000_SampleModule')
+                            if ($generated.Name -notmatch 'Designer') {
+                                # Pass 60c: what a module's migration adds by hand (README "Database naming", "Posted
+                                # records"): the lookup's seed with explicit ids, its identity sequence moved past them,
+                                # and the ledger's append-only trigger. Each call does nothing on a provider it does not
+                                # apply to.
+                                $handWritten = "`r`n            // Added by hand, as a module's migration would (Pass 60c smoke).`r`n" +
+                                    "            migrationBuilder.SeedLookup(""TBL_LK_WAREHOUSE_TYPES"", (1, ""Main""), (2, ""In transit""));`r`n" +
+                                    "            migrationBuilder.ResetIdentitySequence(""TBL_LK_WAREHOUSE_TYPES"");`r`n" +
+                                    "            migrationBuilder.CreateAppendOnlyTrigger(""TBL_WAREHOUSE_MOVEMENTS"");"
+                                $patched = [regex]::Replace($text,
+                                    '(?s)(protected override void Up\(MigrationBuilder migrationBuilder\)\s*\{.*?)(\r?\n        \}\r?\n\r?\n        /// <inheritdoc />\r?\n        protected override void Down)',
+                                    { param($m) $m.Groups[1].Value + $handWritten + $m.Groups[2].Value })
+                                $patched = $patched.Replace('using Microsoft.EntityFrameworkCore.Migrations;',
+                                    "using Microsoft.EntityFrameworkCore.Migrations;`r`nusing $ProjectName.Infrastructure.Persistence.Rules;")
+                                Check ($patched -ne $text -and $patched.Contains('SeedLookup(')) "the $($migrator.Name) migration gets the lookup seed and the ledger trigger"
+                                $text = $patched
+                            }
                             [IO.File]::WriteAllText($generated.FullName, $text, (New-Object System.Text.UTF8Encoding($true)))
                             Rename-Item -Path $generated.FullName -NewName ($generated.Name.Replace($id, '20990101000000'))
                         }
@@ -618,8 +640,11 @@ try {
                 }
 
                 $pgMigration = @(Get-ChildItem -Path (Join-Path $out 'src\Migrators\Migrators.PostgreSQL') -Recurse -Filter '*_SampleModule.cs')
-                $ensured = $pgMigration.Count -eq 1 -and ([IO.File]::ReadAllText($pgMigration[0].FullName) -match 'EnsureSchema\(\s*name:\s*"smp"')
-                Check $ensured 'the PostgreSQL migration creates the module schema: EnsureSchema("smp")'
+                # Pass 60c (owner decision D1): every module's tables are in core, the one schema a migration creates.
+                $pgText = if ($pgMigration.Count -eq 1) { [IO.File]::ReadAllText($pgMigration[0].FullName) } else { '' }
+                $schemas = @([regex]::Matches($pgText, 'EnsureSchema\(\s*name:\s*"(\w+)"') | ForEach-Object { $_.Groups[1].Value })
+                Check ($schemas.Count -eq 1 -and $schemas[0] -eq 'core') 'the PostgreSQL migration creates core and no other schema: EnsureSchema("core")' "found: $($schemas -join ', ')"
+                Check ($pgText -match 'name:\s*"TBL_WAREHOUSES"' -and $pgText -match 'name:\s*"TBL_LK_WAREHOUSE_TYPES"' -and $pgText -match '"branch_id"') 'the sample tables are plural TBL_ / TBL_LK_ with snake_case columns'
 
                 $buildLog = Join-Path $WorkRoot 'build-sample-migrations.log'
                 $built = (Invoke-Dotnet @('build', (Join-Path $out "$ProjectName.slnx"), '-nologo') $buildLog) -eq 0
@@ -662,6 +687,64 @@ try {
                 }
                 else {
                     $env:GX_TEST_PG = $TestServer
+
+                    # Pass 60c. The suites' databases are kept between runs and the sample migration has one fixed
+                    # id, so a database migrated by an EARLIER sample module (1.7.1's smp."TBL_SAMPLE_BIN") already
+                    # records 20990101000000_SampleModule: EF skips the new one and its tables never exist. Before
+                    # the suites, each of this project's own gx_test_<project>_* databases forgets that migration:
+                    # its history row, and the schemas only the sample creates (core, smp) plus the test reset's
+                    # snapshot (gx_test_seed). The template's own tables are in public and are untouched. Never a
+                    # DROP DATABASE.
+                    $psql = @(Get-Command psql -ErrorAction SilentlyContinue | ForEach-Object Source) +
+                            @(Get-ChildItem 'C:\Program Files\PostgreSQL\*\bin\psql.exe' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | ForEach-Object FullName) |
+                            Select-Object -First 1
+                    if (-not $psql) {
+                        Write-Host '  note  psql not found: the smoke databases keep any earlier sample migration (see the comment above)' -ForegroundColor Yellow
+                    }
+                    else {
+                        $server = @{}
+                        foreach ($part in $TestServer.Split(';')) { $kv = $part.Split('=', 2); if ($kv.Count -eq 2) { $server[$kv[0].Trim().ToLowerInvariant()] = $kv[1].Trim() } }
+                        $savedPassword = $env:PGPASSWORD
+                        if ($server['password']) { $env:PGPASSWORD = $server['password'] }
+                        try {
+                            $connect = @('-h', $server['host'], '-p', ($(if ($server['port']) { $server['port'] } else { '5432' })), '-U', $server['username'], '-At')
+                            $prefix = 'gx_test_' + $ProjectName.ToLowerInvariant()
+                            $databases = @(& $psql @connect -d postgres -c "SELECT datname FROM pg_database WHERE datname LIKE '${prefix}%'" 2>$null | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                            # Not $database: PowerShell names are case-insensitive, and $Database is the validated -Database parameter.
+                            # The SQL goes through a file, not -c: Windows PowerShell 5.1 strips the double quotes from a native
+                            # argument, so "__EFMigrationsHistory" reached psql unquoted, folded to lower case, matched nothing,
+                            # and the history row survived while core was dropped - the migration was then skipped.
+                            # client_min_messages: "schema ... does not exist, skipping" is a NOTICE on stderr, which 5.1 turns
+                            # into a terminating error under ErrorActionPreference Stop. The DO block fails if the row survives.
+                            $cleanupSql = Join-Path $WorkRoot 'sample-cleanup.sql'
+                            [IO.File]::WriteAllText($cleanupSql, @'
+SET client_min_messages TO warning;
+DO $gx$ BEGIN
+  IF to_regclass('public."__EFMigrationsHistory"') IS NOT NULL THEN
+    DELETE FROM public."__EFMigrationsHistory" WHERE "MigrationId" = '20990101000000_SampleModule';
+    IF EXISTS (SELECT 1 FROM public."__EFMigrationsHistory" WHERE "MigrationId" = '20990101000000_SampleModule') THEN
+      RAISE EXCEPTION 'the SampleModule history row survived the cleanup';
+    END IF;
+  END IF;
+END $gx$;
+DROP SCHEMA IF EXISTS core CASCADE;
+-- the one object the sample migration puts outside core (SampleBranchNameIndex on the template's Branches), as its Down() drops it
+DROP INDEX IF EXISTS public."IX_Branches_Name";
+DROP SCHEMA IF EXISTS smp CASCADE;
+DROP SCHEMA IF EXISTS gx_test_seed CASCADE;
+'@)
+                            foreach ($testDatabase in $databases) {
+                                $savedPreference = $ErrorActionPreference
+                                $ErrorActionPreference = 'Continue'
+                                try { $psqlOutput = @(& $psql @connect -d $testDatabase -q -v ON_ERROR_STOP=1 -f $cleanupSql 2>&1) }
+                                finally { $ErrorActionPreference = $savedPreference }
+                                if ($LASTEXITCODE -ne 0) { throw "psql cleanup of $testDatabase failed: $($psqlOutput -join ' ')" }
+                            }
+                            Pass "the smoke's own test databases forget any earlier sample migration ($($databases.Count) databases)"
+                        }
+                        finally { $env:PGPASSWORD = $savedPassword }
+                    }
+
                     foreach ($suite in $suites) {
                         $testLog = Join-Path $WorkRoot "test-$suite.log"
                         $exit = Invoke-Dotnet @('test', (Join-Path $out "tests\$suite"), '--no-build', '-nologo') $testLog
@@ -686,7 +769,7 @@ try {
                     # fails the smoke instead of hiding in a suite total.
                     Step 'the sample module tests pass in the generated project'
                     foreach ($run in @(
-                            @('Application.IntegrationTests', 'FullyQualifiedName~SampleModuleTests', 7),
+                            @('Application.IntegrationTests', 'FullyQualifiedName~SampleModuleTests', 10),  # (P60c) S1-S12: S10 warehouse, S11 lookup, S12 branch floor
                             @('Server.UI.IntegrationTests', 'FullyQualifiedName~SampleModuleUiTests|FullyQualifiedName~ModuleServicesResolveTests', 3))) {
                         $testLog = Join-Path $WorkRoot "test-sample-$($run[0]).log"
                         $exit = Invoke-Dotnet @('test', (Join-Path $out "tests\$($run[0])"), '--no-build', '-nologo', '--filter', $run[1]) $testLog

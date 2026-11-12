@@ -243,6 +243,7 @@
         "build/**/*",
         "tooling/**/*",
         "GXTemplate-passes/**/*",
+        "CLAUDE.md",
         "Directory.Build.props",
         "src/Server.UI/appsettings.Development.json"
       ]
@@ -251,6 +252,11 @@
       "source": "./.template.config/local-settings/",
       "target": "./src/Server.UI/",
       "include": [ "appsettings.Development.json" ]
+    },
+    {
+      "source": "./docs/",
+      "target": "./docs/",
+      "include": [ "gx-conventions.md" ]
     }
   ]
 }

@@ -138,6 +138,15 @@ public sealed class PostgresTestDatabase
 
             await EnsureExistsAsync(cancellationToken);
 
+            // (G1) Undo whatever the previous run's last test left, lookups included, BEFORE migrating: the
+            // snapshot was taken against the tables as they are now, and a migration may change them.
+            await using (var cleanup = new NpgsqlConnection(ConnectionString))
+            {
+                await cleanup.OpenAsync(cancellationToken);
+                await using var command = new NpgsqlCommand(await BuildResetBatchAsync(restoreAllLookups: true, cancellationToken), cleanup);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
             await using (var context = new ApplicationDbContext(ApplicationModel.NpgsqlOptions(ConnectionString)))
             {
                 var defined = context.Database.GetMigrations().ToHashSet(StringComparer.Ordinal);
@@ -153,7 +162,15 @@ public sealed class PostgresTestDatabase
                 await context.Database.MigrateAsync(cancellationToken);
             }
 
-            _resetBatch = await BuildResetBatchAsync(cancellationToken);
+            // (G1) The lookups as the migrations leave them: what every reset restores.
+            await using (var snapshot = new NpgsqlConnection(ConnectionString))
+            {
+                await snapshot.OpenAsync(cancellationToken);
+                await using var command = new NpgsqlCommand(SnapshotLookups, snapshot);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            _resetBatch = await BuildResetBatchAsync(restoreAllLookups: false, cancellationToken);
             _ready = true;
         }
         finally
@@ -207,22 +224,37 @@ public sealed class PostgresTestDatabase
         }
     }
 
-    private async Task<string> BuildResetBatchAsync(CancellationToken cancellationToken)
+    private async Task<string> BuildResetBatchAsync(bool restoreAllLookups, CancellationToken cancellationToken)
     {
         await using var connection = new NpgsqlConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
 
         var tables = new List<string>();
+        var lookups = new List<string>();
         await using (var command = new NpgsqlCommand(
-            "SELECT format('%I.%I', n.nspname, c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
-            "WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema') " +
-            "AND n.nspname NOT LIKE 'pg\\_%' AND c.relname <> @history AND left(c.relname, length(@lookup)) <> @lookup ORDER BY 1", connection))
+            "SELECT format('%I.%I', n.nspname, c.relname), left(c.relname, length(@lookup)) = @lookup " +
+            "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
+            "WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema', @seed) " +
+            "AND n.nspname NOT LIKE 'pg\\_%' AND c.relname <> @history ORDER BY 1", connection))
         {
             command.Parameters.AddWithValue("history", MigrationsHistoryTable);
             command.Parameters.AddWithValue("lookup", LookupTablePrefix);
+            command.Parameters.AddWithValue("seed", SeedSchema);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken)) tables.Add(reader.GetString(0));
+            while (await reader.ReadAsync(cancellationToken))
+                (reader.GetBoolean(1) ? lookups : tables).Add(reader.GetString(0));
         }
+
+        // (G1) Only lookups the snapshot holds can be restored: a lookup created after it (a test's own probe) is not.
+        var snapshotted = new HashSet<string>(StringComparer.Ordinal);
+        await using (var command = new NpgsqlCommand(
+            "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = @seed AND c.relkind = 'r'", connection))
+        {
+            command.Parameters.AddWithValue("seed", SeedSchema);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) snapshotted.Add(reader.GetString(0));
+        }
+        lookups = lookups.Where(l => snapshotted.Contains(SnapshotName(l))).ToList();
 
         var foreignKeys = new List<(string Child, string Parent)>();
         await using (var command = new NpgsqlCommand(
@@ -252,7 +284,97 @@ public sealed class PostgresTestDatabase
                    .Select(t => guarded.Contains(t)
                        ? $"ALTER TABLE {t} DISABLE TRIGGER USER; DELETE FROM {t}; ALTER TABLE {t} ENABLE TRIGGER USER;"
                        : $"DELETE FROM {t};"))
-               + RestartSequences;
+               + RestartSequences
+               + RestoreLookups(lookups, foreignKeys, restoreAllLookups);
+    }
+
+    // ---- (G1) Lookups: restored to their migrated state ------------------------------------------
+
+    /// <summary>The schema of the lookup snapshot, in the throwaway test database only (G1).</summary>
+    public const string SeedSchema = "gx_test_seed";
+
+    /// <summary><c>core."TBL_LK_X"</c> → <c>core.TBL_LK_X</c>, the snapshot table's name in <see cref="SeedSchema"/>.</summary>
+    private static string SnapshotName(string qualified) => qualified.Replace("\"", "", StringComparison.Ordinal);
+
+    /// <summary>
+    /// (G1) Snapshots every lookup after migration, and marks each lookup a test writes, with a statement trigger, so a
+    /// reset restores only those. Retaken on every run, after the previous run's leftovers were restored away, so it
+    /// is always the migrated state. Exists only here: the migrations never create any of it.
+    /// </summary>
+    private static readonly string SnapshotLookups =
+        $"""
+         DROP SCHEMA IF EXISTS {SeedSchema} CASCADE;
+         CREATE SCHEMA {SeedSchema};
+         CREATE TABLE {SeedSchema}.dirty (tbl oid PRIMARY KEY);
+         CREATE TABLE {SeedSchema}.sequences (tbl oid NOT NULL, seq regclass NOT NULL, last_value bigint NOT NULL, is_called boolean NOT NULL);
+         CREATE FUNCTION {SeedSchema}.mark_dirty() RETURNS trigger LANGUAGE plpgsql AS $f$
+         BEGIN INSERT INTO {SeedSchema}.dirty VALUES (TG_RELID) ON CONFLICT DO NOTHING; RETURN NULL; END $f$;
+         DO $gx$
+         DECLARE r record;
+         BEGIN
+           FOR r IN SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relkind IN ('r', 'p') AND left(c.relname, {LookupTablePrefix.Length}) = '{LookupTablePrefix}'
+                      AND n.nspname NOT LIKE 'pg\_%' AND n.nspname NOT IN ('information_schema', '{SeedSchema}')
+           LOOP
+             EXECUTE format('CREATE TABLE {SeedSchema}.%I AS TABLE %I.%I', r.nspname || '.' || r.relname, r.nspname, r.relname);
+             EXECUTE format('DROP TRIGGER IF EXISTS gx_test_dirty ON %I.%I', r.nspname, r.relname);
+             EXECUTE format('CREATE TRIGGER gx_test_dirty AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON %I.%I ' ||
+                            'FOR EACH STATEMENT EXECUTE FUNCTION {SeedSchema}.mark_dirty()', r.nspname, r.relname);
+           END LOOP;
+           -- Read from each sequence itself: pg_sequences shows NULL for one set with is_called = false, which is
+           -- exactly what a seed migration's ResetIdentitySequence leaves.
+           FOR r IN SELECT d.refobjid AS tbl, s.seqrelid::regclass AS seq
+                    FROM pg_sequence s
+                    JOIN pg_depend d ON d.objid = s.seqrelid AND d.classid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
+                    JOIN pg_class t ON t.oid = d.refobjid JOIN pg_namespace tn ON tn.oid = t.relnamespace
+                    WHERE left(t.relname, {LookupTablePrefix.Length}) = '{LookupTablePrefix}' AND tn.nspname <> '{SeedSchema}'
+           LOOP
+             EXECUTE format('INSERT INTO {SeedSchema}.sequences SELECT %s, %L::regclass, last_value, is_called FROM %s', r.tbl, r.seq, r.seq);
+           END LOOP;
+         END $gx$;
+         """;
+
+    /// <summary>
+    /// (G1) One <c>DO</c> block, in the same round trip as the rest of the reset: each lookup a test wrote - or that
+    /// references one a test wrote, so the delete cannot break a foreign key - is emptied children-first, refilled from
+    /// its snapshot parents-first with its original ids, and its sequence set back to where the migration left it. A
+    /// lookup no test touched is not rewritten; with nothing written, the block reads one empty table and stops.
+    /// </summary>
+    private static string RestoreLookups(IReadOnlyList<string> lookups, IReadOnlyList<(string Child, string Parent)> foreignKeys, bool all)
+    {
+        if (lookups.Count == 0) return string.Empty;
+
+        var set = new HashSet<string>(lookups, StringComparer.Ordinal);
+        var edges = foreignKeys.Where(e => set.Contains(e.Child) && set.Contains(e.Parent) && e.Child != e.Parent).ToList();
+        var deleteOrder = ResetOrder.ChildrenFirst(lookups, edges);
+
+        // A lookup must be restored when it, or any lookup it references (transitively), was written.
+        IEnumerable<string> Ancestors(string table)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal) { table };
+            var queue = new Queue<string>([table]);
+            while (queue.Count > 0)
+            {
+                var child = queue.Dequeue();
+                foreach (var parent in edges.Where(e => e.Child == child).Select(e => e.Parent).ToList())
+                    if (seen.Add(parent)) queue.Enqueue(parent);
+            }
+            return seen;
+        }
+
+        static string Literal(string table) => "'" + table.Replace("'", "''", StringComparison.Ordinal) + "'::regclass::oid";
+        string Condition(string table) => all ? "true" : string.Join(" OR ", Ancestors(table).Select(t => $"{Literal(t)} = ANY(d)"));
+
+        var sql = new System.Text.StringBuilder();
+        sql.Append($"DO $gx$ DECLARE d oid[] := ARRAY(SELECT tbl FROM {SeedSchema}.dirty); BEGIN ");
+        if (!all) sql.Append("IF cardinality(d) = 0 THEN RETURN; END IF; ");
+        foreach (var table in deleteOrder)
+            sql.Append($"IF {Condition(table)} THEN DELETE FROM {table}; END IF; ");
+        foreach (var table in deleteOrder.Reverse())
+            sql.Append($"IF {Condition(table)} THEN INSERT INTO {table} OVERRIDING SYSTEM VALUE SELECT * FROM {SeedSchema}.\"{SnapshotName(table)}\"; ")
+               .Append($"PERFORM setval(s.seq, s.last_value, s.is_called) FROM {SeedSchema}.sequences s WHERE s.tbl = {Literal(table)}; END IF; ");
+        sql.Append($"DELETE FROM {SeedSchema}.dirty; END $gx$;");
+        return sql.ToString();
     }
 
     /// <summary>

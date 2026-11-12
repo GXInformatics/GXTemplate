@@ -19,40 +19,17 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.DataFoundations;
 public sealed class GuardAlphaModule : ModuleDefinition
 {
     public override string Name => "GuardAlpha";
-    public override string Schema => "talpha";
 }
 
 public sealed class GuardBetaModule : ModuleDefinition
 {
     public override string Name => "GuardBeta";
-    public override string Schema => "tbeta";
 }
 
-public sealed class SameSchemaModule : ModuleDefinition
-{
-    public override string Name => "SameSchema";
-    public override string Schema => "talpha";
-}
-
-public sealed class BadSchemaModule : ModuleDefinition
-{
-    public override string Name => "BadSchema";
-    public override string Schema => "Inv-1";
-}
-
-public sealed class PublicSchemaModule : ModuleDefinition
-{
-    public override string Name => "PublicSchema";
-    public override string Schema => "public";
-}
-
-public class Moduleless : BaseEntity { public string? Name { get; set; } }
+public class GuardModuleless : BaseEntity { public string? Name { get; set; } }
 
 [Module<GuardAlphaModule>] public class AlphaRow : BaseEntity { public string? Name { get; set; } }
 [Module<GuardBetaModule>] public class BetaRow : BaseEntity { public string? Name { get; set; } }
-[Module<SameSchemaModule>] public class SameSchemaRow : BaseEntity { public string? Name { get; set; } }
-[Module<BadSchemaModule>] public class BadSchemaRow : BaseEntity { public string? Name { get; set; } }
-[Module<PublicSchemaModule>] public class PublicSchemaRow : BaseEntity { public string? Name { get; set; } }
 
 [Module<GuardAlphaModule>] public class AlphaShape : BaseEntity { public string? Kind { get; set; } }
 [Module<GuardBetaModule>] public class BetaCircle : AlphaShape { public int Radius { get; set; } }
@@ -77,16 +54,15 @@ public class BetaInvoice : BaseEntity
     public int AlphaRowId { get; set; }
 }
 
-public sealed class ModulelessContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) => b.Entity<Moduleless>(); }
-public sealed class SharedSchemaContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) { b.Entity<AlphaRow>(); b.Entity<SameSchemaRow>(); } }
-public sealed class BadSchemaContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) { b.Entity<BadSchemaRow>(); b.Entity<PublicSchemaRow>(); } }
+public sealed class ModulelessContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) => b.Entity<GuardModuleless>(); }
+public sealed class HandNamedIntoPublicContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) => b.Entity<AlphaRow>().ToTable("legacy_rows"); }
 public sealed class SplitHierarchyContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) { b.Entity<AlphaShape>(); b.Entity<BetaCircle>(); } }
 public sealed class TwinTablesContext() : GuardContext(Options())
 {
     protected override void Add(ModelBuilder b)
     {
-        b.Entity<AlphaTwin>().ToTable("TBL_TWIN");
-        b.Entity<BetaTwin>().ToTable("TBL_TWIN");
+        b.Entity<AlphaTwin>().ToTable("TBL_TWIN", "core");
+        b.Entity<BetaTwin>().ToTable("TBL_TWIN", "reporting");
     }
 }
 public sealed class CrossNavigationContext() : GuardContext(Options())
@@ -119,24 +95,22 @@ public class ModuleGuardTests
     {
         using var context = new ModulelessContext();
         DataModelGuard.FindProblems(context.Model).Should().ContainSingle()
-            .Which.Should().StartWith("Moduleless:").And.Contain("declares no module");
+            .Which.Should().StartWith("GuardModuleless:").And.Contain("declares no module");
         FluentActions.Invoking(() => DataModelGuard.AssertModel(context.Model)).Should().Throw<InvalidOperationException>()
-            .WithMessage("*Moduleless*Modules and schemas*");
+            .WithMessage("*GuardModuleless*\"Modules\"*");
     }
 
-    [Test]
-    public void T15_TwoModulesWithOneSchema_FailStartup()
-    {
-        ProblemsOf(new SharedSchemaContext()).Should().ContainSingle()
-            .Which.Should().Contain("GuardAlphaModule").And.Contain("SameSchemaModule").And.Contain("'talpha'");
-    }
+    // Pass 60c: the two schema rows (two modules sharing a schema; an invalid or reserved schema) are gone with
+    // ModuleDefinition.Schema. A module no longer chooses a schema; every business table is in core.
 
     [Test]
-    public void T15_AnInvalidOrReservedSchema_FailsStartup()
+    public void P60c_AModuleEntityHandNamedIntoPublic_FailsStartup()
     {
-        var problems = ProblemsOf(new BadSchemaContext());
-        problems.Should().Contain(p => p.Contains("BadSchemaModule") && p.Contains("lower-case"));
-        problems.Should().Contain(p => p.Contains("PublicSchemaModule") && p.Contains("reserved"));
+        // Decision Q-B. ToTable(name) with no schema leaves the table where it was put (owner decision D1), which is the
+        // default schema; public holds Identity and the template's own tables only (D2), so the guard refuses it.
+        ProblemsOf(new HandNamedIntoPublicContext()).Should().ContainSingle()
+            .Which.Should().StartWith("AlphaRow:").And.Contain("'legacy_rows'").And.Contain("default schema")
+            .And.Contain("core.\"TBL_ALPHA_ROWS\"");
     }
 
     [Test]
@@ -150,19 +124,20 @@ public class ModuleGuardTests
     public void T15_TwoTablesWithOneNameInDifferentSchemas_FailStartup()
     {
         ProblemsOf(new TwinTablesContext()).Should().ContainSingle()
-            .Which.Should().Contain("'TBL_TWIN'").And.Contain("talpha").And.Contain("tbeta");
+            .Which.Should().Contain("'TBL_TWIN'").And.Contain("core").And.Contain("reporting");
     }
 
     [Test]
-    public void T16_EachModulesTablesLandInItsSchema_AndTemplateTablesStayInTheDefault()
+    public void T16_EveryModulesTablesAreInCore_AndTemplateTablesStayInTheDefault()
     {
+        // Pass 60c (owner decision D1): every module's tables are in core, plural (D3).
         using var context = new TwoModulesContext();
         DataModelGuard.FindProblems(context.Model).Should().BeEmpty();
 
         var alpha = context.Model.FindEntityType(typeof(AlphaRow))!;
         var beta = context.Model.FindEntityType(typeof(BetaInvoice))!;
-        (alpha.GetSchema(), alpha.GetTableName()).Should().Be(("talpha", "TBL_ALPHA_ROW"));
-        (beta.GetSchema(), beta.GetTableName()).Should().Be(("tbeta", "TBL_BETA_INVOICE"));
+        (alpha.GetSchema(), alpha.GetTableName()).Should().Be(("core", "TBL_ALPHA_ROWS"));
+        (beta.GetSchema(), beta.GetTableName()).Should().Be(("core", "TBL_BETA_INVOICES"));
         context.Model.FindEntityType(typeof(Branch))!.GetSchema().Should().BeNull();
 
         // The cross-module foreign key exists without a navigation.
@@ -208,6 +183,6 @@ public class ModuleGuardTests
         using var context = new ModulelessContext();
         context.Model.GetEntityTypes().Where(e => !e.IsOwned() && !e.IsPropertyBag)
             .Where(e => !TemplateEntities.Contains(e.ClrType) && ModuleDefinition.Of(e.ClrType) == null)
-            .Select(e => e.ClrType).Should().Equal(typeof(Moduleless));
+            .Select(e => e.ClrType).Should().Equal(typeof(GuardModuleless));
     }
 }

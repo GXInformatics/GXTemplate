@@ -93,7 +93,7 @@ public sealed class ApprovalBehaviour<TRequest, TResponse> : IPipelineBehavior<T
     {
         public required string HeaderName { get; init; }
         public required string DocumentType { get; init; }
-        public required Func<IApplicationDbContext, Guid, CancellationToken, Task<IApprovable?>> LoadAsync { get; init; }
+        public required Func<IApplicationDbContext, long, CancellationToken, Task<IApprovable?>> LoadAsync { get; init; }
 
         public static HeaderLoader For(Type requestType)
         {
@@ -108,7 +108,7 @@ public sealed class ApprovalBehaviour<TRequest, TResponse> : IPipelineBehavior<T
             };
         }
 
-        private static async Task<IApprovable?> LoadTyped<THeader>(IApplicationDbContext db, Guid id, CancellationToken cancellationToken)
+        private static async Task<IApprovable?> LoadTyped<THeader>(IApplicationDbContext db, long id, CancellationToken cancellationToken)
             where THeader : class, IApprovable =>
             await db.Set<THeader>().Where(h => h.Id == id).ForUpdate().FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
     }

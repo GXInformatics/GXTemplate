@@ -24,14 +24,13 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.DataFoundations;
 public sealed class GuardModule : ModuleDefinition
 {
     public override string Name => "Guard";
-    public override string Schema => "tguard";
 }
 
 [Module<GuardModule>]
-public class Undeclared : BaseEntity { public decimal Price { get; set; } }
+public class GuardUndeclared : BaseEntity { public decimal Price { get; set; } }
 
 [Module<GuardModule>]
-public class Kinds : BaseEntity
+public class GuardKinds : BaseEntity
 {
     [Money] public decimal Amount { get; set; }
     [Quantity] public decimal Quantity { get; set; }
@@ -44,7 +43,7 @@ public class TwoKinds : BaseEntity { [Money, Rate] public decimal Both { get; se
 [Module<GuardModule>]
 public class KindOnString : BaseEntity { [Money] public string? Text { get; set; } }
 [Module<GuardModule>]
-public class Floats : BaseEntity { public double Weight { get; set; } [Approximate] public double Latitude { get; set; } }
+public class GuardFloats : BaseEntity { public double Weight { get; set; } [Approximate] public double Latitude { get; set; } }
 
 [Module<GuardModule>]
 public class SoftLedger : BaseEntity, IAppendOnly, ISoftDelete
@@ -77,12 +76,12 @@ public class TphRoot : BaseEntity { public string? Kind { get; set; } }
 public class TphBranchLeaf : TphRoot, IMustHaveBranch { public int BranchId { get; set; } }
 
 [Module<GuardModule>]
-public class Warehouse : BaseEntity { public int BranchId { get; set; } }
+public class GuardProbeWarehouse : BaseEntity { public int BranchId { get; set; } }
 [Module<GuardModule>]
 public class NavigatingTransfer : BaseEntity, IBranchVisibility<NavigatingTransfer>
 {
     public int WarehouseId { get; set; }
-    public Warehouse? Warehouse { get; set; }
+    public GuardProbeWarehouse? Warehouse { get; set; }
     public static Expression<Func<NavigatingTransfer, int[], bool>> VisibleTo => (t, ids) => ids.Contains(t.Warehouse!.BranchId);
     public IEnumerable<int> InvolvedBranchIds => [];
 }
@@ -104,15 +103,15 @@ public abstract class GuardContext(DbContextOptions<ApplicationDbContext> option
         new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql("Host=model-only").Options;
 }
 
-public sealed class UndeclaredContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) => b.Entity<Undeclared>(); }
-public sealed class KindsContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) => b.Entity<Kinds>(); }
+public sealed class UndeclaredContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) => b.Entity<GuardUndeclared>(); }
+public sealed class KindsContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) => b.Entity<GuardKinds>(); }
 public sealed class OverriddenKindContext() : GuardContext(Options())
 {
-    protected override void Add(ModelBuilder b) => b.Entity<Kinds>();
-    protected override void After(ModelBuilder b) => b.Entity<Kinds>().Property(k => k.Amount).HasPrecision(10, 3);
+    protected override void Add(ModelBuilder b) => b.Entity<GuardKinds>();
+    protected override void After(ModelBuilder b) => b.Entity<GuardKinds>().Property(k => k.Amount).HasPrecision(10, 3);
 }
 public sealed class TwoKindsContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) { b.Entity<TwoKinds>(); b.Entity<KindOnString>(); } }
-public sealed class FloatsContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) => b.Entity<Floats>(); }
+public sealed class FloatsContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) => b.Entity<GuardFloats>(); }
 public sealed class ImmutabilityContext() : GuardContext(Options())
 {
     protected override void Add(ModelBuilder b)
@@ -128,7 +127,7 @@ public sealed class UnfilteredBranchContext() : GuardContext(Options())
     protected override void After(ModelBuilder b) => b.Entity<UnfilteredBranchRow>().HasQueryFilter(QueryFilters.Branch, null);
 }
 public sealed class TphBranchContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) { b.Entity<TphRoot>(); b.Entity<TphBranchLeaf>(); } }
-public sealed class NavigatingTransferContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) { b.Entity<Warehouse>(); b.Entity<NavigatingTransfer>(); } }
+public sealed class NavigatingTransferContext() : GuardContext(Options()) { protected override void Add(ModelBuilder b) { b.Entity<GuardProbeWarehouse>(); b.Entity<NavigatingTransfer>(); } }
 
 public class DataModelGuardTests
 {
@@ -149,9 +148,9 @@ public class DataModelGuardTests
     public void T01_ADecimalWithNoDeclaredKindFailsStartup()
     {
         using var context = new UndeclaredContext();
-        DataModelGuard.FindProblems(context.Model).Should().ContainSingle().Which.Should().Contain("Undeclared.Price").And.Contain("no declared kind");
+        DataModelGuard.FindProblems(context.Model).Should().ContainSingle().Which.Should().Contain("GuardUndeclared.Price").And.Contain("no declared kind");
         FluentActions.Invoking(() => DataModelGuard.AssertModel(context.Model)).Should().Throw<InvalidOperationException>()
-            .WithMessage("*Undeclared.Price*");
+            .WithMessage("*GuardUndeclared.Price*");
     }
 
     [Test]
@@ -159,16 +158,16 @@ public class DataModelGuardTests
     {
         using (var context = new KindsContext())
         {
-            var type = context.Model.FindEntityType(typeof(Kinds))!;
+            var type = context.Model.FindEntityType(typeof(GuardKinds))!;
             (int?, int?) Of(string name) => (type.FindProperty(name)!.GetPrecision(), type.FindProperty(name)!.GetScale());
-            Of(nameof(Kinds.Amount)).Should().Be((18, 2));
-            Of(nameof(Kinds.Quantity)).Should().Be((18, 4));
-            Of(nameof(Kinds.UnitCost)).Should().Be((18, 4));
-            Of(nameof(Kinds.TaxRate)).Should().Be((18, 6));
+            Of(nameof(GuardKinds.Amount)).Should().Be((18, 2));
+            Of(nameof(GuardKinds.Quantity)).Should().Be((18, 4));
+            Of(nameof(GuardKinds.UnitCost)).Should().Be((18, 4));
+            Of(nameof(GuardKinds.TaxRate)).Should().Be((18, 6));
             DataModelGuard.FindProblems(context.Model).Should().BeEmpty();
         }
 
-        ProblemsOf(new OverriddenKindContext()).Should().ContainSingle().Which.Should().Contain("Kinds.Amount").And.Contain("numeric(10,3)");
+        ProblemsOf(new OverriddenKindContext()).Should().ContainSingle().Which.Should().Contain("GuardKinds.Amount").And.Contain("numeric(10,3)");
         var problems = ProblemsOf(new TwoKindsContext());
         problems.Should().Contain(p => p.Contains("TwoKinds.Both") && p.Contains("more than one kind"));
         problems.Should().Contain(p => p.Contains("KindOnString.Text") && p.Contains("decimal only"));
@@ -177,7 +176,7 @@ public class DataModelGuardTests
     [Test]
     public void T03_ADoubleFailsUnlessMarkedApproximate()
     {
-        ProblemsOf(new FloatsContext()).Should().ContainSingle().Which.Should().Contain("Floats.Weight").And.Contain("[Approximate]");
+        ProblemsOf(new FloatsContext()).Should().ContainSingle().Which.Should().Contain("GuardFloats.Weight").And.Contain("[Approximate]");
     }
 
     [Test]

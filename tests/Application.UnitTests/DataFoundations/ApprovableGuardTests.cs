@@ -14,7 +14,7 @@ namespace CleanArchitecture.Blazor.Application.UnitTests.DataFoundations;
 // Pass 60 plan §5 row 14: the model rules for an approvable document.
 
 [Module<GuardModule>]
-public class UnversionedApprovable : BaseEntity<Guid>, IApprovable<UnversionedApprovable>
+public class UnversionedApprovable : BaseEntity<long>, IApprovable<UnversionedApprovable>
 {
     public static string ApprovalDocumentType => "guard.unversioned";
     public string? PreparedById { get; set; }
@@ -24,7 +24,7 @@ public class UnversionedApprovable : BaseEntity<Guid>, IApprovable<UnversionedAp
 }
 
 [Module<GuardModule>]
-public class QuantityValuedApprovable : BaseVersionedEntity<Guid>, IApprovable<QuantityValuedApprovable>
+public class QuantityValuedApprovable : BaseVersionedEntity<long>, IApprovable<QuantityValuedApprovable>
 {
     public static string ApprovalDocumentType => "guard.quantity";
     public string? PreparedById { get; set; }
@@ -34,7 +34,7 @@ public class QuantityValuedApprovable : BaseVersionedEntity<Guid>, IApprovable<Q
 }
 
 [Module<GuardModule>]
-public class FirstSharedCode : BaseVersionedEntity<Guid>, IApprovable<FirstSharedCode>
+public class FirstSharedCode : BaseVersionedEntity<long>, IApprovable<FirstSharedCode>
 {
     public static string ApprovalDocumentType => "guard.shared";
     public string? PreparedById { get; set; }
@@ -44,7 +44,7 @@ public class FirstSharedCode : BaseVersionedEntity<Guid>, IApprovable<FirstShare
 }
 
 [Module<GuardModule>]
-public class SecondSharedCode : BaseVersionedEntity<Guid>, IApprovable<SecondSharedCode>
+public class SecondSharedCode : BaseVersionedEntity<long>, IApprovable<SecondSharedCode>
 {
     public static string ApprovalDocumentType => "guard.shared";
     public string? PreparedById { get; set; }
@@ -55,7 +55,7 @@ public class SecondSharedCode : BaseVersionedEntity<Guid>, IApprovable<SecondSha
 
 /// <summary>C1: an approvable with no branch scope at all is a sound model.</summary>
 [Module<GuardModule>]
-public class UnscopedApprovable : BaseVersionedEntity<Guid>, IApprovable<UnscopedApprovable>
+public class UnscopedApprovable : BaseVersionedEntity<long>, IApprovable<UnscopedApprovable>
 {
     public static string ApprovalDocumentType => "guard.unscoped";
     public string? PreparedById { get; set; }

@@ -481,7 +481,9 @@ public class RoleDefinitionRightTests
         using var scope = _provider.CreateScope();
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
 
-        (await roleManager.Roles.ToListAsync()).Should().HaveCount(3,
+        // Pass 60c (T12): the roles THIS test created, not a total. A provider that also provisions an application's
+        // role catalogue must not break it (Spare Parts sweep S3).
+        (await roleManager.Roles.Select(r => r.Name).ToListAsync()).Should().Contain(new[] { ConstantRoles.Admin, ConstantRoles.Basic, TargetRole },
             "this is a WRITE right; nothing about who may see the installation's roles changed, " +
             "which is why RoleDataSourceService.Scope stays Global");
     }
